@@ -1,0 +1,15 @@
+version: 1
+env:
+  NODE_ENV: "development"
+settings:
+  theme: "dark"
+mcpServers:
+  browser-use:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-browser"]
+persona:
+  claudeMd:
+    - "~/.myclaude/persona/global-roles/frontend/CLAUDE.md"
+  agents:
+    - "~/.myclaude/persona/global-roles/frontend/agents/ux-reviewer.md"

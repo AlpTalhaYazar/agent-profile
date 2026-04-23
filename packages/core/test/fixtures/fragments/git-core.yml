@@ -1,0 +1,10 @@
+name: git-core
+mcpServer:
+  git:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-git"]
+    env:
+      GIT_DEFAULT_BRANCH: "main"
+env:
+  GIT_EDITOR: "nvim"

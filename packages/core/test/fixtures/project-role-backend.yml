@@ -1,0 +1,9 @@
+version: 1
+mcpServers:
+  postgres:
+    __extends: global-role
+    env:
+      DATABASE_URL: "${secret:postgres.acme-prod}"
+persona:
+  claudeMd:
+    - "./persona/backend/CLAUDE.md"

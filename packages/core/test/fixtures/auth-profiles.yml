@@ -1,0 +1,18 @@
+version: 1
+authProfiles:
+  work:
+    displayName: "Work (Acme Inc.)"
+    anthropic:
+      mode: apiKey
+      secretRef: "keyring://anthropic/work"
+    mcpSecretRefs:
+      github.pat: "keyring://github/work"
+      postgres.acme-prod: "keyring://postgres/acme-prod"
+      figma.token: "keyring://figma/work"
+  personal:
+    displayName: "Personal"
+    anthropic:
+      mode: apiKey
+      secretRef: "keyring://anthropic/personal"
+    mcpSecretRefs:
+      github.pat: "keyring://github/personal"

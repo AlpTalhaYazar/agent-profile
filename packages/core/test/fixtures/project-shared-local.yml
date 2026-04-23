@@ -1,0 +1,6 @@
+version: 1
+env:
+  ENVIRONMENT: "local"
+  LOCAL_OVERRIDE: "true"
+settings:
+  verboseOutput: true

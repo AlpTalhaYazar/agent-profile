@@ -1,0 +1,19 @@
+version: 1
+use: [postgres-core]
+env:
+  NODE_ENV: "development"
+  DB_POOL_SIZE: "10"
+settings:
+  theme: "light"
+mcpServers:
+  github:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${secret:github.pat}"
+persona:
+  claudeMd:
+    - "~/.myclaude/persona/global-roles/backend/CLAUDE.md"
+  agents:
+    - "~/.myclaude/persona/global-roles/backend/agents/api-designer.md"

@@ -1,0 +1,23 @@
+version: 1
+use: [git-core]
+env:
+  EDITOR: "nvim"
+settings:
+  theme: "dark"
+mcpServers:
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem"]
+    env:
+      ROOTS: "/tmp"
+  figma:
+    type: http
+    url: "https://figma-mcp.example.com"
+    headers:
+      Authorization: "${secret:figma.token}"
+persona:
+  claudeMd:
+    - "~/.myclaude/persona/global/CLAUDE.md"
+  memory:
+    - "~/.myclaude/persona/global/memory-seed.md"

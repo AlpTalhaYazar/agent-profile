@@ -5,3 +5,11 @@ research
 .claude
 
 .DS_Store
+
+node_modules
+dist
+coverage
+.turbo
+*.log
+.vitest-cache
+*.tsbuildinfo

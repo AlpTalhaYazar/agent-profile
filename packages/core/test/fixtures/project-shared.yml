@@ -1,0 +1,10 @@
+version: 1
+env:
+  PROJECT_NAME: "acme-api"
+  ENVIRONMENT: "staging"
+mcpServers:
+  filesystem:
+    __merge: deep
+    env:
+      ROOTS: "${env:PWD}/src,${env:PWD}/tests"
+disabledServers: [figma]

@@ -1,0 +1,10 @@
+name: postgres-core
+mcpServer:
+  postgres:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-postgres"]
+    env:
+      DATABASE_URL: "${secret:postgres.default}"
+env:
+  POSTGRES_SSLMODE: "require"
