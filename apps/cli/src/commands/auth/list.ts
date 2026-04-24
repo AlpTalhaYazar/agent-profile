@@ -19,6 +19,8 @@ export interface AuthListOptions {
   showRefs?: boolean;
   /** Emit structured JSON. */
   json?: boolean;
+  /** Pretty-print JSON output (implies json). */
+  pretty?: boolean;
   /** Override myclaude home directory (for tests). */
   home?: string;
 }
@@ -29,7 +31,8 @@ export interface AuthListOptions {
  * @param opts - List options.
  */
 export function runAuthList(opts: AuthListOptions = {}): void {
-  const { showRefs = false, json = false, home } = opts;
+  const { showRefs = false, home, pretty = false } = opts;
+  const json = Boolean(opts.json) || pretty;
 
   const doc = loadAuthProfiles(home);
 
@@ -46,7 +49,7 @@ export function runAuthList(opts: AuthListOptions = {}): void {
         anthropicRef: showRefs ? p.anthropic.secretRef : undefined,
         mcpSecrets: showRefs ? p.mcpSecretRefs : Object.keys(p.mcpSecretRefs),
       }));
-    writeJson({ authProfiles: entries });
+    writeJson({ authProfiles: entries }, pretty);
     return;
   }
 
@@ -70,8 +73,13 @@ export const authListCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -83,6 +91,7 @@ export const authListCommand = defineCommand({
     runAuthList({
       showRefs: args["show-refs"],
       json: args.json,
+      pretty: args.pretty,
       home: args.home,
     });
   },

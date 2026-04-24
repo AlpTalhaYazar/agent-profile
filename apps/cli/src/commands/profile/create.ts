@@ -47,6 +47,7 @@ export interface CreateOptions {
   project?: boolean;
   force?: boolean;
   json?: boolean;
+  pretty?: boolean;
   home?: string;
   cwd?: string;
   /**
@@ -64,7 +65,8 @@ export interface CreateOptions {
  * @throws {CliError} On conflicts or user cancellation.
  */
 export async function runCreate(opts: CreateOptions): Promise<void> {
-  const { role, force = false, json = false } = opts;
+  const { role, force = false, pretty = false } = opts;
+  const json = Boolean(opts.json) || pretty;
   const home = opts.home ?? myClaudeHome();
   const cwd = opts.cwd ?? process.cwd();
 
@@ -117,7 +119,7 @@ export async function runCreate(opts: CreateOptions): Promise<void> {
   writeFileSync(targetPath, scaffoldYaml(role), "utf8");
 
   if (json) {
-    writeJson({ created: targetPath });
+    writeJson({ created: targetPath }, pretty);
     return;
   }
 
@@ -156,8 +158,13 @@ export const profileCreateCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -179,6 +186,7 @@ export const profileCreateCommand = defineCommand({
       project: args.project,
       force: args.force,
       json: args.json,
+      pretty: args.pretty,
       home: args.home,
       cwd: args.cwd,
     });

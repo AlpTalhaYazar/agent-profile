@@ -35,13 +35,13 @@ export const renderCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
       default: false,
     },
     pretty: {
       type: "boolean",
-      description: "Pretty-print JSON output",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     provenance: {

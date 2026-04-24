@@ -255,8 +255,13 @@ export const doctorCommand = defineCommand({
   args: {
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -280,8 +285,8 @@ export const doctorCommand = defineCommand({
 
     const hasFailures = checks.some((c) => c.status === "fail");
 
-    if (args.json) {
-      writeJson({ checks, healthy: !hasFailures });
+    if (args.json || args.pretty) {
+      writeJson({ checks, healthy: !hasFailures }, Boolean(args.pretty));
       if (hasFailures) process.exit(1);
       return;
     }

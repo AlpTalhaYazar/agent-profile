@@ -297,13 +297,13 @@ export const launchCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON for --dry-run",
+      description: "With --dry-run, emit structured JSON to stdout",
       alias: "j",
       default: false,
     },
     pretty: {
       type: "boolean",
-      description: "Pretty-print JSON output",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -378,7 +378,7 @@ function buildLaunchAddDirs(cwd: string, addDirs: string[] | undefined): string[
 
 function printDryRun(input: { record: SessionRecord; json: boolean; pretty: boolean }): void {
   const { record } = input;
-  if (input.json) {
+  if (input.json || input.pretty) {
     writeJson({ launch: record }, input.pretty);
     return;
   }

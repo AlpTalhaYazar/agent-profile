@@ -64,8 +64,13 @@ export const versionCommand = defineCommand({
   args: {
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
   },
@@ -76,8 +81,8 @@ export const versionCommand = defineCommand({
       node: process.version,
     };
 
-    if (args.json) {
-      writeJson(versions);
+    if (args.json || args.pretty) {
+      writeJson(versions, Boolean(args.pretty));
       return;
     }
 

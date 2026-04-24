@@ -55,8 +55,13 @@ export const profileValidateCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -69,6 +74,8 @@ export const profileValidateCommand = defineCommand({
     },
   },
   run({ args }) {
+    const jsonMode = Boolean(args.json) || Boolean(args.pretty);
+    const pretty = Boolean(args.pretty);
     const results: ValidationResult[] = [];
 
     if (args.path) {
@@ -81,8 +88,8 @@ export const profileValidateCommand = defineCommand({
       // Validate all discovered scopes
       const entries = discoverScopes({ home: args.home, cwd: args.cwd });
       if (entries.length === 0) {
-        if (args.json) {
-          writeJson({ results: [], allValid: true });
+        if (jsonMode) {
+          writeJson({ results: [], allValid: true }, pretty);
           return;
         }
         process.stdout.write("No scope files found.\n");
@@ -95,8 +102,8 @@ export const profileValidateCommand = defineCommand({
 
     const allValid = results.every((r) => r.valid);
 
-    if (args.json) {
-      writeJson({ results, allValid });
+    if (jsonMode) {
+      writeJson({ results, allValid }, pretty);
       if (!allValid) process.exit(EXIT_CONFIG_INVALID);
       return;
     }

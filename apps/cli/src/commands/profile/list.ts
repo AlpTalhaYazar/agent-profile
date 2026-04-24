@@ -27,8 +27,13 @@ export const profileListCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     home: {
@@ -47,8 +52,8 @@ export const profileListCommand = defineCommand({
       filterRole: args.role,
     });
 
-    if (args.json) {
-      writeJson(entries);
+    if (args.json || args.pretty) {
+      writeJson(entries, Boolean(args.pretty));
       return;
     }
 

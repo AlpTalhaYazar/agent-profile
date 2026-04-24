@@ -78,7 +78,6 @@ export async function runShow(opts: ShowOptions): Promise<void> {
   const {
     role,
     auth,
-    json = false,
     provenance = false,
     home,
     cwd,
@@ -87,6 +86,8 @@ export async function runShow(opts: ShowOptions): Promise<void> {
     showValues = false,
     backend,
   } = opts;
+  // --pretty implies --json so scripts can always opt into structured output.
+  const json = Boolean(opts.json) || pretty;
 
   let result: EffectiveSessionConfig;
   try {
@@ -230,13 +231,13 @@ export const profileShowCommand = defineCommand({
     },
     json: {
       type: "boolean",
-      description: "Emit structured JSON",
+      description: "Emit structured JSON to stdout",
       alias: "j",
       default: false,
     },
     pretty: {
       type: "boolean",
-      description: "Pretty-print JSON output",
+      description: "Pretty-print JSON output (implies --json)",
       default: false,
     },
     provenance: {
