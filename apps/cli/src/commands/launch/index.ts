@@ -24,15 +24,17 @@ import {
   resolveActivation,
 } from "../../activation/resolve.js";
 import { loadAuthProfiles } from "../../auth/profiles-file.js";
-import {
-  CliError,
-  EXIT_AUTH_FAILURE,
-  EXIT_CONFIG_INVALID,
-  EXIT_GENERIC,
-  mapCoreError,
-} from "../../errors.js";
+import { CliError, EXIT_AUTH_FAILURE, EXIT_GENERIC, mapCoreError } from "../../errors.js";
+import { writeJson } from "../../output/json.js";
 import { generateCapabilityToken, writeSessionManifest } from "../../session/manifest.js";
+import {
+  type SessionRecord,
+  redactCommandArgs,
+  updateSessionRecord,
+  writeSessionRecord,
+} from "../../session/registry.js";
 import { globalConfigDir, globalFragmentsDir } from "../../utils/paths.js";
+import { buildClaudeLaunchArgs } from "./env.js";
 import { type ClaudeSpawnFn, spawnClaude } from "./spawn.js";
 
 type AuthProfile = AuthProfilesDocT["authProfiles"][string];
@@ -41,7 +43,15 @@ type AuthProfile = AuthProfilesDocT["authProfiles"][string];
 export interface LaunchOptions {
   role?: string;
   auth?: string;
+  bare?: boolean;
+  strict?: boolean;
+  addDirs?: string[];
+  passthroughArgs?: string[];
+  retainSession?: boolean;
   keepSession?: boolean;
+  dryRun?: boolean;
+  json?: boolean;
+  pretty?: boolean;
   home?: string;
   cwd?: string;
   backend?: Backend;
@@ -92,10 +102,18 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
   );
 
   const sessionsRoot = opts.sessionsRoot ?? env.MYCLAUDE_SESSIONS_ROOT ?? sessionsRootDefault();
+  const retainSession = opts.retainSession ?? opts.keepSession ?? false;
+  const addDirs = buildLaunchAddDirs(cwd, opts.addDirs);
+  const passthroughArgs = opts.passthroughArgs ?? [];
+  const strict = opts.strict ?? true;
+  const bare = opts.bare ?? false;
+  const command = opts.claudeCommand ?? "claude";
   const session = await createSessionDir({ root: sessionsRoot });
   const capabilityToken = opts.tokenGenerator?.() ?? generateCapabilityToken();
   let exitCode = 0;
   let primaryError: unknown;
+  let recordWritten = false;
+  const startedAtMs = Date.now();
 
   try {
     const emitInput: Parameters<typeof emitSessionArtifacts>[0] = {
@@ -110,6 +128,28 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
       emitInput.onMissingSource = opts.onMissingSource;
     }
     const artifacts = await emitSessionArtifacts(emitInput);
+    const spawnArgs = buildClaudeLaunchArgs(artifacts.runtimePaths, {
+      strict,
+      bare,
+      addDirs,
+      passthroughArgs,
+    });
+    const recordInput: Parameters<typeof createSessionRecord>[0] = {
+      sessionId: session.sessionId,
+      role: activation.role,
+      authProfileId: activation.auth,
+      cwd,
+      retained: retainSession || Boolean(opts.dryRun),
+      runtimePaths: artifacts.runtimePaths,
+      command,
+      args: spawnArgs,
+      status: opts.dryRun ? "dry-run" : "running",
+      nowMs: startedAtMs,
+    };
+    if (opts.dryRun !== undefined) recordInput.dryRun = opts.dryRun;
+    const recordBase = createSessionRecord(recordInput);
+    await writeSessionRecord({ sessionsRoot, record: recordBase });
+    recordWritten = true;
 
     try {
       await writeSessionManifest({
@@ -127,6 +167,15 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
       );
     }
 
+    if (opts.dryRun) {
+      printDryRun({
+        record: recordBase,
+        json: opts.json ?? false,
+        pretty: opts.pretty ?? false,
+      });
+      return 0;
+    }
+
     const spawnInput: Parameters<typeof spawnClaude>[0] = {
       baseEnv: env,
       effective: { env: resolvedEffective.env },
@@ -135,22 +184,65 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
       capabilityToken,
       authMode: authProfile.anthropic.mode,
       sessionsRoot,
+      strict,
+      bare,
+      addDirs,
+      passthroughArgs,
     };
-    if (opts.claudeCommand !== undefined) {
-      spawnInput.command = opts.claudeCommand;
-    }
+    spawnInput.command = command;
     if (opts.spawnFn !== undefined) {
       spawnInput.spawnFn = opts.spawnFn;
     }
     exitCode = await spawnClaude(spawnInput);
+    const endedAtMs = Date.now();
+    await updateSessionRecord({
+      sessionsRoot,
+      sessionId: session.sessionId,
+      patch: {
+        status: "exited",
+        exitCode,
+        wallMs: endedAtMs - startedAtMs,
+        endedAt: new Date(endedAtMs).toISOString(),
+        updatedAt: new Date(endedAtMs).toISOString(),
+      },
+    });
   } catch (err) {
     primaryError = err;
+    if (recordWritten) {
+      const failedAtMs = Date.now();
+      await updateSessionRecord({
+        sessionsRoot,
+        sessionId: session.sessionId,
+        patch: {
+          status: "failed",
+          wallMs: failedAtMs - startedAtMs,
+          endedAt: new Date(failedAtMs).toISOString(),
+          updatedAt: new Date(failedAtMs).toISOString(),
+        },
+      }).catch(() => {
+        // Preserve the original launch error.
+      });
+    }
     throw err;
   } finally {
-    if (opts.keepSession) {
+    if (opts.dryRun && primaryError === undefined) {
+      process.stderr.write(`Dry-run session kept at ${session.sessionDir}\n`);
+    } else if (retainSession) {
       process.stderr.write(`Session kept at ${session.sessionDir}\n`);
     } else {
       await cleanupAfterLaunch(session.sessionDir, sessionsRoot, primaryError, exitCode);
+      if (recordWritten) {
+        await updateSessionRecord({
+          sessionsRoot,
+          sessionId: session.sessionId,
+          patch: {
+            cleaned: true,
+            updatedAt: new Date().toISOString(),
+          },
+        }).catch(() => {
+          // Cleanup already happened; do not mask the launch result.
+        });
+      }
     }
   }
 
@@ -174,9 +266,44 @@ export const launchCommand = defineCommand({
       description: "Auth profile ID",
       alias: "a",
     },
+    bare: {
+      type: "boolean",
+      description: "Pass --bare to Claude Code",
+      default: false,
+    },
+    strict: {
+      type: "boolean",
+      description: "Pass --strict-mcp-config to Claude Code",
+      default: true,
+    },
+    "add-dir": {
+      type: "string",
+      description: "Add a working directory for Claude Code (repeatable)",
+    },
+    "retain-session": {
+      type: "boolean",
+      description: "Keep the ephemeral session directory after exit",
+      default: false,
+    },
     "keep-session": {
       type: "boolean",
-      description: "Keep the ephemeral session directory for debugging",
+      description: "Deprecated alias for --retain-session",
+      default: false,
+    },
+    "dry-run": {
+      type: "boolean",
+      description: "Resolve and emit session artifacts without spawning Claude Code",
+      default: false,
+    },
+    json: {
+      type: "boolean",
+      description: "Emit structured JSON for --dry-run",
+      alias: "j",
+      default: false,
+    },
+    pretty: {
+      type: "boolean",
+      description: "Pretty-print JSON output",
       default: false,
     },
     home: {
@@ -188,11 +315,17 @@ export const launchCommand = defineCommand({
       description: "Override working directory (for testing)",
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const launchOptions: LaunchOptions = {};
-    if (args["keep-session"] !== undefined) {
-      launchOptions.keepSession = args["keep-session"];
-    }
+    launchOptions.bare = Boolean(args.bare);
+    launchOptions.strict = args.strict !== false;
+    launchOptions.addDirs = normalizeRepeatedStringArg(args["add-dir"]);
+    launchOptions.passthroughArgs = extractPassthroughArgs(rawArgs);
+    launchOptions.retainSession = Boolean(args["retain-session"]);
+    launchOptions.keepSession = Boolean(args["keep-session"]);
+    launchOptions.dryRun = Boolean(args["dry-run"]);
+    launchOptions.json = Boolean(args.json);
+    launchOptions.pretty = Boolean(args.pretty);
     if (args.role !== undefined) launchOptions.role = args.role;
     if (args.auth !== undefined) launchOptions.auth = args.auth;
     if (args.home !== undefined) launchOptions.home = args.home;
@@ -201,6 +334,90 @@ export const launchCommand = defineCommand({
     process.exitCode = exitCode;
   },
 });
+
+function createSessionRecord(input: {
+  sessionId: string;
+  role: string;
+  authProfileId: string;
+  cwd: string;
+  retained: boolean;
+  runtimePaths: SessionRecord["runtimePaths"];
+  command: string;
+  args: string[];
+  status: SessionRecord["status"];
+  dryRun?: boolean;
+  nowMs: number;
+}): SessionRecord {
+  const now = new Date(input.nowMs).toISOString();
+  const record: SessionRecord = {
+    version: 1,
+    sessionId: input.sessionId,
+    role: input.role,
+    authProfileId: input.authProfileId,
+    cwd: input.cwd,
+    createdAt: now,
+    updatedAt: now,
+    retained: input.retained,
+    cleaned: false,
+    runtimePaths: input.runtimePaths,
+    spawn: {
+      command: input.command,
+      args: redactCommandArgs(input.args),
+    },
+    status: input.status,
+  };
+  if (input.dryRun !== undefined) record.dryRun = input.dryRun;
+  if (input.status === "running") record.startedAt = now;
+  if (input.status === "dry-run") record.endedAt = now;
+  return record;
+}
+
+function buildLaunchAddDirs(cwd: string, addDirs: string[] | undefined): string[] {
+  return [cwd, ...(addDirs ?? [])];
+}
+
+function printDryRun(input: { record: SessionRecord; json: boolean; pretty: boolean }): void {
+  const { record } = input;
+  if (input.json) {
+    writeJson({ launch: record }, input.pretty);
+    return;
+  }
+
+  const lines = [
+    `Session: ${record.sessionId}`,
+    `Role:    ${record.role}`,
+    `Auth:    ${record.authProfileId}`,
+    `Dir:     ${record.runtimePaths.sessionDir}`,
+    `Status:  ${record.status}`,
+    `Command: ${record.spawn.command} ${record.spawn.args.join(" ")}`.trimEnd(),
+    "Files:",
+    `  mcp.json          ${record.runtimePaths.mcpConfig}`,
+    `  settings.json     ${record.runtimePaths.settings}`,
+  ];
+
+  if (record.runtimePaths.apiKeyHelper) {
+    lines.push(`  apiKeyHelper.sh  ${record.runtimePaths.apiKeyHelper}`);
+  }
+  if (record.runtimePaths.headersHelper) {
+    lines.push(`  headersHelper.sh  ${record.runtimePaths.headersHelper}`);
+  }
+  if (record.runtimePaths.claudeMd) {
+    lines.push(`  CLAUDE.md         ${record.runtimePaths.claudeMd}`);
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+function normalizeRepeatedStringArg(value: unknown): string[] {
+  if (value === undefined || value === false) return [];
+  if (Array.isArray(value)) return value.map((entry) => String(entry));
+  return [String(value)];
+}
+
+export function extractPassthroughArgs(rawArgs: string[] | undefined): string[] {
+  const separatorIndex = rawArgs?.indexOf("--") ?? -1;
+  return separatorIndex >= 0 ? (rawArgs ?? []).slice(separatorIndex + 1) : [];
+}
 
 function loadActiveAuthProfile(
   authProfileId: string,

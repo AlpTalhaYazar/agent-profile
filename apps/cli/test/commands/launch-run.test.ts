@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { basename, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runLaunch } from "../../src/commands/launch/index.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
@@ -90,6 +90,7 @@ describe("runLaunch integration with a stub claude binary", () => {
   afterEach(() => {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     tempDir = "";
+    vi.restoreAllMocks();
   });
 
   it("emits a session, spawns stub claude with env/args, and cleans up", async () => {
@@ -98,8 +99,10 @@ describe("runLaunch integration with a stub claude binary", () => {
     const cwd = join(tempDir, "repo");
     const sessionsRoot = join(tempDir, "sessions");
     const binDir = join(tempDir, "bin");
+    const extraDir = join(tempDir, "extra");
     const stubOut = join(tempDir, "stub-output.txt");
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(extraDir, { recursive: true });
     writeFixtureHome(home);
     writeStubClaude(binDir);
 
@@ -115,6 +118,9 @@ describe("runLaunch integration with a stub claude binary", () => {
       sessionsRoot,
       backend,
       tokenGenerator: () => "fixed-token",
+      addDirs: [extraDir],
+      bare: true,
+      passthroughArgs: ["--prompt", "Review PR"],
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
@@ -126,8 +132,11 @@ describe("runLaunch integration with a stub claude binary", () => {
 
     expect(exitCode).toBe(7);
     const output = readFileSync(stubOut, "utf8");
-    expect(output).toContain("ARGS=--mcp-config ");
+    expect(output).toContain("ARGS=--strict-mcp-config --mcp-config ");
     expect(output).toContain(" --settings ");
+    expect(output).toContain(" --setting-sources user,project,local ");
+    expect(output).toContain(` --add-dir ${cwd} --add-dir ${extraDir} `);
+    expect(output).toContain(" --bare --prompt Review PR");
     expect(output).toContain(`MYCLAUDE_SESSIONS_ROOT=${sessionsRoot}`);
     expect(output).toContain("MYCLAUDE_CAPABILITY_TOKEN=fixed-token");
     expect(output).toContain("PROFILE_ENV=ghp-work-value");
@@ -146,5 +155,81 @@ describe("runLaunch integration with a stub claude binary", () => {
       ?.slice("SESSION_DIR=".length);
     expect(sessionDir).toBeDefined();
     expect(existsSync(sessionDir as string)).toBe(false);
+
+    const sessionId = basename(sessionDir as string);
+    const record = JSON.parse(
+      readFileSync(join(tempDir, "session-registry", `${sessionId}.json`), "utf8")
+    ) as { status: string; cleaned: boolean; spawn: { args: string[] } };
+    expect(record.status).toBe("exited");
+    expect(record.cleaned).toBe(true);
+    expect(record.spawn.args).toContain("--bare");
+    expect(JSON.stringify(record)).not.toContain("fixed-token");
+    expect(JSON.stringify(record)).not.toContain("remote-secret-value");
+  });
+
+  it("dry-run emits secret-safe JSON and does not spawn claude", async () => {
+    tempDir = makeTempDir();
+    const home = join(tempDir, "home", ".myclaude");
+    const cwd = join(tempDir, "repo");
+    const sessionsRoot = join(tempDir, "sessions");
+    mkdirSync(cwd, { recursive: true });
+    writeFixtureHome(home);
+
+    let stdout = "";
+    let stderr = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      stdout += chunk.toString();
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderr += chunk.toString();
+      return true;
+    });
+
+    const backend = new MockBackend("keychain-macos")
+      .seed("agent-profile.github.work", "ghp-work-value")
+      .seed("agent-profile.remote.token", "remote-secret-value");
+
+    const exitCode = await runLaunch({
+      role: "backend",
+      auth: "work",
+      home,
+      cwd,
+      sessionsRoot,
+      backend,
+      tokenGenerator: () => "fixed-token",
+      dryRun: true,
+      json: true,
+      passthroughArgs: ["--api-key", "secret-arg"],
+      spawnFn: () => {
+        throw new Error("should not spawn");
+      },
+      env: {
+        ...process.env,
+        ANTHROPIC_API_KEY: "must-not-output",
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout) as {
+      launch: {
+        sessionId: string;
+        status: string;
+        retained: boolean;
+        runtimePaths: { sessionDir: string };
+        spawn: { args: string[] };
+      };
+    };
+    expect(parsed.launch.status).toBe("dry-run");
+    expect(parsed.launch.retained).toBe(true);
+    expect(parsed.launch.spawn.args).toContain("--api-key");
+    expect(parsed.launch.spawn.args).toContain("<redacted>");
+    expect(existsSync(parsed.launch.runtimePaths.sessionDir)).toBe(true);
+    expect(stderr).toContain("Dry-run session kept at ");
+    expect(stdout).not.toContain("fixed-token");
+    expect(stdout).not.toContain("secret-arg");
+    expect(stdout).not.toContain("ghp-work-value");
+    expect(stdout).not.toContain("remote-secret-value");
+    expect(stdout).not.toContain("must-not-output");
   });
 });

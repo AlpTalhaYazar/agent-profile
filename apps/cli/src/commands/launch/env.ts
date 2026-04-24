@@ -11,6 +11,20 @@ export interface ClaudeLaunchRuntimePaths {
   settings: string;
 }
 
+/** Options that affect the argv passed to Claude Code. */
+export interface BuildClaudeLaunchArgsOptions {
+  /** Pass `--strict-mcp-config`. Defaults to true. */
+  strict?: boolean;
+  /** Pass `--bare`. Defaults to false. */
+  bare?: boolean;
+  /** Directories to pass via repeatable `--add-dir`. */
+  addDirs?: string[];
+  /** Extra args forwarded after `myclaude launch --`. */
+  passthroughArgs?: string[];
+  /** Setting sources passed to Claude Code. Defaults to `user,project,local`. */
+  settingSources?: string;
+}
+
 /** Session metadata needed for launch-time env construction. */
 export interface ClaudeLaunchSession {
   sessionId: string;
@@ -47,9 +61,35 @@ const PROVIDER_ENV_KEYS = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] 
  * Build the Claude Code argv for runtime artifact paths.
  */
 export function buildClaudeLaunchArgs(
-  runtimePaths: Pick<ClaudeLaunchRuntimePaths, "mcpConfig" | "settings">
+  runtimePaths: Pick<ClaudeLaunchRuntimePaths, "mcpConfig" | "settings">,
+  options: BuildClaudeLaunchArgsOptions = {}
 ): string[] {
-  return ["--mcp-config", runtimePaths.mcpConfig, "--settings", runtimePaths.settings];
+  const args: string[] = [];
+
+  if (options.strict !== false) {
+    args.push("--strict-mcp-config");
+  }
+
+  args.push(
+    "--mcp-config",
+    runtimePaths.mcpConfig,
+    "--settings",
+    runtimePaths.settings,
+    "--setting-sources",
+    options.settingSources ?? "user,project,local"
+  );
+
+  for (const dir of options.addDirs ?? []) {
+    args.push("--add-dir", dir);
+  }
+
+  if (options.bare) {
+    args.push("--bare");
+  }
+
+  args.push(...(options.passthroughArgs ?? []));
+
+  return args;
 }
 
 /**

@@ -86,12 +86,40 @@ class FakeSignalProcess implements SignalProcess {
 }
 
 describe("launch env helpers", () => {
-  it("builds Claude args exactly from runtime artifact paths", () => {
+  it("builds Claude args with strict MCP config and setting sources by default", () => {
     expect(buildClaudeLaunchArgs(runtimePaths)).toEqual([
+      "--strict-mcp-config",
       "--mcp-config",
       runtimePaths.mcpConfig,
       "--settings",
       runtimePaths.settings,
+      "--setting-sources",
+      "user,project,local",
+    ]);
+  });
+
+  it("builds Claude args for strict disable, add-dir, bare, and passthrough order", () => {
+    expect(
+      buildClaudeLaunchArgs(runtimePaths, {
+        strict: false,
+        addDirs: ["/repo", "/extra"],
+        bare: true,
+        passthroughArgs: ["--prompt", "Review PR"],
+      })
+    ).toEqual([
+      "--mcp-config",
+      runtimePaths.mcpConfig,
+      "--settings",
+      runtimePaths.settings,
+      "--setting-sources",
+      "user,project,local",
+      "--add-dir",
+      "/repo",
+      "--add-dir",
+      "/extra",
+      "--bare",
+      "--prompt",
+      "Review PR",
     ]);
   });
 
@@ -146,7 +174,15 @@ describe("spawnClaude", () => {
     await expect(result).resolves.toBe(0);
     expect(captured).toEqual({
       command: "claude",
-      args: ["--mcp-config", runtimePaths.mcpConfig, "--settings", runtimePaths.settings],
+      args: [
+        "--strict-mcp-config",
+        "--mcp-config",
+        runtimePaths.mcpConfig,
+        "--settings",
+        runtimePaths.settings,
+        "--setting-sources",
+        "user,project,local",
+      ],
       options: expect.objectContaining({
         stdio: "inherit",
         env: expect.objectContaining({

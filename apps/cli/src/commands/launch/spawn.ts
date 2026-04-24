@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { CliError, EXIT_GENERIC, EXIT_SPAWN_FAILURE } from "../../errors.js";
 import {
+  type BuildClaudeLaunchArgsOptions,
   type BuildClaudeLaunchEnvInput,
   type ClaudeLaunchRuntimePaths,
   buildClaudeLaunchArgs,
@@ -41,7 +42,7 @@ export interface SignalProcess {
 }
 
 /** Inputs for spawning Claude Code. */
-export interface SpawnClaudeInput extends BuildClaudeLaunchEnvInput {
+export interface SpawnClaudeInput extends BuildClaudeLaunchEnvInput, BuildClaudeLaunchArgsOptions {
   command?: string;
   spawnFn?: ClaudeSpawnFn;
   signalProcess?: SignalProcess;
@@ -62,9 +63,10 @@ const defaultSpawnFn: ClaudeSpawnFn = (command, args, options) => spawn(command,
  * Build the Claude Code argv for runtime artifact paths.
  */
 export function buildClaudeArgs(
-  runtimePaths: Pick<ClaudeLaunchRuntimePaths, "mcpConfig" | "settings">
+  runtimePaths: Pick<ClaudeLaunchRuntimePaths, "mcpConfig" | "settings">,
+  options: BuildClaudeLaunchArgsOptions = {}
 ): string[] {
-  return buildClaudeLaunchArgs(runtimePaths);
+  return buildClaudeLaunchArgs(runtimePaths, options);
 }
 
 /**
@@ -89,7 +91,13 @@ export function runClaude(input: RunClaudeInput): Promise<number> {
  */
 export function spawnClaude(input: SpawnClaudeInput): Promise<number> {
   const command = input.command ?? "claude";
-  const args = buildClaudeLaunchArgs(input.runtimePaths);
+  const argOptions: BuildClaudeLaunchArgsOptions = {};
+  if (input.strict !== undefined) argOptions.strict = input.strict;
+  if (input.bare !== undefined) argOptions.bare = input.bare;
+  if (input.addDirs !== undefined) argOptions.addDirs = input.addDirs;
+  if (input.passthroughArgs !== undefined) argOptions.passthroughArgs = input.passthroughArgs;
+  if (input.settingSources !== undefined) argOptions.settingSources = input.settingSources;
+  const args = buildClaudeLaunchArgs(input.runtimePaths, argOptions);
   const env = buildClaudeLaunchEnv(input);
   return runClaude({
     command,
