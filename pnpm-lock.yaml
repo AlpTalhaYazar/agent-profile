@@ -58,6 +58,37 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.17)
 
+  apps/helper:
+    dependencies:
+      '@agent-profile/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@agent-profile/persona-deployer':
+        specifier: workspace:*
+        version: link:../../packages/persona-deployer
+      '@agent-profile/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
+      zod:
+        specifier: ^4.0.0
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      '@vitest/coverage-v8':
+        specifier: ^2.1.0
+        version: 2.1.9(vitest@2.1.9(@types/node@22.19.17))
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(postcss@8.5.10)(typescript@5.9.3)(yaml@2.8.3)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.17)
+
   packages/core:
     dependencies:
       yaml:
@@ -99,14 +130,17 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.17)
 
-  packages/session-artifacts:
+  packages/secrets:
     dependencies:
       '@agent-profile/core':
         specifier: workspace:*
         version: link:../core
-      '@agent-profile/persona-deployer':
-        specifier: workspace:*
-        version: link:../persona-deployer
+      '@napi-rs/keyring':
+        specifier: ^1.1.0
+        version: 1.2.0
+      zod:
+        specifier: ^4.0.0
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -121,17 +155,14 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.17)
 
-  packages/secrets:
+  packages/session-artifacts:
     dependencies:
       '@agent-profile/core':
         specifier: workspace:*
         version: link:../core
-      '@napi-rs/keyring':
-        specifier: ^1.1.0
-        version: 1.2.0
-      zod:
-        specifier: ^4.0.0
-        version: 4.3.6
+      '@agent-profile/persona-deployer':
+        specifier: workspace:*
+        version: link:../persona-deployer
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
