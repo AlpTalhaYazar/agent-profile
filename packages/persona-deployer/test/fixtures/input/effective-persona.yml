@@ -1,0 +1,17 @@
+# Fixture: effective persona resolved from cascade
+# Maps to files in test/fixtures/persona-fragments/
+claudeMd:
+  - ../persona-fragments/global-backend-CLAUDE.md
+  - ../persona-fragments/project-backend-CLAUDE.md
+
+agents:
+  - ../persona-fragments/agent-api-designer.md
+  - ../persona-fragments/agent-code-reviewer.md
+
+skills:
+  - ../persona-fragments/skill-postgres-query.md
+
+slashCmds:
+  - ../persona-fragments/cmd-review.md
+
+memory: []
