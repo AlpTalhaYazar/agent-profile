@@ -1,0 +1,10 @@
+version: 1
+env:
+  PROJECT_DB_POOL: "20"
+mcpServers:
+  postgres:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-postgres"]
+    env:
+      DATABASE_URL: "${secret:postgres.acme-prod}"

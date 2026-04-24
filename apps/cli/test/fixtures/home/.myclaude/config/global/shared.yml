@@ -1,0 +1,17 @@
+version: 1
+env:
+  EDITOR: "nvim"
+settings:
+  theme: "dark"
+mcpServers:
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem"]
+    env:
+      ROOTS: "/tmp"
+  figma:
+    type: http
+    url: "https://figma-mcp.example.com"
+    headers:
+      Authorization: "${secret:figma.token}"

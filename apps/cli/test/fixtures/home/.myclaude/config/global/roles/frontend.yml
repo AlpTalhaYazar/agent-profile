@@ -1,0 +1,11 @@
+version: 1
+env:
+  NODE_ENV: "development"
+settings:
+  theme: "dark"
+mcpServers:
+  figma:
+    type: http
+    url: "https://figma-mcp.example.com"
+    headers:
+      Authorization: "${secret:figma.token}"
