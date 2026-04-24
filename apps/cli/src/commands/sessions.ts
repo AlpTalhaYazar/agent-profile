@@ -10,7 +10,8 @@ import {
   sessionsRootDefault,
 } from "@agent-profile/persona-deployer";
 import { defineCommand } from "citty";
-import { CliError, EXIT_GENERIC } from "../errors.js";
+import { isTTY, promptConfirm } from "../auth/prompt-secrets.js";
+import { CliError, EXIT_GENERIC, EXIT_USER_CANCELLED } from "../errors.js";
 import { writeJson } from "../output/json.js";
 import {
   type SessionRecord,
@@ -37,11 +38,31 @@ export interface SessionsShowOptions extends SessionsBaseOptions {
 }
 
 export interface SessionsGcOptions extends SessionsBaseOptions {
+  /** Also clean old orphan directories under the sessions root. */
   all?: boolean;
+  /**
+   * Include sessions marked `retained` as cleanup candidates.
+   * Requires either interactive confirmation or `--yes` (non-TTY / JSON mode).
+   */
+  includeRetained?: boolean;
+  /** Skip confirmation prompts (required in non-TTY / JSON mode when deleting retained). */
+  yes?: boolean;
+  /**
+   * Injected confirmation function for tests. When omitted, the real interactive
+   * prompt is used in TTY mode. Never invoked in non-TTY / `--json` mode.
+   */
+  confirm?: (message: string) => Promise<boolean>;
+  /** Force non-TTY behavior for tests (overrides the real TTY detection). */
+  isInteractive?: boolean;
 }
 
 export interface SessionsGcResult {
-  cleaned: Array<{ sessionId: string; sessionDir: string; source: "registry" | "orphan" }>;
+  cleaned: Array<{
+    sessionId: string;
+    sessionDir: string;
+    source: "registry" | "orphan";
+    retained?: boolean;
+  }>;
   skipped: Array<{ sessionId: string; sessionDir: string; reason: string }>;
 }
 
@@ -53,8 +74,9 @@ export async function runSessionsList(opts: SessionsListOptions = {}): Promise<S
     records = records.filter((record) => record.status === "running");
   }
 
-  if (opts.json) {
-    writeJson({ sessions: records }, opts.pretty ?? false);
+  const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
+  if (jsonMode) {
+    writeJson({ sessions: records }, Boolean(opts.pretty));
   } else {
     process.stdout.write(`${formatSessionList(records, opts.nowMs ?? Date.now())}\n`);
   }
@@ -67,8 +89,9 @@ export async function runSessionsShow(opts: SessionsShowOptions): Promise<Sessio
   const sessionsRoot = resolveSessionsRoot(opts);
   const record = await readSessionRecord({ sessionsRoot, sessionId: opts.sessionId });
 
-  if (opts.json) {
-    writeJson({ session: record }, opts.pretty ?? false);
+  const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
+  if (jsonMode) {
+    writeJson({ session: record }, Boolean(opts.pretty));
   } else {
     process.stdout.write(`${formatSessionShow(record)}\n`);
   }
@@ -79,13 +102,31 @@ export async function runSessionsShow(opts: SessionsShowOptions): Promise<Sessio
 /** Clean session directories using persona-deployer's guarded cleanupSession. */
 export async function runSessionsGc(opts: SessionsGcOptions = {}): Promise<SessionsGcResult> {
   const sessionsRoot = resolveSessionsRoot(opts);
+  const includeRetained = Boolean(opts.includeRetained);
+  const yes = Boolean(opts.yes);
+  const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
   const result: SessionsGcResult = { cleaned: [], skipped: [] };
   const records = await listSessionRecords({ sessionsRoot });
   const recordsById = new Map(records.map((record) => [record.sessionId, record]));
   const cleanedIds = new Set<string>();
 
+  if (includeRetained && !yes) {
+    const retainedCandidates = records.filter(
+      (r) => r.retained && r.status !== "running" && !r.cleaned
+    );
+    if (retainedCandidates.length > 0) {
+      const confirmInput: ConfirmRetainedDeletionInput = {
+        retained: retainedCandidates,
+        jsonMode,
+        interactive: opts.isInteractive ?? isTTY(),
+      };
+      if (opts.confirm !== undefined) confirmInput.confirm = opts.confirm;
+      await confirmRetainedDeletion(confirmInput);
+    }
+  }
+
   for (const record of records) {
-    if (record.retained) {
+    if (record.retained && !includeRetained) {
       result.skipped.push({
         sessionId: record.sessionId,
         sessionDir: record.runtimePaths.sessionDir,
@@ -111,11 +152,13 @@ export async function runSessionsGc(opts: SessionsGcOptions = {}): Promise<Sessi
     await cleanupSession(record.runtimePaths.sessionDir, { allowedRoots: [sessionsRoot] });
     await markCleaned(sessionsRoot, record);
     cleanedIds.add(record.sessionId);
-    result.cleaned.push({
+    const cleanedEntry: SessionsGcResult["cleaned"][number] = {
       sessionId: record.sessionId,
       sessionDir: record.runtimePaths.sessionDir,
       source: "registry",
-    });
+    };
+    if (record.retained) cleanedEntry.retained = true;
+    result.cleaned.push(cleanedEntry);
   }
 
   if (opts.all) {
@@ -123,7 +166,7 @@ export async function runSessionsGc(opts: SessionsGcOptions = {}): Promise<Sessi
     for (const orphan of orphans) {
       if (cleanedIds.has(orphan.sessionId)) continue;
       const record = recordsById.get(orphan.sessionId);
-      if (record?.retained) {
+      if (record?.retained && !includeRetained) {
         result.skipped.push({
           sessionId: orphan.sessionId,
           sessionDir: orphan.sessionDir,
@@ -145,21 +188,53 @@ export async function runSessionsGc(opts: SessionsGcOptions = {}): Promise<Sessi
         await markCleaned(sessionsRoot, record);
       }
       cleanedIds.add(orphan.sessionId);
-      result.cleaned.push({
+      const cleanedEntry: SessionsGcResult["cleaned"][number] = {
         sessionId: orphan.sessionId,
         sessionDir: orphan.sessionDir,
         source: "orphan",
-      });
+      };
+      if (record?.retained) cleanedEntry.retained = true;
+      result.cleaned.push(cleanedEntry);
     }
   }
 
-  if (opts.json) {
-    writeJson(result, opts.pretty ?? false);
+  if (jsonMode) {
+    writeJson(result, Boolean(opts.pretty));
   } else {
     process.stdout.write(formatGcResult(result));
   }
 
   return result;
+}
+
+interface ConfirmRetainedDeletionInput {
+  retained: SessionRecord[];
+  jsonMode: boolean;
+  interactive: boolean;
+  confirm?: (message: string) => Promise<boolean>;
+}
+
+/**
+ * Guards retained-session deletion with the rule: JSON or non-TTY requires
+ * an explicit `--yes`, else exit 6; TTY prompts for confirmation.
+ */
+async function confirmRetainedDeletion(input: ConfirmRetainedDeletionInput): Promise<void> {
+  const list = input.retained
+    .map((r) => `  ${r.sessionId}  ${r.runtimePaths.sessionDir}`)
+    .join("\n");
+  if (input.jsonMode || !input.interactive) {
+    throw new CliError(
+      `Refusing to delete ${input.retained.length} retained session(s) without --yes.`,
+      EXIT_USER_CANCELLED,
+      "Re-run with `--include-retained --yes` to confirm non-interactively."
+    );
+  }
+  process.stderr.write(`About to delete ${input.retained.length} retained session(s):\n${list}\n`);
+  const prompt = input.confirm ?? ((message: string) => promptConfirm(message));
+  const ok = await prompt("Delete these retained sessions?");
+  if (!ok) {
+    throw new CliError("Retained-session cleanup cancelled.", EXIT_USER_CANCELLED);
+  }
 }
 
 export const sessionsCommand = defineCommand({
@@ -171,7 +246,7 @@ export const sessionsCommand = defineCommand({
     list: defineCommand({
       meta: {
         name: "list",
-        description: "List active and recent sessions",
+        description: "List active and recent sessions from the file-backed registry",
       },
       args: {
         active: {
@@ -186,13 +261,13 @@ export const sessionsCommand = defineCommand({
         },
         json: {
           type: "boolean",
-          description: "Emit structured JSON",
+          description: "Emit structured JSON to stdout",
           alias: "j",
           default: false,
         },
         pretty: {
           type: "boolean",
-          description: "Pretty-print JSON output",
+          description: "Pretty-print JSON output (implies --json)",
           default: false,
         },
       },
@@ -208,7 +283,7 @@ export const sessionsCommand = defineCommand({
     show: defineCommand({
       meta: {
         name: "show",
-        description: "Show one session",
+        description: "Show details for a single session by ID",
       },
       args: {
         sessionId: {
@@ -218,13 +293,13 @@ export const sessionsCommand = defineCommand({
         },
         json: {
           type: "boolean",
-          description: "Emit structured JSON",
+          description: "Emit structured JSON to stdout",
           alias: "j",
           default: false,
         },
         pretty: {
           type: "boolean",
-          description: "Pretty-print JSON output",
+          description: "Pretty-print JSON output (implies --json)",
           default: false,
         },
       },
@@ -242,7 +317,7 @@ export const sessionsCommand = defineCommand({
     gc: defineCommand({
       meta: {
         name: "gc",
-        description: "Clean exited session directories",
+        description: "Clean exited session directories (retained sessions are skipped by default)",
       },
       args: {
         all: {
@@ -250,21 +325,34 @@ export const sessionsCommand = defineCommand({
           description: "Also clean old orphan directories under the sessions root",
           default: false,
         },
+        "include-retained": {
+          type: "boolean",
+          description: "Also delete sessions marked retained (requires confirmation or --yes)",
+          default: false,
+        },
+        yes: {
+          type: "boolean",
+          description: "Skip the confirmation prompt (required in non-TTY / --json mode)",
+          alias: "y",
+          default: false,
+        },
         json: {
           type: "boolean",
-          description: "Emit structured JSON",
+          description: "Emit structured JSON to stdout",
           alias: "j",
           default: false,
         },
         pretty: {
           type: "boolean",
-          description: "Pretty-print JSON output",
+          description: "Pretty-print JSON output (implies --json)",
           default: false,
         },
       },
       async run({ args }) {
         await runSessionsGc({
           all: Boolean(args.all),
+          includeRetained: Boolean(args["include-retained"]),
+          yes: Boolean(args.yes),
           json: Boolean(args.json),
           pretty: Boolean(args.pretty),
         });
@@ -320,9 +408,15 @@ function formatSessionShow(record: SessionRecord): string {
 
 function formatGcResult(result: SessionsGcResult): string {
   const lines: string[] = [];
-  lines.push(`Cleaned ${result.cleaned.length} session dir(s).`);
+  const retainedCount = result.cleaned.filter((e) => e.retained).length;
+  const summary =
+    retainedCount > 0
+      ? `Cleaned ${result.cleaned.length} session dir(s) (${retainedCount} retained).`
+      : `Cleaned ${result.cleaned.length} session dir(s).`;
+  lines.push(summary);
   for (const entry of result.cleaned) {
-    lines.push(`  ${entry.sessionId} ${entry.sessionDir}`);
+    const tag = entry.retained ? " [retained]" : "";
+    lines.push(`  ${entry.sessionId}${tag} ${entry.sessionDir}`);
   }
   if (result.skipped.length > 0) {
     lines.push(`Skipped ${result.skipped.length} session dir(s).`);
