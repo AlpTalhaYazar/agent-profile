@@ -42,13 +42,13 @@ function ctx(args: Record<string, unknown>, cmd: unknown): any {
 }
 
 describe("renderCommand.run", () => {
-  it("throws CliError when no role can be resolved", () => {
+  it("throws CliError when no role can be resolved", async () => {
     // Use a temp home with no default-role and no env vars
-    expect(() =>
+    await expect(
       renderCommand.run?.(
         ctx({ json: false, home: "/nonexistent/home", cwd: "/nonexistent/cwd" }, renderCommand)
       )
-    ).toThrow(CliError);
+    ).rejects.toThrow(CliError);
   });
 
   it("renders JSON output when --role and --json are given", async () => {

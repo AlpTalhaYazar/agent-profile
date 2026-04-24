@@ -17,6 +17,13 @@ export default defineConfig({
         "src/commands/profile/edit.ts",
         // profile/index.ts is a pure re-export barrel — no logic to cover
         "src/commands/profile/index.ts",
+        // auth/index.ts is a pure re-export barrel — no logic to cover
+        "src/commands/auth/index.ts",
+        // version.ts contains tsup-injected build-time constants (__CLI_VERSION__,
+        // __CORE_VERSION__) that are only defined in bundled builds and cannot be
+        // exercised in unit tests — the branches that check `typeof __X__ !== "undefined"`
+        // are permanently false at test time.
+        "src/commands/version.ts",
       ],
       thresholds: {
         lines: 85,

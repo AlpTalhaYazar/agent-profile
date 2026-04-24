@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@agent-profile/core": "workspace:*",
+    "@agent-profile/secrets": "workspace:*",
     "citty": "^0.1.6",
     "consola": "^3.2.0",
     "picocolors": "^1.0.0",

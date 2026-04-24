@@ -1,8 +1,10 @@
 /**
  * Tests for `doctorCommand.run` to cover the command wrapper.
  */
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { doctorCommand } from "../../src/commands/doctor.js";
 
 const FIXTURES_HOME = resolve(new URL("../fixtures/home/.myclaude", import.meta.url).pathname);
@@ -95,5 +97,45 @@ describe("doctorCommand.run", () => {
     const parsed = JSON.parse(stdout) as { checks: Array<{ name: string; status: string }> };
     const deferred = parsed.checks.filter((c) => c.status === "deferred");
     expect(deferred.length).toBeGreaterThan(0);
+  });
+
+  it("non-JSON mode with failures writes diagnostic message and calls process.exit(1)", async () => {
+    // Create a temp home with a broken scope file to trigger a fail check.
+    const tempHome = join(
+      tmpdir(),
+      `doctor-run-fail-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    const rolesDir = join(tempHome, "config", "global", "roles");
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(
+      join(rolesDir, "broken.yml"),
+      "version: 1\nmcpServers:\n  bad:\n    type: stdio\n" // missing required 'command' field
+    );
+
+    let exitCode: number | undefined;
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      exitCode = code;
+      throw new Error("process.exit called");
+    }) as unknown as typeof process.exit);
+
+    let stdout = "";
+    const origWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: unknown) => {
+      if (typeof chunk === "string") stdout += chunk;
+      return true;
+    };
+
+    try {
+      await expect(
+        doctorCommand.run?.(ctx({ json: false, home: tempHome, cwd: tempHome }, doctorCommand))
+      ).rejects.toThrow("process.exit called");
+    } finally {
+      process.stdout.write = origWrite;
+      exitSpy.mockRestore();
+      rmSync(tempHome, { recursive: true, force: true });
+    }
+
+    expect(stdout).toContain("Diagnostics found issues");
+    expect(exitCode).toBe(1);
   });
 });

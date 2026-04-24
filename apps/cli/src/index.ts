@@ -1,4 +1,3 @@
-import { defineCommand, runMain } from "citty";
 /**
  * @module index
  *
@@ -9,7 +8,9 @@ import { defineCommand, runMain } from "citty";
  *
  * The shebang (`#!/usr/bin/env node`) is injected by tsup's `banner` option.
  */
+import { defineCommand, runMain } from "citty";
 import { createConsola } from "consola";
+import { authCommand } from "./commands/auth/index.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { profileCommand } from "./commands/profile/index.js";
 import { renderCommand } from "./commands/render.js";
@@ -34,6 +35,7 @@ const main = defineCommand({
     version: "0.0.1",
   },
   subCommands: {
+    auth: authCommand,
     profile: profileCommand,
     render: renderCommand,
     schema: schemaCommand,

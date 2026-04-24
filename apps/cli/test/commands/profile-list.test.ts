@@ -119,4 +119,48 @@ describe("discoverScopes (profile list logic)", () => {
     expect(local).toBeDefined();
     rmSync(tempProject, { recursive: true, force: true });
   });
+
+  it("discovers global role files with .yaml extension", () => {
+    const tempHome = join(tmpdir(), `myclaude-home-${Math.random().toString(36).slice(2)}`);
+    const rolesDir = join(tempHome, "config", "global", "roles");
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(
+      join(rolesDir, "myspecialrole.yaml"),
+      "version: 1\nmcpServers: {}\nenv: {}\nsettings: {}\n"
+    );
+    const entries = discoverScopes({ home: tempHome, cwd: tempHome });
+    const yamlRole = entries.find((e) => e.scope === "global-role" && e.role === "myspecialrole");
+    expect(yamlRole).toBeDefined();
+    expect(yamlRole?.filePath).toContain("myspecialrole.yaml");
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it("discovers project role files with .yaml extension", () => {
+    const tempProject = join(tmpdir(), `myclaude-project-${Math.random().toString(36).slice(2)}`);
+    const projectRolesDir = join(tempProject, ".myclaude", "roles");
+    mkdirSync(projectRolesDir, { recursive: true });
+    writeFileSync(
+      join(projectRolesDir, "projrole.yaml"),
+      "version: 1\nmcpServers: {}\nenv: {}\nsettings: {}\n"
+    );
+    const entries = discoverScopes({ home: FIXTURES_HOME, cwd: tempProject });
+    const yamlRole = entries.find((e) => e.scope === "project-role" && e.role === "projrole");
+    expect(yamlRole).toBeDefined();
+    expect(yamlRole?.filePath).toContain("projrole.yaml");
+    rmSync(tempProject, { recursive: true, force: true });
+  });
+
+  it("discovers global role .yaml with filterRole", () => {
+    const tempHome = join(tmpdir(), `myclaude-home-${Math.random().toString(36).slice(2)}`);
+    const rolesDir = join(tempHome, "config", "global", "roles");
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(
+      join(rolesDir, "filterme.yaml"),
+      "version: 1\nmcpServers: {}\nenv: {}\nsettings: {}\n"
+    );
+    const entries = discoverScopes({ home: tempHome, cwd: tempHome, filterRole: "filterme" });
+    const yamlRole = entries.find((e) => e.scope === "global-role" && e.role === "filterme");
+    expect(yamlRole).toBeDefined();
+    rmSync(tempHome, { recursive: true, force: true });
+  });
 });

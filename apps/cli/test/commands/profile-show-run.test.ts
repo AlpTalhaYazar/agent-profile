@@ -106,8 +106,8 @@ describe("profileShowCommand.run", () => {
     expect(parsed).toHaveProperty("provenance");
   });
 
-  it("throws CliError when role arg is missing", () => {
-    expect(() =>
+  it("throws CliError when role arg is missing", async () => {
+    await expect(
       profileShowCommand.run?.(
         asCtx(
           ctx(
@@ -123,10 +123,10 @@ describe("profileShowCommand.run", () => {
           )
         )
       )
-    ).toThrow(CliError);
+    ).rejects.toThrow(CliError);
   });
 
-  it("throws CliError when scope file is invalid", () => {
+  it("throws CliError when scope file is invalid", async () => {
     const tempDir = makeTempDir();
     const rolesDir = join(tempDir, "config", "global", "roles");
     mkdirSync(rolesDir, { recursive: true });
@@ -134,7 +134,7 @@ describe("profileShowCommand.run", () => {
       join(rolesDir, "broken.yml"),
       "version: 1\nmcpServers:\n  bad:\n    type: stdio\n"
     );
-    expect(() =>
+    await expect(
       profileShowCommand.run?.(
         asCtx(
           ctx(
@@ -150,7 +150,7 @@ describe("profileShowCommand.run", () => {
           )
         )
       )
-    ).toThrow(CliError);
+    ).rejects.toThrow(CliError);
     rmSync(tempDir, { recursive: true, force: true });
   });
 

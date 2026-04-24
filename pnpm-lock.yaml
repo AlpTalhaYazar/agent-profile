@@ -23,6 +23,9 @@ importers:
       '@agent-profile/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agent-profile/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       citty:
         specifier: ^0.1.6
         version: 0.1.6

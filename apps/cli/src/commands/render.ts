@@ -1,7 +1,8 @@
 /**
  * @module commands/render
  *
- * `myclaude render [--role <r>] [--auth <a>] [--json] [--provenance]`
+ * `myclaude render [--role <r>] [--auth <a>] [--json] [--provenance]
+ *   [--resolve-secrets [--show-values]]`
  *
  * Alias of `profile show` for the common debugging shape.
  * Resolves the cascade and prints effective config without spawning `claude`.
@@ -48,6 +49,16 @@ export const renderCommand = defineCommand({
       description: "Show provenance chain for each entry",
       default: false,
     },
+    "resolve-secrets": {
+      type: "boolean",
+      description: "Resolve secret references from the keychain",
+      default: false,
+    },
+    "show-values": {
+      type: "boolean",
+      description: "Show actual secret values (implies --resolve-secrets)",
+      default: false,
+    },
     home: {
       type: "string",
       description: "Override myclaude home directory (for testing)",
@@ -57,7 +68,7 @@ export const renderCommand = defineCommand({
       description: "Override working directory (for testing)",
     },
   },
-  run({ args }) {
+  async run({ args }) {
     // Resolve role and auth from activation system when not provided as flags
     const activation = resolveActivation({
       flagRole: args.role,
@@ -70,12 +81,14 @@ export const renderCommand = defineCommand({
       throw new CliError(NO_ROLE_HELP, EXIT_GENERIC);
     }
 
-    runShow({
+    await runShow({
       role: activation.role,
       auth: activation.auth ?? args.auth,
       json: args.json,
       pretty: args.pretty,
       provenance: args.provenance,
+      resolveSecrets: args["resolve-secrets"] || args["show-values"],
+      showValues: args["show-values"],
       home: args.home,
       cwd: args.cwd,
     });

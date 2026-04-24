@@ -1,21 +1,20 @@
 /**
  * @module commands/doctor
  *
- * `myclaude doctor` — environment diagnostics (stub for Sprint 2).
+ * `myclaude doctor` — environment diagnostics.
  *
- * Checks performed in this sprint:
+ * Checks performed:
  * - CLI version is readable.
  * - Core package version is readable.
  * - Node version meets minimum (≥ 22).
  * - All discovered scope files pass Zod validation.
- *
- * TODO(sprint-3): Add keychain probe (requires @agent-profile/secrets).
- * TODO(sprint-3): Add daemon reachability check (requires IPC).
- * TODO(sprint-3): Check that `claude` binary is on PATH.
- * TODO(sprint-3): Check shell integration (CLAUDE_CONFIG_DIR not aliased).
+ * - Keychain backend probe (Sprint 4).
+ * - MYCLAUDE_ALLOW_PLAINTEXT warning (Sprint 4).
  */
 import { createRequire } from "node:module";
 import { loadScopeFile } from "@agent-profile/core";
+import type { Backend } from "@agent-profile/secrets";
+import { getBackend } from "@agent-profile/secrets";
 import { defineCommand } from "citty";
 import { green, red, yellow } from "../output/colors.js";
 import { writeJson } from "../output/json.js";
@@ -138,6 +137,71 @@ export function checkScopeFiles(home?: string, cwd?: string): DoctorCheck[] {
 }
 
 /**
+ * Checks the keychain backend.
+ *
+ * Returns a `[✓]` if a secure backend is available, `[✗]` for `basic-text`,
+ * or `[!]` if `MYCLAUDE_ALLOW_PLAINTEXT=1` is set.
+ *
+ * @param backend - Optional injected backend (for tests).
+ */
+export async function checkKeychainBackend(backend?: Backend): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+
+  let b: Backend;
+  try {
+    b = backend ?? (await getBackend());
+  } catch (err) {
+    checks.push({
+      name: "keychain",
+      status: "fail",
+      message: `Keychain unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      hint: "Ensure the keychain daemon is running.",
+    });
+    return checks;
+  }
+
+  if (b.kind === "basic-text") {
+    checks.push({
+      name: "keychain",
+      status: "fail",
+      message: "Keychain backend: basic-text — NOT secure.",
+      hint:
+        "Fix:\n" +
+        "  Debian/Ubuntu:  sudo apt install libsecret-1-0 gnome-keyring\n" +
+        "  Fedora:         sudo dnf install libsecret\n" +
+        "  Arch:           sudo pacman -S libsecret\n" +
+        "Or set MYCLAUDE_ALLOW_PLAINTEXT=1 if this is a disposable CI container\n" +
+        "(we recommend using runner-native secrets instead; see docs/06-security.md).",
+    });
+  } else if (b.kind === "unavailable") {
+    checks.push({
+      name: "keychain",
+      status: "fail",
+      message: "Keychain backend: unavailable.",
+      hint: "Ensure the keychain daemon is running and accessible.",
+    });
+  } else {
+    checks.push({
+      name: "keychain",
+      status: "pass",
+      message: `Keychain backend: ${b.kind} (secure)`,
+    });
+  }
+
+  // Warn if MYCLAUDE_ALLOW_PLAINTEXT is set.
+  if (process.env.MYCLAUDE_ALLOW_PLAINTEXT === "1") {
+    checks.push({
+      name: "allow-plaintext",
+      status: "warn",
+      message: "MYCLAUDE_ALLOW_PLAINTEXT=1 set — plaintext credentials allowed.",
+      hint: "Unset this for production credentials.",
+    });
+  }
+
+  return checks;
+}
+
+/**
  * Stub checks that are deferred to later sprints.
  */
 export function deferredChecks(): DoctorCheck[] {
@@ -146,11 +210,6 @@ export function deferredChecks(): DoctorCheck[] {
       name: "claude-binary",
       status: "deferred",
       message: "claude binary check (deferred — Sprint 3)",
-    },
-    {
-      name: "keychain",
-      status: "deferred",
-      message: "Keychain backend check (deferred — Sprint 4)",
     },
     {
       name: "daemon",
@@ -186,12 +245,12 @@ export function renderCheck(check: DoctorCheck): void {
 }
 
 /**
- * `myclaude doctor` command definition (stub).
+ * `myclaude doctor` command definition.
  */
 export const doctorCommand = defineCommand({
   meta: {
     name: "doctor",
-    description: "Environment diagnostics (stub: version + schema walk only)",
+    description: "Environment diagnostics",
   },
   args: {
     json: {
@@ -209,11 +268,13 @@ export const doctorCommand = defineCommand({
       description: "Override working directory (for testing)",
     },
   },
-  run({ args }) {
+  async run({ args }) {
+    const keychainChecks = await checkKeychainBackend();
     const checks: DoctorCheck[] = [
       checkNodeVersion(),
       ...checkVersions(),
       ...checkScopeFiles(args.home, args.cwd),
+      ...keychainChecks,
       ...deferredChecks(),
     ];
 
