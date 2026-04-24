@@ -29,13 +29,7 @@
     }
   },
   "files": {
-    "ignore": [
-      "node_modules",
-      "dist",
-      "coverage",
-      ".turbo",
-      "*.tsbuildinfo"
-    ]
+    "ignore": ["node_modules", "dist", "coverage", ".turbo", "*.tsbuildinfo"]
   },
   "overrides": [
     {
