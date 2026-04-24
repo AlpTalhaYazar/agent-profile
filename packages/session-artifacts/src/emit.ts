@@ -31,7 +31,9 @@ export async function emitSessionArtifacts(
   const mcpConfigPath = join(session.sessionDir, "mcp.json");
   const settingsPath = join(session.sessionDir, "settings.json");
   const apiKeyHelperPath =
-    input.authMode === "apiKey" ? join(session.sessionDir, "apiKeyHelper.sh") : null;
+    input.authMode === "apiKey" || input.authMode === "gateway"
+      ? join(session.sessionDir, "apiKeyHelper.sh")
+      : null;
 
   const needsHeadersHelper = hasServerNeedingHeadersHelper(effective);
   const headersHelperPath = needsHeadersHelper

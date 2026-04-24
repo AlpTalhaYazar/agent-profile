@@ -7,9 +7,9 @@
  * - 0  Success
  * - 1  Generic error
  * - 2  Config invalid (Zod validation failure)
- * - 3  Auth failure (not used this sprint)
+ * - 3  Auth failure / keychain unavailable / secret resolution failure
  * - 4  Daemon unreachable (not used this sprint)
- * - 5  Spawn failure (not used this sprint)
+ * - 5  Spawn failure
  * - 6  User cancelled
  * - 130 Interrupted (SIGINT)
  */
@@ -21,6 +21,10 @@ export const EXIT_SUCCESS = 0;
 export const EXIT_GENERIC = 1;
 /** Exit code 2: config/schema validation failure. */
 export const EXIT_CONFIG_INVALID = 2;
+/** Exit code 3: auth failure / keychain unavailable / secret resolution failure. */
+export const EXIT_AUTH_FAILURE = 3;
+/** Exit code 5: failed to spawn the child process. */
+export const EXIT_SPAWN_FAILURE = 5;
 /** Exit code 6: user cancelled (declined prompt). */
 export const EXIT_USER_CANCELLED = 6;
 /** Exit code 130: SIGINT / interrupted. */

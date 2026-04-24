@@ -23,9 +23,15 @@ importers:
       '@agent-profile/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agent-profile/persona-deployer':
+        specifier: workspace:*
+        version: link:../../packages/persona-deployer
       '@agent-profile/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@agent-profile/session-artifacts':
+        specifier: workspace:*
+        version: link:../../packages/session-artifacts
       citty:
         specifier: ^0.1.6
         version: 0.1.6

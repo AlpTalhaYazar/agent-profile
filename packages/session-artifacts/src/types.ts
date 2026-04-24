@@ -44,7 +44,7 @@ export interface EmitSessionArtifactsInput {
   /** Existing session directory metadata from `createSessionDir()`. */
   session: SessionInfo;
 
-  /** Active Anthropic auth mode. `apiKey` emits `apiKeyHelper.sh`. */
+  /** Active Anthropic auth mode. `apiKey` and `gateway` emit `apiKeyHelper.sh`. */
   authMode?: AuthMode;
 
   /** Helper executable invoked by generated wrapper scripts. */

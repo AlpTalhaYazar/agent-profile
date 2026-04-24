@@ -3,8 +3,8 @@
  *
  * Entry point for the `myclaude` CLI binary.
  *
- * Wires together Citty commands, installs the SIGINT handler for exit code 130,
- * and routes `CoreError` / `CliError` subclasses to user-friendly messages.
+ * Wires together Citty commands and routes `CoreError` / `CliError`
+ * subclasses to user-friendly messages.
  *
  * The shebang (`#!/usr/bin/env node`) is injected by tsup's `banner` option.
  */
@@ -12,20 +12,15 @@ import { defineCommand, runMain } from "citty";
 import { createConsola } from "consola";
 import { authCommand } from "./commands/auth/index.js";
 import { doctorCommand } from "./commands/doctor.js";
+import { launchCommand } from "./commands/launch/index.js";
 import { profileCommand } from "./commands/profile/index.js";
 import { renderCommand } from "./commands/render.js";
 import { schemaCommand } from "./commands/schema.js";
 import { versionCommand } from "./commands/version.js";
-import { EXIT_INTERRUPTED, mapCoreError } from "./errors.js";
+import { mapCoreError } from "./errors.js";
 
 /** Global consola instance (used for error output). */
 const logger = createConsola({ level: 3 });
-
-// ── SIGINT handler ────────────────────────────────────────────────────────────
-process.on("SIGINT", () => {
-  process.stderr.write("\n");
-  process.exit(EXIT_INTERRUPTED);
-});
 
 // ── Root command ──────────────────────────────────────────────────────────────
 const main = defineCommand({
@@ -37,6 +32,7 @@ const main = defineCommand({
   subCommands: {
     auth: authCommand,
     profile: profileCommand,
+    launch: launchCommand,
     render: renderCommand,
     schema: schemaCommand,
     doctor: doctorCommand,

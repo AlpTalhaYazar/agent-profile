@@ -131,7 +131,7 @@ describe("emitSessionArtifacts", () => {
     expect(renderedClaudeMd).toContain("# Backend persona");
   });
 
-  it("does not write apiKeyHelper when authMode is not apiKey", async () => {
+  it("does not write apiKeyHelper for bedrock auth mode", async () => {
     const root = makeTmpRoot();
     const session = await createSessionDir({ root });
     const effective = baseEffective({
@@ -149,6 +149,26 @@ describe("emitSessionArtifacts", () => {
 
     const settings = await readJson<Record<string, unknown>>(result.runtimePaths.settings);
     expect(settings).toEqual({ theme: "dark" });
+  });
+
+  it("writes apiKeyHelper for gateway auth mode", async () => {
+    const root = makeTmpRoot();
+    const session = await createSessionDir({ root });
+    const effective = baseEffective({
+      settings: { theme: "dark" },
+    });
+
+    const result = await emitSessionArtifacts({
+      effective,
+      session,
+      authMode: "gateway",
+    });
+
+    expect(result.runtimePaths.apiKeyHelper).toBe(join(session.sessionDir, "apiKeyHelper.sh"));
+    expect(existsSync(join(session.sessionDir, "apiKeyHelper.sh"))).toBe(true);
+
+    const settings = await readJson<Record<string, unknown>>(result.runtimePaths.settings);
+    expect(settings.apiKeyHelper).toBe(result.runtimePaths.apiKeyHelper);
   });
 
   it("does not override explicit headersHelper values", async () => {
