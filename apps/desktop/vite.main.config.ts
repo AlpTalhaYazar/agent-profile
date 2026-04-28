@@ -11,11 +11,11 @@ export default defineConfig({
   build: {
     lib: {
       entry: "src/main/index.ts",
-      formats: ["es"],
-      fileName: () => "main.js",
+      formats: ["cjs"],
+      fileName: () => "main.cjs",
     },
     rollupOptions: {
-      external: ["electron", /^node:/],
+      external: ["electron", /^node:/, /^@napi-rs\/keyring/],
     },
     sourcemap: true,
     target: "node22",

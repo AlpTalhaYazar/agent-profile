@@ -15,12 +15,18 @@
  * `Backend` interface without any changes to consumers.
  */
 
-import { AsyncEntry, findCredentialsAsync } from "@napi-rs/keyring";
+import { createRequire } from "node:module";
+import type * as KeyringModule from "@napi-rs/keyring";
 import { KEY_PREFIX } from "../namespace.js";
 import type { Backend, KeychainBackend } from "./types.js";
 
 /** The keyring service name used for all agent-profile entries. */
 const KEYRING_SERVICE = KEY_PREFIX;
+const require = createRequire(import.meta.url);
+
+function loadKeyring(): typeof KeyringModule {
+  return require("@napi-rs/keyring") as typeof KeyringModule;
+}
 
 /**
  * `@napi-rs/keyring`-backed implementation of the `Backend` interface.
@@ -40,6 +46,7 @@ export class KeyringBackend implements Backend {
   }
 
   async get(key: string): Promise<string | null> {
+    const { AsyncEntry } = loadKeyring();
     const entry = new AsyncEntry(KEYRING_SERVICE, key);
     try {
       const value = await entry.getPassword();
@@ -53,11 +60,13 @@ export class KeyringBackend implements Backend {
   }
 
   async set(key: string, value: string): Promise<void> {
+    const { AsyncEntry } = loadKeyring();
     const entry = new AsyncEntry(KEYRING_SERVICE, key);
     await entry.setPassword(value);
   }
 
   async remove(key: string): Promise<void> {
+    const { AsyncEntry } = loadKeyring();
     const entry = new AsyncEntry(KEYRING_SERVICE, key);
     try {
       await entry.deleteCredential();
@@ -69,6 +78,7 @@ export class KeyringBackend implements Backend {
   }
 
   async list(prefix: string): Promise<string[]> {
+    const { findCredentialsAsync } = loadKeyring();
     // `findCredentials` returns all accounts stored under KEYRING_SERVICE.
     // We then filter by prefix — the account field holds the full namespaced key.
     const credentials = await findCredentialsAsync(KEYRING_SERVICE);
