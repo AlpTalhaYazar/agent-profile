@@ -18,17 +18,17 @@ function shortSocketPath(workdir: string): string {
 
 describe.skipIf(skipOnWindows)("runDaemonStop", () => {
   let workdir: string;
-  let homedir: string;
+  let myClaudeDir: string;
   let socketPath: string;
   let server: DaemonServer | null = null;
   let originalSocketEnv: string | undefined;
 
   beforeEach(async () => {
     workdir = await mkdtemp("/tmp/ap-dst-");
-    homedir = join(workdir, "home");
+    myClaudeDir = join(workdir, ".myclaude");
     socketPath = shortSocketPath(workdir);
-    await mkdir(join(homedir, ".myclaude"), { recursive: true, mode: 0o700 });
-    const cookiePath = join(homedir, ".myclaude", "ipc-cookie");
+    await mkdir(myClaudeDir, { recursive: true, mode: 0o700 });
+    const cookiePath = join(myClaudeDir, "ipc-cookie");
     await writeFile(cookiePath, "ck", { mode: 0o600, encoding: "utf8" });
     await chmod(cookiePath, 0o600);
 
@@ -56,7 +56,7 @@ describe.skipIf(skipOnWindows)("runDaemonStop", () => {
   it("throws CliError(EXIT_DAEMON_UNREACHABLE) when no daemon is running", async () => {
     let caught: unknown;
     try {
-      await runDaemonStop({ home: homedir });
+      await runDaemonStop({ home: myClaudeDir });
     } catch (err) {
       caught = err;
     }
@@ -84,7 +84,7 @@ describe.skipIf(skipOnWindows)("runDaemonStop", () => {
       return true;
     });
 
-    await runDaemonStop({ home: homedir, force: true });
+    await runDaemonStop({ home: myClaudeDir, force: true });
 
     expect(receivedForce).toBe(true);
     expect(stdout).toContain("Daemon: stopped");

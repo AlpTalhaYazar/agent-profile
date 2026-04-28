@@ -22,17 +22,17 @@ function shortSocketPath(workdir: string): string {
 
 describe.skipIf(skipOnWindows)("runDaemonStatus", () => {
   let workdir: string;
-  let homedir: string;
+  let myClaudeDir: string;
   let socketPath: string;
   let server: DaemonServer | null = null;
   let originalSocketEnv: string | undefined;
 
   beforeEach(async () => {
     workdir = await mkdtemp("/tmp/ap-ds-");
-    homedir = join(workdir, "home");
+    myClaudeDir = join(workdir, ".myclaude");
     socketPath = shortSocketPath(workdir);
-    await mkdir(join(homedir, ".myclaude"), { recursive: true, mode: 0o700 });
-    const cookiePath = join(homedir, ".myclaude", "ipc-cookie");
+    await mkdir(myClaudeDir, { recursive: true, mode: 0o700 });
+    const cookiePath = join(myClaudeDir, "ipc-cookie");
     await writeFile(cookiePath, "ck", { mode: 0o600, encoding: "utf8" });
     await chmod(cookiePath, 0o600);
 
@@ -60,7 +60,7 @@ describe.skipIf(skipOnWindows)("runDaemonStatus", () => {
   it("throws CliError(EXIT_DAEMON_UNREACHABLE) when daemon is not running", async () => {
     let caught: unknown;
     try {
-      await runDaemonStatus({ home: homedir });
+      await runDaemonStatus({ home: myClaudeDir });
     } catch (err) {
       caught = err;
     }
@@ -89,7 +89,7 @@ describe.skipIf(skipOnWindows)("runDaemonStatus", () => {
       return true;
     });
 
-    await runDaemonStatus({ home: homedir });
+    await runDaemonStatus({ home: myClaudeDir });
 
     expect(stdout).toContain("Daemon:    running (pid 12345)");
     expect(stdout).toContain(`Socket:    ${socketPath}`);
@@ -118,7 +118,7 @@ describe.skipIf(skipOnWindows)("runDaemonStatus", () => {
       return true;
     });
 
-    await runDaemonStatus({ home: homedir, json: true });
+    await runDaemonStatus({ home: myClaudeDir, json: true });
 
     const parsed = JSON.parse(stdout);
     expect(parsed.pid).toBe(1);

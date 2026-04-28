@@ -15,8 +15,8 @@ describe("cookie helpers", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  it("cookiePath joins to <home>/.myclaude/ipc-cookie", () => {
-    expect(cookiePath("/h/x")).toBe(join("/h/x", ".myclaude", "ipc-cookie"));
+  it("cookiePath joins to <myClaudeHome>/ipc-cookie", () => {
+    expect(cookiePath("/h/x/.myclaude")).toBe(join("/h/x/.myclaude", "ipc-cookie"));
   });
 
   it("writes a cookie at mode 0600 and round-trips through readCookie", async () => {
@@ -33,7 +33,7 @@ describe("cookie helpers", () => {
   });
 
   it("readCookie throws on a relaxed file mode", async () => {
-    await mkdir(join(home, ".myclaude"), { recursive: true });
+    await mkdir(home, { recursive: true });
     const path = cookiePath(home);
     await writeFile(path, "tampered", { mode: 0o600, encoding: "utf8" });
     await chmod(path, 0o644);
