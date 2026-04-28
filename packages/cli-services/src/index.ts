@@ -95,3 +95,7 @@ export {
   type DaemonStatusInput,
   type DaemonStatus,
 } from "./daemon/status.js";
+
+// ─── Launch hash (Phase 2 milestone 5) ───────────────────────────────────────
+
+export { computeLaunchHash, type LaunchHashInput } from "./launch-hash.js";
