@@ -87,6 +87,7 @@ describe("sessions commands", () => {
     const records = await runSessionsList({
       sessionsRoot,
       nowMs: Date.parse("2026-04-24T10:00:00.000Z"),
+      standalone: true,
     });
 
     expect(records).toHaveLength(2);

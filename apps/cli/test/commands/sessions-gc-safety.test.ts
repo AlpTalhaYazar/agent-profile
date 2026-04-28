@@ -303,6 +303,7 @@ describe("sessions gc safety hardening", () => {
       sessionsRoot,
       pretty: true,
       nowMs: Date.parse("2026-04-24T10:05:00.000Z"),
+      standalone: true,
     });
 
     expect(stdout).toContain('"sessions"');
