@@ -154,4 +154,21 @@ describe("main renderer IPC bridge", () => {
     await expect(defaultCwd(event, undefined)).resolves.toBe("/repo");
     await expect(pickDirectory(event, undefined)).resolves.toBe("/picked/project");
   });
+
+  it("resolves the nested renderer HTML path in dev and packaged modes", async () => {
+    const { rendererEntryUrl } = await import("../src/main/index.js");
+
+    expect(rendererEntryUrl({ devServerUrl: "http://localhost:5173" })).toBe(
+      "http://localhost:5173/src/renderer/index.html"
+    );
+    expect(rendererEntryUrl({ devServerUrl: "http://localhost:5174/" })).toBe(
+      "http://localhost:5174/src/renderer/index.html"
+    );
+    expect(
+      rendererEntryUrl({
+        baseDir: "/app/.vite/build",
+        rendererName: "main_window",
+      })
+    ).toBe("file:///app/.vite/renderer/main_window/src/renderer/index.html");
+  });
 });

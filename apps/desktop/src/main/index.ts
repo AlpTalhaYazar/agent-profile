@@ -19,7 +19,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   type DaemonClient,
   type RespAuthListOkT,
@@ -92,15 +92,31 @@ function isHeadless(argv: string[] = process.argv, env = process.env): boolean {
   return argv.includes("--headless");
 }
 
+interface RendererEntryUrlOpts {
+  devServerUrl?: string;
+  rendererName?: string;
+  baseDir?: string;
+}
+
 /** Resolve the renderer entry URL for sender-frame validation + window load. */
-function rendererEntryUrl(): string {
-  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    return MAIN_WINDOW_VITE_DEV_SERVER_URL;
+export function rendererEntryUrl(opts: RendererEntryUrlOpts = {}): string {
+  const injectedDevServerUrl =
+    typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined"
+      ? MAIN_WINDOW_VITE_DEV_SERVER_URL
+      : undefined;
+  const devServerUrl = opts.devServerUrl ?? injectedDevServerUrl;
+  if (devServerUrl) {
+    const baseUrl = devServerUrl.endsWith("/") ? devServerUrl : `${devServerUrl}/`;
+    return new URL("src/renderer/index.html", baseUrl).toString();
   }
+
   // Forge plugin-vite emits per-renderer dirs under `.vite/renderer/<name>/`.
-  const name = typeof MAIN_WINDOW_VITE_NAME !== "undefined" ? MAIN_WINDOW_VITE_NAME : "main_window";
-  const filePath = join(__dirname, "..", "renderer", name, "src", "renderer", "index.html");
-  return `file://${filePath}`;
+  const injectedRendererName =
+    typeof MAIN_WINDOW_VITE_NAME !== "undefined" ? MAIN_WINDOW_VITE_NAME : undefined;
+  const name = opts.rendererName ?? injectedRendererName ?? "main_window";
+  const baseDir = opts.baseDir ?? __dirname;
+  const filePath = join(baseDir, "..", "renderer", name, "src", "renderer", "index.html");
+  return pathToFileURL(filePath).toString();
 }
 
 /** Resolve the preload bundle path across Forge/Vite output variants. */
@@ -269,8 +285,11 @@ async function startup(): Promise<void> {
 
   // GUI mode: open the placeholder window. Real screens land in later sprints.
   const preloadPath = preloadEntryPath();
-  const win = createSecureWindow({ preloadPath, show: true }, BrowserWindow);
-  await win.loadURL(rendererEntryUrl());
+  const win = createSecureWindow({ preloadPath }, BrowserWindow);
+  win.once("ready-to-show", () => {
+    win.show();
+  });
+  await win.loadURL(expectedFrameUrl);
 }
 
 // Drain on every quit path so tests / dev cycles don't leave UDS files behind.

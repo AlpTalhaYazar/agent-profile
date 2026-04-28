@@ -88,7 +88,7 @@ env:
     await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "global-shared" })).toBeVisible();
     await expect(page.getByText("Effective preview")).toBeVisible();
-    await expect(page.getByText("EDITOR")).toBeVisible();
+    await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
 
     await page.getByPlaceholder("Value").first().fill("vim");
     await expect(page.getByText("Ready to save")).toBeVisible({ timeout: 10_000 });
@@ -100,7 +100,7 @@ env:
     await page.reload();
     await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
     await expect(page.getByPlaceholder("Value").first()).toHaveValue("vim", { timeout: 10_000 });
-    await expect(page.getByText("EDITOR")).toBeVisible();
+    await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
   } finally {
     await app.close();
     await rm(root, { recursive: true, force: true });

@@ -97,6 +97,7 @@ export function createSecureWindow(
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
     show: opts.show ?? false,
+    center: true,
     webPreferences,
   });
 }
