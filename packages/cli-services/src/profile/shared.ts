@@ -32,6 +32,8 @@ export interface ProfileScopeEntry {
   role: string | null;
   filePath: string;
   content: ScopeDocT | null;
+  /** Per-file read/parse/validation issues; absent when the file loaded cleanly. */
+  issues?: ProfileIssue[];
 }
 
 export interface ProfileDiffEntry {
@@ -289,11 +291,19 @@ function parseScopeContent(content: unknown): { value: unknown; issues: ProfileI
   }
 }
 
-function pushScope(entries: ProfileScopeEntry[], entry: Omit<ProfileScopeEntry, "content">): void {
+function pushScope(
+  entries: ProfileScopeEntry[],
+  entry: Omit<ProfileScopeEntry, "content" | "issues">
+): void {
   const filePath = resolve(entry.filePath);
-  if (existsAsFile(filePath)) {
-    entries.push({ ...entry, filePath, content: readScopeDoc(filePath) });
-  }
+  if (!existsAsFile(filePath)) return;
+  const { doc, issues } = readScopeDoc(filePath);
+  entries.push({
+    ...entry,
+    filePath,
+    content: doc,
+    ...(issues.length > 0 ? { issues } : {}),
+  });
 }
 
 function pushRoleEntries(
@@ -314,11 +324,14 @@ function pushRoleEntries(
   for (const file of roleFiles) {
     const role = file.endsWith(".yaml") ? file.slice(0, -5) : file.slice(0, -4);
     if (roleFilter && role !== roleFilter) continue;
+    const filePath = resolve(join(rolesDir, file));
+    const { doc, issues } = readScopeDoc(filePath);
     entries.push({
       scope,
       role,
-      filePath: resolve(join(rolesDir, file)),
-      content: readScopeDoc(join(rolesDir, file)),
+      filePath,
+      content: doc,
+      ...(issues.length > 0 ? { issues } : {}),
     });
   }
 }
@@ -327,12 +340,23 @@ function existsAsFile(filePath: string): boolean {
   return existsSync(filePath);
 }
 
-function readScopeDoc(filePath: string): ScopeDocT | null {
+function readScopeDoc(filePath: string): ParsedScopeContent {
+  let raw: string;
   try {
-    return validateScopeContent(readFileSync(filePath, "utf8")).doc;
-  } catch {
-    return null;
+    raw = readFileSync(filePath, "utf8");
+  } catch (err) {
+    return {
+      doc: null,
+      issues: [
+        {
+          path: "",
+          message: err instanceof Error ? err.message : String(err),
+          code: "io.read",
+        },
+      ],
+    };
   }
+  return validateScopeContent(raw);
 }
 
 function canonicalizeScopeDoc(doc: ScopeDocT): ScopeDocT {

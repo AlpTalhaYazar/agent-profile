@@ -456,6 +456,8 @@ const ProfileScopeEntry = z
     role: z.string().nullable(),
     filePath: z.string().min(1),
     content: z.unknown().nullable(),
+    /** Optional per-file read/parse/validation issues. Empty arrays are omitted. */
+    issues: z.array(ProfileIssue).optional(),
   })
   .strict();
 
