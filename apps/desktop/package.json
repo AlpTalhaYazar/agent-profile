@@ -4,7 +4,7 @@
   "private": true,
   "description": "Electron Main + Renderer host for the Agent Profile daemon and GUI.",
   "type": "module",
-  "main": ".vite/build/main.js",
+  "main": ".vite/build/main.cjs",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
@@ -12,6 +12,7 @@
     "verify-fuses": "node ./scripts/verify-fuses.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:e2e": "electron-forge package && playwright test --config test/e2e/playwright.config.ts",
     "test:watch": "vitest",
     "lint": "biome check src test scripts"
   },
@@ -22,13 +23,16 @@
     "@agent-profile/ipc-protocol": "workspace:*",
     "@agent-profile/persona-deployer": "workspace:*",
     "@agent-profile/secrets": "workspace:*",
-    "@agent-profile/ui": "workspace:*"
+    "@agent-profile/ui": "workspace:*",
+    "jotai": "^2.10.1",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.6.0",
     "@electron-forge/plugin-fuses": "^7.6.0",
     "@electron-forge/plugin-vite": "^7.6.0",
     "@electron/fuses": "^1.8.0",
+    "@playwright/test": "^1.49.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

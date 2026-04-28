@@ -1,5 +1,9 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Vite config for the Renderer (Chromium) bundle.
@@ -9,9 +13,18 @@ import { defineConfig } from "vite";
  * we wire up shadcn / Jotai; this round only ships a placeholder `index.tsx`.
  */
 export default defineConfig({
-  root: "src/renderer",
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@agent-profile/ui": resolve(__dirname, "../../packages/ui/src/index.ts"),
+    },
+  },
   build: {
+    rollupOptions: {
+      input: {
+        index: "src/renderer/index.html",
+      },
+    },
     target: "esnext",
     sourcemap: true,
   },
