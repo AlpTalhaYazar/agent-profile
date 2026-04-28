@@ -1,4 +1,4 @@
-import { CodeEditor } from "@agent-profile/ui";
+import { Button, CodeEditor, Field, Input, Select, Switch, cn } from "@agent-profile/ui";
 import { atom, useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
@@ -121,36 +121,6 @@ interface PreviewState {
 
 type JsonState = { text: string; parseError: null } | { text: string; parseError: string };
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "ghost";
-}
-
-interface FieldProps extends React.HTMLAttributes<HTMLDivElement> {
-  label: string;
-  description?: string;
-  error?: string | undefined;
-}
-
-interface SelectOption {
-  value: string;
-  label: string;
-}
-
-interface SelectProps {
-  value: string;
-  onValueChange: (value: string) => void;
-  options: SelectOption[];
-  disabled?: boolean;
-  className?: string;
-  "aria-label"?: string;
-}
-
-interface SwitchProps {
-  checked: boolean;
-  disabled?: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}
-
 const scopeEntriesAtom = atom<ScopeListEntry[]>([]);
 const authProfilesAtom = atom<AuthProfileOption[]>([]);
 const availableRolesAtom = atom<string[]>([]);
@@ -206,118 +176,6 @@ const issuesByPathAtom = atom((get) => {
   const issues = get(validationStateAtom).issues;
   return new Map(issues.map((issue) => [issue.path, issue.message]));
 });
-
-function cn(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
-}
-
-function Button({
-  className,
-  variant = "secondary",
-  type = "button",
-  ...props
-}: ButtonProps): React.ReactElement {
-  return (
-    <button
-      className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" &&
-          "border-neutral-950 bg-neutral-950 text-white hover:bg-neutral-800",
-        variant === "secondary" &&
-          "border-neutral-300 bg-white text-neutral-950 hover:bg-neutral-100",
-        variant === "ghost" &&
-          "border-transparent bg-transparent text-neutral-700 hover:bg-neutral-100",
-        className
-      )}
-      type={type}
-      {...props}
-    />
-  );
-}
-
-function Input({
-  className,
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement>): React.ReactElement {
-  return (
-    <input
-      className={cn(
-        "flex h-9 w-full rounded-md border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-950 shadow-sm transition-colors placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      {...props}
-    />
-  );
-}
-
-function Field({
-  label,
-  description,
-  error,
-  className,
-  children,
-  ...props
-}: FieldProps): React.ReactElement {
-  return (
-    <div className={cn("grid gap-1.5", className)} {...props}>
-      <div className="text-sm font-medium text-neutral-900">{label}</div>
-      {children}
-      {description ? <p className="text-xs text-neutral-500">{description}</p> : null}
-      {error ? <p className="text-xs font-medium text-red-700">{error}</p> : null}
-    </div>
-  );
-}
-
-function Select({
-  value,
-  onValueChange,
-  options,
-  disabled,
-  className,
-  "aria-label": ariaLabel,
-}: SelectProps): React.ReactElement {
-  return (
-    <select
-      aria-label={ariaLabel}
-      className={cn(
-        "inline-flex h-9 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
-      disabled={disabled}
-      onChange={(event) => onValueChange(event.target.value)}
-      value={value}
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Switch({ checked, disabled, onCheckedChange }: SwitchProps): React.ReactElement {
-  return (
-    <button
-      aria-checked={checked}
-      className={cn(
-        "inline-flex h-5 w-9 items-center rounded-full border border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-neutral-950" : "bg-neutral-300"
-      )}
-      disabled={disabled}
-      onClick={() => onCheckedChange(!checked)}
-      role="switch"
-      type="button"
-    >
-      <span
-        className={cn(
-          "mx-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-          checked ? "translate-x-4" : "translate-x-0"
-        )}
-      />
-    </button>
-  );
-}
 
 function App(): React.ReactElement {
   const [version, setVersion] = useAtom(versionAtom);
@@ -1261,7 +1119,7 @@ function FormEditor({
     <div className="divide-y divide-neutral-200">
       <section className="px-4 py-4">
         <div className="grid gap-4 xl:grid-cols-3">
-          <Field error={versionError} label="Version">
+          <Field {...(versionError !== undefined ? { error: versionError } : {})} label="Version">
             <Input
               disabled={disabled}
               onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1300,7 +1158,7 @@ function FormEditor({
         <div className="grid gap-4 xl:grid-cols-2">
           <Field
             description="Document-level environment entries."
-            error={envError}
+            {...(envError !== undefined ? { error: envError } : {})}
             label="Environment"
           >
             <KeyValueEditor
@@ -1316,7 +1174,7 @@ function FormEditor({
 
           <Field
             description="Compact JSON object merged into settings.json."
-            error={settingsError}
+            {...(settingsError !== undefined ? { error: settingsError } : {})}
             label="Settings"
           >
             <textarea
