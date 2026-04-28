@@ -170,17 +170,24 @@ export function assertAllowlistedScopePath(home: string, path: string): string {
   if (path.includes("\0")) {
     throw new ServiceError("config-invalid", `Refusing to save path with null byte`);
   }
-  const targetPath = resolveRealPath(resolve(path));
-  const globalRoot = join(globalConfigDirFor(home), "global");
+  const targetPath = resolve(path);
+  // Resolve symlinks for the security comparison so a symlink inside the
+  // allowlist cannot redirect writes outside it. Both sides of every check
+  // run through realpath so platform quirks (e.g. macOS /var → /private/var)
+  // don't cause false negatives. The returned path stays in the
+  // caller-supplied form so downstream IO operates on the address the user
+  // requested.
+  const checkPath = resolveRealPath(targetPath);
+  const globalRoot = resolveRealPath(join(globalConfigDirFor(home), "global"));
 
-  if (targetPath === join(globalRoot, "shared.yml")) return targetPath;
+  if (checkPath === join(globalRoot, "shared.yml")) return targetPath;
 
   const globalRolesDir = join(globalRoot, "roles");
-  if (dirname(targetPath) === globalRolesDir && targetPath.endsWith(".yml")) {
+  if (dirname(checkPath) === globalRolesDir && checkPath.endsWith(".yml")) {
     return targetPath;
   }
 
-  const segments = targetPath.split(sep);
+  const segments = checkPath.split(sep);
   const myClaudeIndex = segments.lastIndexOf(".myclaude");
   if (myClaudeIndex === -1) {
     throw new ServiceError(
