@@ -1,0 +1,11 @@
+version: 1
+env:
+  PROJECT_NAME: "acme-api"
+  DATABASE_URL: "postgres://localhost:5432/acme"
+mcpServers:
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem"]
+    env:
+      ROOTS: "/workspace/acme"
