@@ -9,10 +9,13 @@
  * constructor — we only care about the options we send through.
  */
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   type HardenedWebPreferences,
   assertHardening,
+  assertValidSenderFrame,
   createSecureWindow,
+  parseRendererPayload,
 } from "../src/main/security.js";
 
 interface StubWindow {
@@ -146,5 +149,36 @@ describe("assertHardening", () => {
 
   it("rejects a window with undefined webPreferences", () => {
     expect(() => assertHardening({ webPreferences: undefined })).toThrow(/is undefined/);
+  });
+});
+
+describe("renderer IPC security helpers", () => {
+  it("accepts a matching sender frame", () => {
+    expect(() =>
+      assertValidSenderFrame(
+        { senderFrame: { url: "file:///trusted/index.html" } } as never,
+        "file:///trusted/index.html",
+        "profile.show"
+      )
+    ).not.toThrow();
+  });
+
+  it("rejects a mismatched sender frame", () => {
+    expect(() =>
+      assertValidSenderFrame(
+        { senderFrame: { url: "https://evil.example" } } as never,
+        "file:///trusted/index.html",
+        "profile.show"
+      )
+    ).toThrow(/sender frame mismatch/);
+  });
+
+  it("parses valid renderer payloads", () => {
+    const parsed = parseRendererPayload(
+      z.object({ role: z.string() }).strict(),
+      { role: "backend" },
+      "profile.show"
+    );
+    expect(parsed).toEqual({ role: "backend" });
   });
 });

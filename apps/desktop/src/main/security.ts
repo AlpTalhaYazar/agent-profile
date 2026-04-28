@@ -28,6 +28,7 @@
  * grep / search and makes it trivial to enumerate which channels exist.
  */
 import type { BrowserWindow, BrowserWindowConstructorOptions, IpcMainInvokeEvent } from "electron";
+import type { ZodType } from "zod";
 
 /** Options accepted by {@link createSecureWindow}. */
 export interface CreateSecureWindowOpts {
@@ -168,4 +169,27 @@ export function validateSenderFrame(event: IpcMainInvokeEvent, expectedUrl: stri
   const frame = event.senderFrame;
   if (!frame) return false;
   return frame.url === expectedUrl;
+}
+
+/** Throw when a renderer IPC call does not originate from the trusted frame. */
+export function assertValidSenderFrame(
+  event: IpcMainInvokeEvent,
+  expectedUrl: string,
+  channel: string
+): void {
+  if (!validateSenderFrame(event, expectedUrl)) {
+    throw new Error(`${channel}: sender frame mismatch`);
+  }
+}
+
+/** Parse and validate a renderer IPC payload with a channel-specific error prefix. */
+export function parseRendererPayload<T>(schema: ZodType<T>, payload: unknown, channel: string): T {
+  const result = schema.safeParse(payload);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new Error(
+      `${channel}: invalid payload${issue ? ` at ${issue.path.join(".") || "(root)"}: ${issue.message}` : ""}`
+    );
+  }
+  return result.data;
 }

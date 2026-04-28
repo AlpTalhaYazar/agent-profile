@@ -30,16 +30,38 @@
  * content. Ignoring this check would let a compromised iframe call any
  * channel as if it were the trusted top-level frame.
  *
- * The single channel exposed in this round (`system.version`) demonstrates
- * the pattern; later channels copy the structure verbatim.
+ * The bridge stays narrow and capability-oriented. Renderer code gets a small
+ * method surface; all validation, filesystem access, and daemon transport stay
+ * in Main.
  */
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("myclaude", {
-  /**
-   * Return the app's `package.json` version. Backed by `app.getVersion()` in
-   * Main; the call goes through `system.version` and validates the sender
-   * frame on the Main side.
-   */
-  version: (): Promise<string> => ipcRenderer.invoke("system.version"),
+  system: {
+    version: (): Promise<string> => ipcRenderer.invoke("system.version"),
+    defaultCwd: (): Promise<string> => ipcRenderer.invoke("system.defaultCwd"),
+    pickDirectory: (): Promise<string | null> => ipcRenderer.invoke("system.pickDirectory"),
+  },
+  auth: {
+    list: (): Promise<unknown> => ipcRenderer.invoke("auth.list"),
+  },
+  profile: {
+    list: (opts: { cwd: string; roleFilter?: string }): Promise<unknown> =>
+      ipcRenderer.invoke("profile.list", opts),
+    show: (opts: {
+      role: string;
+      authProfileId: string;
+      cwd: string;
+    }): Promise<unknown> => ipcRenderer.invoke("profile.show", opts),
+    validate: (opts: { content: unknown }): Promise<unknown> =>
+      ipcRenderer.invoke("profile.validate", opts),
+    preview: (opts: {
+      role: string;
+      authProfileId: string;
+      cwd: string;
+      draft: { path: string; content: unknown };
+    }): Promise<unknown> => ipcRenderer.invoke("profile.preview", opts),
+    save: (opts: { path: string; content: unknown }): Promise<unknown> =>
+      ipcRenderer.invoke("profile.save", opts),
+  },
 });

@@ -12,22 +12,35 @@
  *      `MYCLAUDE_HEADLESS=1` was passed (placeholder Renderer this round).
  *   4. Drain the daemon on `before-quit`; remove the lockfile.
  *
- * The Renderer-facing IPC surface is currently `system.version` only; future
- * UI sprints add `auth.*`, `profile.*`, `sessions.*` channels here.
+ * The Renderer-facing IPC surface is a narrow `window.myclaude` bridge for
+ * read-only profile/auth flows plus `profile.save`.
  */
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defaultSocketPath } from "@agent-profile/ipc-protocol";
+import {
+  type DaemonClient,
+  type RespAuthListOkT,
+  type RespProfileListOkT,
+  type RespProfilePreviewOkT,
+  type RespProfileSaveOkT,
+  type RespProfileShowOkT,
+  type RespProfileValidateOkT,
+  connectToSocket,
+  defaultSocketPath,
+  readCookie,
+} from "@agent-profile/ipc-protocol";
 import { getBackend } from "@agent-profile/secrets";
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, safeStorage } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, safeStorage } from "electron";
+import { z } from "zod";
 import { AuditLog } from "./daemon/audit.js";
 import { buildCapabilityRegistry } from "./daemon/capability-registry.js";
 import { rotateBootCookie } from "./daemon/cookie.js";
 import { DaemonLifecycle } from "./daemon/lifecycle.js";
 import { buildSecretsStore } from "./daemon/secrets-store.js";
-import { createSecureWindow, validateSenderFrame } from "./security.js";
+import { assertValidSenderFrame, createSecureWindow, parseRendererPayload } from "./security.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,6 +49,42 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string | undefined;
 
 const SERVER_VERSION = "0.1.0";
+const STARTUP_CWD = process.cwd();
+const NoPayload = z.undefined();
+const AuthListPayload = NoPayload;
+const ProfileListPayload = z
+  .object({
+    cwd: z.string().min(1),
+    roleFilter: z.string().min(1).optional(),
+  })
+  .strict();
+const ProfileShowPayload = z
+  .object({
+    role: z.string().min(1),
+    authProfileId: z.string().min(1),
+    cwd: z.string().min(1),
+  })
+  .strict();
+const ProfileValidatePayload = z.object({ content: z.unknown() }).strict();
+const ProfilePreviewPayload = z
+  .object({
+    role: z.string().min(1),
+    authProfileId: z.string().min(1),
+    cwd: z.string().min(1),
+    draft: z
+      .object({
+        path: z.string().min(1),
+        content: z.unknown(),
+      })
+      .strict(),
+  })
+  .strict();
+const ProfileSavePayload = z
+  .object({
+    path: z.string().min(1),
+    content: z.unknown(),
+  })
+  .strict();
 
 /** Read once at startup; affects whether we create a window. */
 function isHeadless(argv: string[] = process.argv, env = process.env): boolean {
@@ -50,11 +99,128 @@ function rendererEntryUrl(): string {
   }
   // Forge plugin-vite emits per-renderer dirs under `.vite/renderer/<name>/`.
   const name = typeof MAIN_WINDOW_VITE_NAME !== "undefined" ? MAIN_WINDOW_VITE_NAME : "main_window";
-  const filePath = join(__dirname, "..", "renderer", name, "index.html");
+  const filePath = join(__dirname, "..", "renderer", name, "src", "renderer", "index.html");
   return `file://${filePath}`;
 }
 
+/** Resolve the preload bundle path across Forge/Vite output variants. */
+function preloadEntryPath(): string {
+  const namedPath = join(__dirname, "preload.cjs");
+  if (existsSync(namedPath)) return namedPath;
+  return join(__dirname, "index.js");
+}
+
 const lifecycle = new DaemonLifecycle();
+
+async function withDaemonClient<T>(
+  myClaudeHome: string,
+  clientVersion: string,
+  run: (client: DaemonClient) => Promise<T>
+): Promise<T> {
+  const cookie = await readCookie(myClaudeHome);
+  const client = await connectToSocket({
+    socketPath: defaultSocketPath(),
+    clientVersion,
+    cookie,
+  });
+  try {
+    return await run(client);
+  } finally {
+    client.close();
+  }
+}
+
+export function registerRendererIpcHandlers(opts: {
+  expectedFrameUrl: string;
+  myClaudeHome: string;
+  startupCwd?: string;
+}): void {
+  const { expectedFrameUrl, myClaudeHome, startupCwd = STARTUP_CWD } = opts;
+
+  ipcMain.handle("system.version", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "system.version");
+    parseRendererPayload(NoPayload, payload, "system.version");
+    return app.getVersion();
+  });
+
+  ipcMain.handle("system.defaultCwd", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "system.defaultCwd");
+    parseRendererPayload(NoPayload, payload, "system.defaultCwd");
+    return startupCwd;
+  });
+
+  ipcMain.handle("system.pickDirectory", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "system.pickDirectory");
+    parseRendererPayload(NoPayload, payload, "system.pickDirectory");
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const dialogOptions: { properties: Array<"openDirectory"> } = {
+      properties: ["openDirectory"],
+    };
+    const result = parentWindow
+      ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle("auth.list", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.list");
+    parseRendererPayload(AuthListPayload, payload, "auth.list");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespAuthListOkT>("auth.list", {});
+      return { profiles: resp.profiles };
+    });
+  });
+
+  ipcMain.handle("profile.list", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "profile.list");
+    const parsed = parseRendererPayload(ProfileListPayload, payload, "profile.list");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespProfileListOkT>("profile.list", parsed);
+      return { scopes: resp.scopes };
+    });
+  });
+
+  ipcMain.handle("profile.show", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "profile.show");
+    const parsed = parseRendererPayload(ProfileShowPayload, payload, "profile.show");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespProfileShowOkT>("profile.show", parsed);
+      return { effective: resp.effective, provenance: resp.provenance };
+    });
+  });
+
+  ipcMain.handle("profile.validate", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "profile.validate");
+    const parsed = parseRendererPayload(ProfileValidatePayload, payload, "profile.validate");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespProfileValidateOkT>("profile.validate", parsed);
+      return { issues: resp.issues };
+    });
+  });
+
+  ipcMain.handle("profile.preview", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "profile.preview");
+    const parsed = parseRendererPayload(ProfilePreviewPayload, payload, "profile.preview");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespProfilePreviewOkT>("profile.preview", parsed);
+      return {
+        issues: resp.issues,
+        current: resp.current,
+        preview: resp.preview,
+        diff: resp.diff,
+      };
+    });
+  });
+
+  ipcMain.handle("profile.save", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "profile.save");
+    const parsed = parseRendererPayload(ProfileSavePayload, payload, "profile.save");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespProfileSaveOkT>("profile.save", parsed);
+      return { saved: resp.saved, path: resp.path };
+    });
+  });
+}
 
 async function startup(): Promise<void> {
   // Per-user single-instance lock. If another Main is already running, exit 0
@@ -91,15 +257,8 @@ async function startup(): Promise<void> {
     },
   });
 
-  // Renderer-facing IPC surface (preload-only; Renderer reaches it via
-  // `contextBridge.exposeInMainWorld('myclaude', { version })`).
   const expectedFrameUrl = rendererEntryUrl();
-  ipcMain.handle("system.version", (event: IpcMainInvokeEvent) => {
-    if (!validateSenderFrame(event, expectedFrameUrl)) {
-      throw new Error("system.version: sender frame mismatch");
-    }
-    return app.getVersion();
-  });
+  registerRendererIpcHandlers({ expectedFrameUrl, myClaudeHome, startupCwd: STARTUP_CWD });
 
   if (isHeadless()) {
     // Headless: keep the Main process alive, daemon is serving requests, no
@@ -109,7 +268,7 @@ async function startup(): Promise<void> {
   }
 
   // GUI mode: open the placeholder window. Real screens land in later sprints.
-  const preloadPath = join(__dirname, "preload.cjs");
+  const preloadPath = preloadEntryPath();
   const win = createSecureWindow({ preloadPath, show: true }, BrowserWindow);
   await win.loadURL(rendererEntryUrl());
 }
@@ -131,8 +290,10 @@ app.on("window-all-closed", () => {
   // intentionally no-op
 });
 
-void startup().catch((err) => {
-  // Surface to stderr so Forge's start command shows the failure prominently.
-  process.stderr.write(`[agent-profile/desktop] startup failed: ${String(err)}\n`);
-  app.exit(1);
-});
+if (process.env.VITEST !== "true" && process.env.NODE_ENV !== "test") {
+  void startup().catch((err) => {
+    // Surface to stderr so Forge's start command shows the failure prominently.
+    process.stderr.write(`[agent-profile/desktop] startup failed: ${String(err)}\n`);
+    app.exit(1);
+  });
+}
