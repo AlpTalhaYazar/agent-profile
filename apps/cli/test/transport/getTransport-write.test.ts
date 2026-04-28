@@ -195,4 +195,56 @@ describe.skipIf(skipOnWindows)("write-side transport round-trips", () => {
       await transport.close();
     }
   });
+
+  it("sessionStart/sessionEnd round-trip and stay compatible with older daemons", async () => {
+    type StartCapture = { sessionId: string; pid: number };
+    type EndCapture = { sessionId: string };
+    const starts: StartCapture[] = [];
+    const ends: EndCapture[] = [];
+
+    await startServer({
+      "session.start": async (req) => {
+        starts.push(req as unknown as StartCapture);
+        return {
+          capabilityToken: "daemon-issued-token",
+          expiresAtMs: 123_456,
+        };
+      },
+      "session.end": async (req) => {
+        ends.push(req as unknown as EndCapture);
+        return {};
+      },
+    });
+
+    const transport = await getTransport({ home: myClaudeDir, attemptTimeoutMs: 2000 });
+    try {
+      const started = await transport.sessionStart({
+        sessionId: "session-123",
+        pid: 4242,
+        authProfileId: "work",
+      });
+      expect(started).toEqual({
+        capabilityToken: "daemon-issued-token",
+        expiresAtMs: 123_456,
+      });
+
+      await transport.sessionEnd({ sessionId: "session-123" });
+    } finally {
+      await transport.close();
+    }
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toEqual(
+      expect.objectContaining({
+        sessionId: "session-123",
+        pid: 4242,
+      })
+    );
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toEqual(
+      expect.objectContaining({
+        sessionId: "session-123",
+      })
+    );
+  });
 });

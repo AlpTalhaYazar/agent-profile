@@ -18,6 +18,8 @@ import type {
   RespDaemonStatusOkT,
   RespDaemonStopOkT,
   RespProfileShowOkT,
+  RespSessionEndOkT,
+  RespSessionStartOkT,
   RespSessionsListOkT,
   RespT,
 } from "@agent-profile/ipc-protocol";
@@ -40,6 +42,9 @@ import type {
   TransportProfileShowResult,
   TransportSecretsMigrateInput,
   TransportSecretsMigrateResult,
+  TransportSessionEndInput,
+  TransportSessionStartInput,
+  TransportSessionStartResult,
   TransportSessionsListInput,
 } from "./types.js";
 
@@ -185,6 +190,46 @@ export class DaemonTransport implements CliTransport {
       skipped: resp.skipped,
       errors: resp.errors,
     };
+  }
+
+  async sessionStart(input: TransportSessionStartInput): Promise<TransportSessionStartResult> {
+    const legacyBody: Record<string, unknown> = {
+      sessionId: input.sessionId,
+      pid: input.pid,
+    };
+    if (input.ttlMs !== undefined) legacyBody.ttlMs = input.ttlMs;
+
+    const preferredBody: Record<string, unknown> = { ...legacyBody };
+    if (input.authProfileId !== undefined) {
+      preferredBody.authProfileId = input.authProfileId;
+    }
+
+    try {
+      const resp = await this.client.request<RespSessionStartOkT>("session.start", preferredBody);
+      return {
+        capabilityToken: resp.capabilityToken,
+        expiresAtMs: resp.expiresAtMs,
+      };
+    } catch (err) {
+      if (
+        input.authProfileId !== undefined &&
+        err instanceof IpcError &&
+        err.code === "BAD_REQUEST"
+      ) {
+        const resp = await this.requestSafe<RespSessionStartOkT>("session.start", legacyBody);
+        return {
+          capabilityToken: resp.capabilityToken,
+          expiresAtMs: resp.expiresAtMs,
+        };
+      }
+      throw mapIpcError(err);
+    }
+  }
+
+  async sessionEnd(input: TransportSessionEndInput): Promise<void> {
+    await this.requestSafe<RespSessionEndOkT>("session.end", {
+      sessionId: input.sessionId,
+    });
   }
 
   async close(): Promise<void> {

@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runLaunch } from "../../src/commands/launch/index.js";
+import type { ClaudeChildProcess } from "../../src/commands/launch/spawn.js";
+import type { CliTransport } from "../../src/transport/types.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
 function makeTempDir(): string {
@@ -84,6 +86,114 @@ function writeStubClaude(binDir: string): void {
   );
 }
 
+function createFakeChild(
+  result:
+    | { kind: "close"; code: number | null; signal: NodeJS.Signals | null }
+    | { kind: "error"; error: Error }
+): ClaudeChildProcess {
+  class FakeChild implements ClaudeChildProcess {
+    private readonly closeListeners: Array<
+      (code: number | null, signal: NodeJS.Signals | null) => void
+    > = [];
+    private readonly errorListeners: Array<(err: Error) => void> = [];
+    private settled = false;
+
+    kill(_signal: NodeJS.Signals): boolean {
+      return true;
+    }
+
+    on(
+      event: "close",
+      listener: (code: number | null, signal: NodeJS.Signals | null) => void
+    ): this;
+    on(event: "error", listener: (err: Error) => void): this;
+    on(
+      event: "close" | "error",
+      listener:
+        | ((code: number | null, signal: NodeJS.Signals | null) => void)
+        | ((err: Error) => void)
+    ): this {
+      if (event === "close") {
+        this.closeListeners.push(
+          listener as (code: number | null, signal: NodeJS.Signals | null) => void
+        );
+      } else {
+        this.errorListeners.push(listener as (err: Error) => void);
+      }
+      this.maybeSettle();
+      return this;
+    }
+
+    private maybeSettle(): void {
+      if (this.settled) return;
+      if (result.kind === "close" && this.closeListeners.length > 0) {
+        this.settled = true;
+        queueMicrotask(() => {
+          for (const listener of this.closeListeners) {
+            listener(result.code, result.signal);
+          }
+        });
+      } else if (result.kind === "error" && this.errorListeners.length > 0) {
+        this.settled = true;
+        queueMicrotask(() => {
+          for (const listener of this.errorListeners) {
+            listener(result.error);
+          }
+        });
+      }
+    }
+  }
+
+  return new FakeChild();
+}
+
+function createTransportStub(overrides: Partial<CliTransport>): CliTransport {
+  return {
+    transportKind: "standalone",
+    authList: async () => {
+      throw new Error("Unexpected transport.authList call");
+    },
+    authGetSecretRef: async () => {
+      throw new Error("Unexpected transport.authGetSecretRef call");
+    },
+    profileShow: async () => {
+      throw new Error("Unexpected transport.profileShow call");
+    },
+    sessionsList: async () => {
+      throw new Error("Unexpected transport.sessionsList call");
+    },
+    daemonStatus: async () => {
+      throw new Error("Unexpected transport.daemonStatus call");
+    },
+    daemonStop: async () => {
+      throw new Error("Unexpected transport.daemonStop call");
+    },
+    authAdd: async () => {
+      throw new Error("Unexpected transport.authAdd call");
+    },
+    authSetSecret: async () => {
+      throw new Error("Unexpected transport.authSetSecret call");
+    },
+    authRotate: async () => {
+      throw new Error("Unexpected transport.authRotate call");
+    },
+    authRemove: async () => {
+      throw new Error("Unexpected transport.authRemove call");
+    },
+    secretsMigrate: async () => {
+      throw new Error("Unexpected transport.secretsMigrate call");
+    },
+    sessionStart: async () => {
+      throw new Error("Unexpected transport.sessionStart call");
+    },
+    sessionEnd: async () => {
+      throw new Error("Unexpected transport.sessionEnd call");
+    },
+    close: async () => {},
+    ...overrides,
+  };
+}
+
 describe("runLaunch integration with a stub claude binary", () => {
   let tempDir = "";
 
@@ -93,7 +203,7 @@ describe("runLaunch integration with a stub claude binary", () => {
     vi.restoreAllMocks();
   });
 
-  it("emits a session, spawns stub claude with env/args, and cleans up", async () => {
+  it("falls back to the standalone token when no daemon transport is available", async () => {
     tempDir = makeTempDir();
     const home = join(tempDir, "home", ".myclaude");
     const cwd = join(tempDir, "repo");
@@ -165,6 +275,117 @@ describe("runLaunch integration with a stub claude binary", () => {
     expect(record.spawn.args).toContain("--bare");
     expect(JSON.stringify(record)).not.toContain("fixed-token");
     expect(JSON.stringify(record)).not.toContain("remote-secret-value");
+  });
+
+  it("uses the daemon-issued token for spawn env and session manifest, then ends the session once", async () => {
+    tempDir = makeTempDir();
+    const home = join(tempDir, "home", ".myclaude");
+    const cwd = join(tempDir, "repo");
+    const sessionsRoot = join(tempDir, "sessions");
+    mkdirSync(cwd, { recursive: true });
+    writeFixtureHome(home);
+
+    const backend = new MockBackend("keychain-macos")
+      .seed("agent-profile.github.work", "ghp-work-value")
+      .seed("agent-profile.remote.token", "remote-secret-value");
+
+    const sessionStart = vi.fn(
+      async (input: { sessionId: string; pid: number; authProfileId?: string }) => ({
+        capabilityToken: "daemon-signed-token",
+        expiresAtMs: 123,
+      })
+    );
+    const sessionEnd = vi.fn(async (_input: { sessionId: string }) => {});
+    const transport = createTransportStub({
+      transportKind: "daemon",
+      sessionStart,
+      sessionEnd,
+    });
+
+    let spawnedToken: string | undefined;
+    let manifestToken: string | undefined;
+
+    const exitCode = await runLaunch({
+      role: "backend",
+      auth: "work",
+      home,
+      cwd,
+      sessionsRoot,
+      backend,
+      tokenGenerator: () => "fixed-token",
+      transport,
+      callerPid: 4242,
+      spawnFn: (_command, _args, options) => {
+        spawnedToken = options.env.MYCLAUDE_CAPABILITY_TOKEN;
+        const sessionDir = dirname(String(options.env.CLAUDE_CONFIG_DIR));
+        manifestToken = JSON.parse(readFileSync(join(sessionDir, "session.json"), "utf8"))
+          .capabilityToken as string;
+        return createFakeChild({ kind: "close", code: 0, signal: null });
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(spawnedToken).toBe("daemon-signed-token");
+    expect(manifestToken).toBe("daemon-signed-token");
+    expect(sessionStart).toHaveBeenCalledTimes(1);
+    expect(sessionStart).toHaveBeenCalledWith({
+      sessionId: expect.any(String),
+      pid: 4242,
+      authProfileId: "work",
+    });
+    expect(sessionEnd).toHaveBeenCalledTimes(1);
+    expect(sessionEnd).toHaveBeenCalledWith({
+      sessionId: sessionStart.mock.calls[0]?.[0].sessionId,
+    });
+  });
+
+  it("ends a daemon-started session when spawn fails before claude launches", async () => {
+    tempDir = makeTempDir();
+    const home = join(tempDir, "home", ".myclaude");
+    const cwd = join(tempDir, "repo");
+    const sessionsRoot = join(tempDir, "sessions");
+    mkdirSync(cwd, { recursive: true });
+    writeFixtureHome(home);
+
+    const backend = new MockBackend("keychain-macos")
+      .seed("agent-profile.github.work", "ghp-work-value")
+      .seed("agent-profile.remote.token", "remote-secret-value");
+
+    const sessionStart = vi.fn(
+      async (input: { sessionId: string; pid: number; authProfileId?: string }) => ({
+        capabilityToken: "daemon-signed-token",
+        expiresAtMs: 123,
+      })
+    );
+    const sessionEnd = vi.fn(async (_input: { sessionId: string }) => {});
+    const transport = createTransportStub({
+      transportKind: "daemon",
+      sessionStart,
+      sessionEnd,
+    });
+
+    await expect(
+      runLaunch({
+        role: "backend",
+        auth: "work",
+        home,
+        cwd,
+        sessionsRoot,
+        backend,
+        transport,
+        spawnFn: () => {
+          throw new Error("spawn boom");
+        },
+      })
+    ).rejects.toMatchObject({
+      message: "Failed to launch claude: spawn boom",
+    });
+
+    expect(sessionStart).toHaveBeenCalledTimes(1);
+    expect(sessionEnd).toHaveBeenCalledTimes(1);
+    expect(sessionEnd).toHaveBeenCalledWith({
+      sessionId: sessionStart.mock.calls[0]?.[0].sessionId,
+    });
   });
 
   it("dry-run emits secret-safe JSON and does not spawn claude", async () => {

@@ -33,6 +33,8 @@ import {
   updateSessionRecord,
   writeSessionRecord,
 } from "../../session/registry.js";
+import { getTransport } from "../../transport/index.js";
+import type { CliTransport } from "../../transport/types.js";
 import { globalConfigDir, globalFragmentsDir } from "../../utils/paths.js";
 import { buildClaudeLaunchArgs } from "./env.js";
 import { type ClaudeSpawnFn, spawnClaude } from "./spawn.js";
@@ -62,6 +64,8 @@ export interface LaunchOptions {
   spawnFn?: ClaudeSpawnFn;
   tokenGenerator?: () => string;
   onMissingSource?: DeployPersonaOpts["onMissingSource"];
+  transport?: CliTransport;
+  callerPid?: number;
 }
 
 /**
@@ -108,11 +112,22 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
   const strict = opts.strict ?? true;
   const bare = opts.bare ?? false;
   const command = opts.claudeCommand ?? "claude";
+  const transportOptions: Parameters<typeof getTransport>[0] = {
+    standalone: env.MYCLAUDE_FORCE_STANDALONE === "1",
+  };
+  if (opts.home !== undefined) {
+    transportOptions.home = opts.home;
+  }
+  const transport = opts.transport ?? (await getTransport(transportOptions));
+  const transportOwnedByLaunch = opts.transport === undefined;
   const session = await createSessionDir({ root: sessionsRoot });
-  const capabilityToken = opts.tokenGenerator?.() ?? generateCapabilityToken();
+  const standaloneCapabilityToken = opts.tokenGenerator?.() ?? generateCapabilityToken();
+  let capabilityToken = standaloneCapabilityToken;
   let exitCode = 0;
   let primaryError: unknown;
   let recordWritten = false;
+  let daemonSessionStarted = false;
+  let daemonSessionEnded = false;
   const startedAtMs = Date.now();
 
   try {
@@ -128,6 +143,17 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
       emitInput.onMissingSource = opts.onMissingSource;
     }
     const artifacts = await emitSessionArtifacts(emitInput);
+
+    if (!opts.dryRun && transport.transportKind === "daemon") {
+      const started = await transport.sessionStart({
+        sessionId: session.sessionId,
+        pid: opts.callerPid ?? process.pid,
+        authProfileId: activation.auth,
+      });
+      capabilityToken = started.capabilityToken;
+      daemonSessionStarted = true;
+    }
+
     const spawnArgs = buildClaudeLaunchArgs(artifacts.runtimePaths, {
       strict,
       bare,
@@ -225,23 +251,41 @@ export async function runLaunch(opts: LaunchOptions = {}): Promise<number> {
     }
     throw err;
   } finally {
-    if (opts.dryRun && primaryError === undefined) {
-      process.stderr.write(`Dry-run session kept at ${session.sessionDir}\n`);
-    } else if (retainSession) {
-      process.stderr.write(`Session kept at ${session.sessionDir}\n`);
-    } else {
-      await cleanupAfterLaunch(session.sessionDir, sessionsRoot, primaryError, exitCode);
-      if (recordWritten) {
-        await updateSessionRecord({
-          sessionsRoot,
+    try {
+      if (daemonSessionStarted && !daemonSessionEnded) {
+        daemonSessionEnded = true;
+        await endDaemonSession({
+          transport,
           sessionId: session.sessionId,
-          patch: {
-            cleaned: true,
-            updatedAt: new Date().toISOString(),
-          },
-        }).catch(() => {
-          // Cleanup already happened; do not mask the launch result.
+          primaryError,
+          exitCode,
         });
+      }
+    } finally {
+      try {
+        if (opts.dryRun && primaryError === undefined) {
+          process.stderr.write(`Dry-run session kept at ${session.sessionDir}\n`);
+        } else if (retainSession) {
+          process.stderr.write(`Session kept at ${session.sessionDir}\n`);
+        } else {
+          await cleanupAfterLaunch(session.sessionDir, sessionsRoot, primaryError, exitCode);
+          if (recordWritten) {
+            await updateSessionRecord({
+              sessionsRoot,
+              sessionId: session.sessionId,
+              patch: {
+                cleaned: true,
+                updatedAt: new Date().toISOString(),
+              },
+            }).catch(() => {
+              // Cleanup already happened; do not mask the launch result.
+            });
+          }
+        }
+      } finally {
+        if (transportOwnedByLaunch) {
+          await transport.close();
+        }
       }
     }
   }
@@ -554,5 +598,22 @@ async function cleanupAfterLaunch(
       throw new CliError(`Failed to clean up session directory: ${message}`, EXIT_GENERIC);
     }
     process.stderr.write(`Failed to clean up session directory: ${message}\n`);
+  }
+}
+
+async function endDaemonSession(input: {
+  transport: CliTransport;
+  sessionId: string;
+  primaryError: unknown;
+  exitCode: number;
+}): Promise<void> {
+  try {
+    await input.transport.sessionEnd({ sessionId: input.sessionId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (input.primaryError === undefined && input.exitCode === 0) {
+      throw new CliError(`Failed to end daemon session: ${message}`, EXIT_GENERIC);
+    }
+    process.stderr.write(`Failed to end daemon session: ${message}\n`);
   }
 }

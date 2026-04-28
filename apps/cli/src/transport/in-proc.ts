@@ -18,6 +18,7 @@ import {
   sessionsListService,
 } from "@agent-profile/cli-services";
 import { CliError, EXIT_DAEMON_UNREACHABLE } from "../errors.js";
+import { generateCapabilityToken } from "../session/manifest.js";
 import type {
   CliTransport,
   TransportAuthAddInput,
@@ -36,6 +37,9 @@ import type {
   TransportProfileShowResult,
   TransportSecretsMigrateInput,
   TransportSecretsMigrateResult,
+  TransportSessionEndInput,
+  TransportSessionStartInput,
+  TransportSessionStartResult,
   TransportSessionsListInput,
 } from "./types.js";
 
@@ -148,6 +152,17 @@ export class InProcTransport implements CliTransport {
       EXIT_DAEMON_UNREACHABLE,
       "Start the daemon with `myclaude daemon start` and try again."
     );
+  }
+
+  async sessionStart(_input: TransportSessionStartInput): Promise<TransportSessionStartResult> {
+    return {
+      capabilityToken: generateCapabilityToken(),
+      expiresAtMs: Date.now() + 60_000,
+    };
+  }
+
+  async sessionEnd(_input: TransportSessionEndInput): Promise<void> {
+    // Standalone sessions are cleaned up locally; there is no daemon state to revoke.
   }
 
   async close(): Promise<void> {

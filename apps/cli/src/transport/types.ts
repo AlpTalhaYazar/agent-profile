@@ -153,6 +153,29 @@ export interface TransportSecretsMigrateResult {
   errors: { key: string; reason: string }[];
 }
 
+/** Input for `transport.sessionStart`. */
+export interface TransportSessionStartInput {
+  sessionId: string;
+  pid: number;
+  ttlMs?: number;
+  /**
+   * Reserved for newer daemons that bind capabilities to a specific auth profile.
+   * Older daemons may reject it; the daemon transport handles that compatibility.
+   */
+  authProfileId?: string;
+}
+
+/** Result of `transport.sessionStart`. */
+export interface TransportSessionStartResult {
+  capabilityToken: string;
+  expiresAtMs: number;
+}
+
+/** Input for `transport.sessionEnd`. */
+export interface TransportSessionEndInput {
+  sessionId: string;
+}
+
 /** Result of `transport.daemonStatus`. Identical shape to `RespDaemonStatusOk` body. */
 export interface TransportDaemonStatusResult {
   pid: number;
@@ -196,6 +219,10 @@ export interface CliTransport {
   authRemove(input: TransportAuthRemoveInput): Promise<TransportAuthRemoveResult>;
 
   secretsMigrate(input: TransportSecretsMigrateInput): Promise<TransportSecretsMigrateResult>;
+
+  sessionStart(input: TransportSessionStartInput): Promise<TransportSessionStartResult>;
+
+  sessionEnd(input: TransportSessionEndInput): Promise<void>;
 
   /** Release any underlying connection. Idempotent and safe to call on either transport. */
   close(): Promise<void>;
