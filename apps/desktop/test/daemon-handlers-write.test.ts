@@ -109,6 +109,25 @@ describe("daemon write handlers", () => {
     });
   }
 
+  it("profile.save validates content and writes to allowlisted project scope paths", async () => {
+    const handler = build()["profile.save"];
+    if (!handler) throw new Error("missing handler");
+    const targetPath = join(home, "repo", ".myclaude", "shared.yml");
+    const body = await handler(
+      req("profile.save", {
+        path: targetPath,
+        content: {
+          version: 1,
+          env: { EDITOR: "nvim" },
+        },
+      }),
+      ctx
+    );
+
+    expect(body).toEqual({ saved: true, path: targetPath });
+    expect(await readFile(targetPath, "utf8")).toContain("EDITOR: nvim");
+  });
+
   it("auth.add stores the encrypted secret and writes the metadata file", async () => {
     const handler = build()["auth.add"];
     if (!handler) throw new Error("missing handler");

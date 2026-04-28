@@ -7,8 +7,8 @@
  * CLI and desktop daemon share. Returns the raw `EffectiveSessionConfig` —
  * formatting, JSON encoding, and secret resolution all live in callers.
  */
-import { type EffectiveSessionConfig, resolve as coreResolve } from "@agent-profile/core";
-import { globalConfigDirFor, globalFragmentsDirFor } from "../paths.js";
+import type { EffectiveSessionConfig } from "@agent-profile/core";
+import { resolveCurrentProfile } from "./shared.js";
 
 /**
  * Input options for `profileShowService`.
@@ -41,14 +41,10 @@ export interface ProfileShowInput {
  */
 export function profileShowService(input: ProfileShowInput): EffectiveSessionConfig {
   const { role, authProfileId, cwd, home } = input;
-
-  const resolveInput: Parameters<typeof coreResolve>[0] = {
+  return resolveCurrentProfile({
     role,
     cwd,
-    globalConfigDir: globalConfigDirFor(home),
-    fragmentDirs: [globalFragmentsDirFor(home)],
-  };
-  if (authProfileId !== undefined) resolveInput.authProfileId = authProfileId;
-
-  return coreResolve(resolveInput);
+    home,
+    ...(authProfileId !== undefined ? { authProfileId } : {}),
+  });
 }

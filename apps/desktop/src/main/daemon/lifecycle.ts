@@ -42,6 +42,10 @@ function sessionsRootFor(home: string): string {
   return join(home, ".myclaude", "sessions");
 }
 
+function sessionsRootForMyClaude(myClaudeHome: string): string {
+  return join(myClaudeHome, "sessions");
+}
+
 /** Options for {@link DaemonLifecycle.start}. */
 export interface LifecycleStartOpts {
   /** Filesystem socket path (POSIX) or `\\.\pipe\...` (Windows). */
@@ -92,6 +96,7 @@ interface DaemonLockFile {
 export class DaemonLifecycle {
   private server: DaemonServer | null = null;
   private home: string = homedir();
+  private myClaudeHome: string = join(homedir(), ".myclaude");
   private pid: number = process.pid;
   private socketPath = "";
   private startedAtMs = 0;
@@ -114,10 +119,13 @@ export class DaemonLifecycle {
       throw new Error("DaemonLifecycle.start called twice");
     }
     this.home = opts.home ?? homedir();
+    this.myClaudeHome = opts.writeHandlers?.myClaudeHome ?? join(this.home, ".myclaude");
     this.pid = opts.pid ?? process.pid;
     this.socketPath = opts.socketPath;
     this.startedAtMs = opts.nowMs ?? Date.now();
-    this.sessionsRoot = sessionsRootFor(this.home);
+    this.sessionsRoot = opts.writeHandlers
+      ? sessionsRootForMyClaude(this.myClaudeHome)
+      : sessionsRootFor(this.home);
     if (opts.requestShutdown) {
       this.requestShutdownImpl = opts.requestShutdown;
     }
@@ -139,6 +147,9 @@ export class DaemonLifecycle {
       "auth.list",
       "auth.get-secret-ref",
       "profile.show",
+      "profile.list",
+      "profile.validate",
+      "profile.preview",
       "sessions.list",
       "daemon.status",
       "daemon.stop",
@@ -149,6 +160,7 @@ export class DaemonLifecycle {
         "auth.setSecret",
         "auth.rotate",
         "auth.remove",
+        "profile.save",
         "session.start",
         "session.end",
         "secret.get",
@@ -216,7 +228,7 @@ export class DaemonLifecycle {
    * diagnostics ("which pid is the daemon?") and for future tooling.
    */
   private async writeLockFile(): Promise<void> {
-    const dir = join(this.home, ".myclaude");
+    const dir = this.myClaudeHome;
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const payload: DaemonLockFile = {
       pid: this.pid,
@@ -231,7 +243,7 @@ export class DaemonLifecycle {
 
   private async removeLockFile(): Promise<void> {
     try {
-      await rm(join(this.home, ".myclaude", "daemon.lock"), { force: true });
+      await rm(join(this.myClaudeHome, "daemon.lock"), { force: true });
     } catch {
       // best-effort
     }

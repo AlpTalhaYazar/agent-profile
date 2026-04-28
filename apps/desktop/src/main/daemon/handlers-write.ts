@@ -26,7 +26,12 @@
  */
 
 import type { CapabilityIssuer, CapabilityVerifier } from "@agent-profile/capability";
-import { ServiceError, loadAuthProfiles, saveAuthProfiles } from "@agent-profile/cli-services";
+import {
+  ServiceError,
+  loadAuthProfiles,
+  profileSaveService,
+  saveAuthProfiles,
+} from "@agent-profile/cli-services";
 import type { AuthProfilesDocT } from "@agent-profile/core";
 import {
   type Handler,
@@ -36,6 +41,7 @@ import {
   type ReqAuthRemoveT,
   type ReqAuthRotateT,
   type ReqAuthSetSecretT,
+  type ReqProfileSaveT,
   type ReqSecretGetT,
   type ReqSecretsMigrateT,
   type ReqSessionEndT,
@@ -89,6 +95,15 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
   const now = deps.now ?? ((): number => Date.now());
 
   return {
+    "profile.save": wrap<ReqProfileSaveT>(async (req) => {
+      const result = profileSaveService({
+        home: deps.myClaudeHome,
+        path: req.path,
+        content: req.content,
+      });
+      return { saved: result.saved, path: result.path };
+    }),
+
     "auth.add": wrap<ReqAuthAddT>(async (req) => {
       const { spec, anthropicSecretB64, force } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
@@ -378,7 +393,12 @@ function wrap<TReq>(fn: (req: TReq) => Promise<Record<string, unknown>>): Handle
     } catch (err) {
       if (err instanceof IpcError) throw err;
       if (err instanceof ServiceError) {
-        const code = err.code === "not-found" ? "NOT_FOUND" : "BAD_REQUEST";
+        const code =
+          err.code === "not-found"
+            ? "NOT_FOUND"
+            : err.code === "io-error"
+              ? "INTERNAL"
+              : "BAD_REQUEST";
         throw new IpcError(code, err.message);
       }
       const reason = err instanceof Error ? err.message : "internal error";

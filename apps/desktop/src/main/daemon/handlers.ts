@@ -33,12 +33,18 @@ import {
   type AuthGetSecretRefResult,
   type AuthListResult,
   type DaemonStatus,
+  type ProfileListResult,
+  type ProfilePreviewResult,
+  type ProfileValidateResult,
   ServiceError,
   type SessionRecord,
   authGetSecretRefService,
   authListService,
   daemonStatusService,
+  profileListService,
+  profilePreviewService,
   profileShowService,
+  profileValidateService,
   sessionsListService,
 } from "@agent-profile/cli-services";
 import {
@@ -48,7 +54,10 @@ import {
   type ReqAuthGetSecretRefT,
   type ReqAuthListT,
   type ReqDaemonStatusT,
+  type ReqProfileListT,
+  type ReqProfilePreviewT,
   type ReqProfileShowT,
+  type ReqProfileValidateT,
   type ReqSessionsListT,
 } from "@agent-profile/ipc-protocol";
 import { type WriteHandlerDeps, createWriteHandlers } from "./handlers-write.js";
@@ -108,7 +117,7 @@ export function createHandlers(
   userHome: string = homedir(),
   writeDeps?: WriteHandlerDeps
 ): HandlerMap {
-  const myClaudeHome = myClaudeHomeFor(userHome);
+  const myClaudeHome = writeDeps?.myClaudeHome ?? myClaudeHomeFor(userHome);
 
   const readHandlers: HandlerMap = {
     "auth.list": wrap<ReqAuthListT>(async (req) => {
@@ -152,6 +161,38 @@ export function createHandlers(
         // together; today we only have one object so we re-publish it under
         // both fields. ST-F's `profile show` consumer only reads `effective`.
         provenance: (effective as { provenance?: unknown }).provenance ?? null,
+      };
+    }),
+
+    "profile.list": wrap<ReqProfileListT>(async (req) => {
+      const result: ProfileListResult = profileListService({
+        home: myClaudeHome,
+        cwd: req.cwd,
+        ...(req.roleFilter !== undefined ? { roleFilter: req.roleFilter } : {}),
+      });
+      return { scopes: result.scopes };
+    }),
+
+    "profile.validate": wrap<ReqProfileValidateT>(async (req) => {
+      const result: ProfileValidateResult = profileValidateService({
+        content: req.content,
+      });
+      return { issues: result.issues };
+    }),
+
+    "profile.preview": wrap<ReqProfilePreviewT>(async (req) => {
+      const result: ProfilePreviewResult = profilePreviewService({
+        home: myClaudeHome,
+        role: req.role,
+        authProfileId: req.authProfileId,
+        cwd: req.cwd,
+        draft: req.draft,
+      });
+      return {
+        issues: result.issues,
+        current: result.current,
+        preview: result.preview,
+        diff: result.diff,
       };
     }),
 
@@ -202,7 +243,12 @@ function wrap<TReq>(fn: (req: TReq) => Promise<Record<string, unknown>>): Handle
       return await fn(req as TReq);
     } catch (err) {
       if (err instanceof ServiceError) {
-        const code = err.code === "not-found" ? "NOT_FOUND" : "BAD_REQUEST";
+        const code =
+          err.code === "not-found"
+            ? "NOT_FOUND"
+            : err.code === "io-error"
+              ? "INTERNAL"
+              : "BAD_REQUEST";
         throw new IpcError(code, err.message);
       }
       // Generic failure — keep the reason short to avoid leaking internals.

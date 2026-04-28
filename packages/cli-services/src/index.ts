@@ -46,7 +46,27 @@ export {
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
+export {
+  profileListService,
+  type ProfileListInput,
+  type ProfileListResult,
+} from "./profile/list.js";
+export {
+  profilePreviewService,
+  type ProfilePreviewInput,
+  type ProfilePreviewResult,
+} from "./profile/preview.js";
+export {
+  profileSaveService,
+  type ProfileSaveInput,
+  type ProfileSaveResult,
+} from "./profile/save.js";
 export { profileShowService, type ProfileShowInput } from "./profile/show.js";
+export {
+  profileValidateService,
+  type ProfileValidateInput,
+  type ProfileValidateResult,
+} from "./profile/validate.js";
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 

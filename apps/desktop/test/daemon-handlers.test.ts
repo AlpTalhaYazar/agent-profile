@@ -153,6 +153,90 @@ authProfiles:
     }
   });
 
+  it("profile.list returns discovered scope entries", async () => {
+    await mkdir(join(home, ".myclaude", "config", "global", "roles"), { recursive: true });
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "shared.yml"),
+      "version: 1\nenv:\n  EDITOR: nvim\n"
+    );
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "roles", "backend.yml"),
+      "version: 1\nenv:\n  NODE_ENV: development\n"
+    );
+
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["profile.list"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(
+      req("profile.list", { cwd: home, roleFilter: "backend" }),
+      ctx
+    )) as {
+      scopes: Array<{ scope: string; role: string | null; filePath: string; content: unknown }>;
+    };
+
+    expect(body.scopes.map((entry) => [entry.scope, entry.role])).toEqual([
+      ["global-shared", null],
+      ["global-role", "backend"],
+    ]);
+    expect(body.scopes[0]?.content).toMatchObject({ version: 1, env: { EDITOR: "nvim" } });
+  });
+
+  it("profile.validate returns schema issues without throwing", async () => {
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["profile.validate"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(req("profile.validate", { content: { version: 2 } }), ctx)) as {
+      issues: Array<{ path: string; code: string }>;
+    };
+
+    expect(body.issues).toHaveLength(1);
+    expect(body.issues[0]).toMatchObject({ path: "version", code: "invalid_value" });
+  });
+
+  it("profile.preview returns an effective diff for a valid draft", async () => {
+    const projectDir = join(home, "repo");
+    await mkdir(join(home, ".myclaude", "config", "global", "roles"), { recursive: true });
+    await mkdir(join(projectDir, ".myclaude", "roles"), { recursive: true });
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "shared.yml"),
+      "version: 1\nenv:\n  EDITOR: nvim\n"
+    );
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "roles", "backend.yml"),
+      "version: 1\nenv:\n  NODE_ENV: development\n"
+    );
+    await writeFile(
+      join(projectDir, ".myclaude", "roles", "backend.yml"),
+      "version: 1\nenv:\n  PROJECT_DB_POOL: '20'\n"
+    );
+
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["profile.preview"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(
+      req("profile.preview", {
+        role: "backend",
+        authProfileId: "work",
+        cwd: projectDir,
+        draft: {
+          path: join(projectDir, ".myclaude", "roles", "backend.yml"),
+          content: "version: 1\nenv:\n  PROJECT_DB_POOL: '30'\n",
+        },
+      }),
+      ctx
+    )) as { issues: unknown[]; diff: Array<{ path: string; after?: unknown }> };
+
+    expect(body.issues).toEqual([]);
+    expect(body.diff).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "env.PROJECT_DB_POOL",
+          after: "30",
+        }),
+      ])
+    );
+  });
+
   // ─── sessions.list ────────────────────────────────────────────────────────
 
   it("sessions.list returns an empty array when registry dir is absent", async () => {

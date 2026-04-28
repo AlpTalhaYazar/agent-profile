@@ -10,7 +10,11 @@ import {
   ReqDaemonStatus,
   ReqDaemonStop,
   ReqHello,
+  ReqProfileList,
+  ReqProfilePreview,
+  ReqProfileSave,
   ReqProfileShow,
+  ReqProfileValidate,
   ReqSecretGet,
   ReqSecretsMigrate,
   ReqSessionEnd,
@@ -27,7 +31,11 @@ import {
   RespDaemonStopOk,
   RespError,
   RespHelloOk,
+  RespProfileListOk,
+  RespProfilePreviewOk,
+  RespProfileSaveOk,
   RespProfileShowOk,
+  RespProfileValidateOk,
   RespSecretGetOk,
   RespSecretsMigrateOk,
   RespSessionEndOk,
@@ -140,6 +148,69 @@ describe("Req schemas", () => {
     });
   });
 
+  describe("ReqProfileList", () => {
+    it("accepts with no filters", () => {
+      const result = ReqProfileList.safeParse({
+        id: "c-4a",
+        kind: "profile.list",
+        cwd: "/repo",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts a role filter", () => {
+      const result = ReqProfileList.safeParse({
+        id: "c-4a",
+        kind: "profile.list",
+        cwd: "/repo",
+        roleFilter: "backend",
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("ReqProfileValidate", () => {
+    it("accepts unknown content payloads", () => {
+      const result = ReqProfileValidate.safeParse({
+        id: "c-4b",
+        kind: "profile.validate",
+        content: "version: 1",
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("ReqProfilePreview", () => {
+    it("accepts a draft path + content payload", () => {
+      const result = ReqProfilePreview.safeParse({
+        id: "c-4c",
+        kind: "profile.preview",
+        role: "backend",
+        authProfileId: "work",
+        cwd: "/repo",
+        draft: {
+          path: "/repo/.myclaude/roles/backend.yml",
+          content: { version: 1 },
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects when draft.path is missing", () => {
+      const result = ReqProfilePreview.safeParse({
+        id: "c-4c",
+        kind: "profile.preview",
+        role: "backend",
+        authProfileId: "work",
+        cwd: "/repo",
+        draft: {
+          content: { version: 1 },
+        },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe("ReqSessionsList", () => {
     it("accepts with no fields", () => {
       const result = ReqSessionsList.safeParse({ id: "c-5", kind: "sessions.list" });
@@ -168,6 +239,18 @@ describe("Req schemas", () => {
         id: "c-7",
         kind: "daemon.stop",
         force: true,
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("ReqProfileSave", () => {
+    it("accepts a target path + content payload", () => {
+      const result = ReqProfileSave.safeParse({
+        id: "c-7a",
+        kind: "profile.save",
+        path: "/repo/.myclaude/shared.yml",
+        content: { version: 1 },
       });
       expect(result.success).toBe(true);
     });
@@ -269,6 +352,62 @@ describe("Resp schemas", () => {
     });
   });
 
+  describe("RespProfileListOk", () => {
+    it("accepts discovered scope entries", () => {
+      const result = RespProfileListOk.safeParse({
+        id: "c-4a",
+        kind: "profile.list.ok",
+        scopes: [
+          {
+            scope: "global-shared",
+            role: null,
+            filePath: "/tmp/shared.yml",
+            content: { version: 1 },
+          },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("RespProfileValidateOk", () => {
+    it("accepts validation issues", () => {
+      const result = RespProfileValidateOk.safeParse({
+        id: "c-4b",
+        kind: "profile.validate.ok",
+        issues: [{ path: "mcpServers.github", message: "Invalid input", code: "invalid_type" }],
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("RespProfilePreviewOk", () => {
+    it("accepts current/preview payloads and compact diffs", () => {
+      const result = RespProfilePreviewOk.safeParse({
+        id: "c-4c",
+        kind: "profile.preview.ok",
+        issues: [],
+        current: {
+          effective: { env: { NODE_ENV: "development" } },
+          provenance: {},
+        },
+        preview: {
+          effective: { env: { NODE_ENV: "production" } },
+          provenance: {},
+        },
+        diff: [
+          {
+            path: "env.NODE_ENV",
+            change: "changed",
+            before: "development",
+            after: "production",
+          },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
   describe("RespSessionsListOk", () => {
     it("accepts an array of unknown sessions", () => {
       const result = RespSessionsListOk.safeParse({
@@ -309,6 +448,18 @@ describe("Resp schemas", () => {
   describe("RespDaemonStopOk", () => {
     it("accepts a bare stop ok", () => {
       const result = RespDaemonStopOk.safeParse({ id: "c-7", kind: "daemon.stop.ok" });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("RespProfileSaveOk", () => {
+    it("accepts a successful save result", () => {
+      const result = RespProfileSaveOk.safeParse({
+        id: "c-7a",
+        kind: "profile.save.ok",
+        saved: true,
+        path: "/repo/.myclaude/shared.yml",
+      });
       expect(result.success).toBe(true);
     });
   });

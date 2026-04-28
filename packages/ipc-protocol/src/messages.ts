@@ -83,6 +83,52 @@ export const ReqProfileShow = z
   })
   .strict();
 
+/** Request the discovered scope files visible from the given cwd. */
+export const ReqProfileList = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.list"),
+    cwd: z.string().min(1),
+    roleFilter: z.string().min(1).optional(),
+  })
+  .strict();
+
+/** Validate a draft scope document without writing it to disk. */
+export const ReqProfileValidate = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.validate"),
+    content: z.unknown(),
+  })
+  .strict();
+
+/** Preview a draft scope document as a highest-precedence launch override. */
+export const ReqProfilePreview = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.preview"),
+    role: z.string().min(1),
+    authProfileId: z.string().min(1),
+    cwd: z.string().min(1),
+    draft: z
+      .object({
+        path: z.string().min(1),
+        content: z.unknown(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/** Save a scope document to an allowlisted path. */
+export const ReqProfileSave = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.save"),
+    path: z.string().min(1),
+    content: z.unknown(),
+  })
+  .strict();
+
 /** Request to list active and recent sessions tracked by the daemon. */
 export const ReqSessionsList = z
   .object({
@@ -270,9 +316,13 @@ export const Req = z.discriminatedUnion("kind", [
   ReqAuthList,
   ReqAuthGetSecretRef,
   ReqProfileShow,
+  ReqProfileList,
+  ReqProfileValidate,
+  ReqProfilePreview,
   ReqSessionsList,
   ReqDaemonStatus,
   ReqDaemonStop,
+  ReqProfileSave,
   ReqAuthAdd,
   ReqAuthSetSecret,
   ReqAuthRotate,
@@ -294,12 +344,20 @@ export type ReqAuthListT = z.infer<typeof ReqAuthList>;
 export type ReqAuthGetSecretRefT = z.infer<typeof ReqAuthGetSecretRef>;
 /** Static type for `profile.show` requests. */
 export type ReqProfileShowT = z.infer<typeof ReqProfileShow>;
+/** Static type for `profile.list` requests. */
+export type ReqProfileListT = z.infer<typeof ReqProfileList>;
+/** Static type for `profile.validate` requests. */
+export type ReqProfileValidateT = z.infer<typeof ReqProfileValidate>;
+/** Static type for `profile.preview` requests. */
+export type ReqProfilePreviewT = z.infer<typeof ReqProfilePreview>;
 /** Static type for `sessions.list` requests. */
 export type ReqSessionsListT = z.infer<typeof ReqSessionsList>;
 /** Static type for `daemon.status` requests. */
 export type ReqDaemonStatusT = z.infer<typeof ReqDaemonStatus>;
 /** Static type for `daemon.stop` requests. */
 export type ReqDaemonStopT = z.infer<typeof ReqDaemonStop>;
+/** Static type for `profile.save` requests. */
+export type ReqProfileSaveT = z.infer<typeof ReqProfileSave>;
 /** Static type for `auth.add` requests (write-side). */
 export type ReqAuthAddT = z.infer<typeof ReqAuthAdd>;
 /** Static type for `auth.setSecret` requests (write-side). */
@@ -384,6 +442,69 @@ export const RespProfileShowOk = z
   })
   .strict();
 
+const ProfileIssue = z
+  .object({
+    path: z.string(),
+    message: z.string().min(1),
+    code: z.string().min(1),
+  })
+  .strict();
+
+const ProfileScopeEntry = z
+  .object({
+    scope: z.string().min(1),
+    role: z.string().nullable(),
+    filePath: z.string().min(1),
+    content: z.unknown().nullable(),
+  })
+  .strict();
+
+const ProfilePreviewPayload = z
+  .object({
+    effective: z.unknown(),
+    provenance: z.unknown(),
+  })
+  .strict();
+
+const ProfileDiffEntry = z
+  .object({
+    path: z.string().min(1),
+    change: z.enum(["added", "removed", "changed"]),
+    before: z.unknown().optional(),
+    after: z.unknown().optional(),
+  })
+  .strict();
+
+/** Response to `profile.list`. */
+export const RespProfileListOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.list.ok"),
+    scopes: z.array(ProfileScopeEntry),
+  })
+  .strict();
+
+/** Response to `profile.validate`. */
+export const RespProfileValidateOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.validate.ok"),
+    issues: z.array(ProfileIssue),
+  })
+  .strict();
+
+/** Response to `profile.preview`. */
+export const RespProfilePreviewOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.preview.ok"),
+    issues: z.array(ProfileIssue),
+    current: ProfilePreviewPayload,
+    preview: ProfilePreviewPayload.nullable(),
+    diff: z.array(ProfileDiffEntry),
+  })
+  .strict();
+
 /**
  * Response to `sessions.list`.
  *
@@ -420,6 +541,16 @@ export const RespDaemonStopOk = z
   .object({
     id: z.string().min(1),
     kind: z.literal("daemon.stop.ok"),
+  })
+  .strict();
+
+/** Response to `profile.save`. */
+export const RespProfileSaveOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("profile.save.ok"),
+    saved: z.literal(true),
+    path: z.string().min(1),
   })
   .strict();
 
@@ -542,9 +673,13 @@ export const Resp = z.discriminatedUnion("kind", [
   RespAuthListOk,
   RespAuthGetSecretRefOk,
   RespProfileShowOk,
+  RespProfileListOk,
+  RespProfileValidateOk,
+  RespProfilePreviewOk,
   RespSessionsListOk,
   RespDaemonStatusOk,
   RespDaemonStopOk,
+  RespProfileSaveOk,
   RespError,
   RespAuthAddOk,
   RespAuthSetSecretOk,
@@ -567,12 +702,20 @@ export type RespAuthListOkT = z.infer<typeof RespAuthListOk>;
 export type RespAuthGetSecretRefOkT = z.infer<typeof RespAuthGetSecretRefOk>;
 /** Static type for `profile.show.ok` responses. */
 export type RespProfileShowOkT = z.infer<typeof RespProfileShowOk>;
+/** Static type for `profile.list.ok` responses. */
+export type RespProfileListOkT = z.infer<typeof RespProfileListOk>;
+/** Static type for `profile.validate.ok` responses. */
+export type RespProfileValidateOkT = z.infer<typeof RespProfileValidateOk>;
+/** Static type for `profile.preview.ok` responses. */
+export type RespProfilePreviewOkT = z.infer<typeof RespProfilePreviewOk>;
 /** Static type for `sessions.list.ok` responses. */
 export type RespSessionsListOkT = z.infer<typeof RespSessionsListOk>;
 /** Static type for `daemon.status.ok` responses. */
 export type RespDaemonStatusOkT = z.infer<typeof RespDaemonStatusOk>;
 /** Static type for `daemon.stop.ok` responses. */
 export type RespDaemonStopOkT = z.infer<typeof RespDaemonStopOk>;
+/** Static type for `profile.save.ok` responses. */
+export type RespProfileSaveOkT = z.infer<typeof RespProfileSaveOk>;
 /** Static type for transport-level `error` responses. */
 export type RespErrorT = z.infer<typeof RespError>;
 /** Static type for `auth.add.ok` responses. */
@@ -591,6 +734,14 @@ export type RespSessionEndOkT = z.infer<typeof RespSessionEndOk>;
 export type RespSecretGetOkT = z.infer<typeof RespSecretGetOk>;
 /** Static type for `secrets.migrate.ok` responses. */
 export type RespSecretsMigrateOkT = z.infer<typeof RespSecretsMigrateOk>;
+/** Static type for a profile validation issue. */
+export type ProfileIssueT = z.infer<typeof ProfileIssue>;
+/** Static type for a discovered scope entry. */
+export type ProfileScopeEntryT = z.infer<typeof ProfileScopeEntry>;
+/** Static type for a preview payload. */
+export type ProfilePreviewPayloadT = z.infer<typeof ProfilePreviewPayload>;
+/** Static type for a compact preview diff entry. */
+export type ProfileDiffEntryT = z.infer<typeof ProfileDiffEntry>;
 
 /** Closed enum of error codes the IPC layer is allowed to emit. */
 export type IpcErrorCode = RespErrorT["code"];
