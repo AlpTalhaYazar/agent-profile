@@ -167,7 +167,7 @@ export async function listOrphanedSessions(
     const createdAtMs = s.mtimeMs;
     const ageMs = now - createdAtMs;
 
-    if (ageMs >= olderThanMs) {
+    if (olderThanMs <= 0 || ageMs >= olderThanMs) {
       results.push({ sessionId: entry, sessionDir, createdAtMs, ageMs });
     }
   }
