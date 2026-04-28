@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -166,7 +167,10 @@ export function assertValidScopeDoc(content: unknown): ScopeDocT {
 }
 
 export function assertAllowlistedScopePath(home: string, path: string): string {
-  const targetPath = resolve(path);
+  if (path.includes("\0")) {
+    throw new ServiceError("config-invalid", `Refusing to save path with null byte`);
+  }
+  const targetPath = resolveRealPath(resolve(path));
   const globalRoot = join(globalConfigDirFor(home), "global");
 
   if (targetPath === join(globalRoot, "shared.yml")) return targetPath;
@@ -206,6 +210,29 @@ export function assertAllowlistedScopePath(home: string, path: string): string {
     "config-invalid",
     `Refusing to save outside an allowlisted scope: ${path}`
   );
+}
+
+/**
+ * Resolve symlinks before allowlist comparison so a symlink placed inside an
+ * allowlisted directory cannot redirect writes to a path the caller never
+ * intended. Falls back to the input path when realpath fails (typical when
+ * neither the file nor its parent directory exists yet).
+ */
+function resolveRealPath(targetPath: string): string {
+  try {
+    return realpathSync.native(targetPath);
+  } catch {
+    // File does not exist yet — resolve the deepest existing ancestor and
+    // re-attach the trailing segments so symlink hops in the parent chain are
+    // still followed.
+    const parent = dirname(targetPath);
+    if (parent === targetPath) return targetPath;
+    try {
+      return join(realpathSync.native(parent), basename(targetPath));
+    } catch {
+      return targetPath;
+    }
+  }
 }
 
 export function writeCanonicalScopeFile(path: string, doc: ScopeDocT): void {
