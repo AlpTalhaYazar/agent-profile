@@ -25,6 +25,19 @@
 export { getBackend, isBackendSecure } from "./backend/detect.js";
 export type { Backend, KeychainBackend } from "./backend/types.js";
 
+// ─── safeStorage backend + migrator (Phase 2 milestone 3) ─────────────────────
+
+export {
+  SafeStorageStore,
+  createSafeStorageStore,
+  type SafeStorageStoreOptions,
+} from "./backend/safe-storage.js";
+export {
+  migrateKeyringToSafeStorage,
+  type MigrationReport,
+  type MigrationOptions,
+} from "./migration/keyring-to-safe.js";
+
 // ─── CRUD against the keychain ────────────────────────────────────────────────
 
 export { getSecret, setSecret, removeSecret, listSecretKeys, hasSecret } from "./store.js";

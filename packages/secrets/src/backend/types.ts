@@ -21,6 +21,7 @@ export type KeychainBackend =
   | "credential-manager"
   | "libsecret"
   | "kwallet"
+  | "safe-storage"
   | "basic-text"
   | "unavailable";
 
@@ -78,4 +79,16 @@ export interface Backend {
    * @returns An array of matching key names.
    */
   list(prefix: string): Promise<string[]>;
+
+  /**
+   * Optional fast-path existence check.
+   *
+   * Backends MAY implement this to avoid round-tripping a value through
+   * decryption purely to test whether a key is set. Callers that need
+   * portability across backends should fall back to `(await get(k)) !== null`
+   * when `has` is missing.
+   *
+   * @param key - The namespaced key to test.
+   */
+  has?(key: string): Promise<boolean>;
 }
