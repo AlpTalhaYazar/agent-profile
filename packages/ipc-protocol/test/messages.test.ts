@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  EvtSessionsEvent,
+  Frame,
   Req,
   ReqAuthAdd,
   ReqAuthGetSecretRef,
@@ -19,7 +21,11 @@ import {
   ReqSecretsMigrate,
   ReqSessionEnd,
   ReqSessionStart,
+  ReqSessionsDrift,
+  ReqSessionsKill,
   ReqSessionsList,
+  ReqSessionsRelaunch,
+  ReqSessionsSubscribe,
   Resp,
   RespAuthAddOk,
   RespAuthGetSecretRefOk,
@@ -40,7 +46,12 @@ import {
   RespSecretsMigrateOk,
   RespSessionEndOk,
   RespSessionStartOk,
+  RespSessionsDriftOk,
+  RespSessionsKillOk,
   RespSessionsListOk,
+  RespSessionsRelaunchOk,
+  RespSessionsSubscribeOk,
+  SessionRecordEnrichment,
 } from "../src/messages.js";
 
 describe("Req schemas", () => {
@@ -934,5 +945,315 @@ describe("wire never contains plaintext secrets", () => {
     expect(json).toContain(SECRET_B64);
     expect(json).not.toContain(SECRET);
     expect(RespSecretGetOk.safeParse(msg).success).toBe(true);
+  });
+});
+
+// ─── Session monitor (Phase 2 milestone 5) ───────────────────────────────────
+
+describe("ReqSessionsKill", () => {
+  it("accepts a minimal kill request", () => {
+    const r = ReqSessionsKill.safeParse({
+      id: "c-1",
+      kind: "sessions.kill",
+      sessionId: "s-1",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an explicit signal", () => {
+    const r = ReqSessionsKill.safeParse({
+      id: "c-1",
+      kind: "sessions.kill",
+      sessionId: "s-1",
+      signal: "SIGKILL",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown signal", () => {
+    const r = ReqSessionsKill.safeParse({
+      id: "c-1",
+      kind: "sessions.kill",
+      sessionId: "s-1",
+      signal: "SIGUSR1",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects an empty sessionId", () => {
+    const r = ReqSessionsKill.safeParse({
+      id: "c-1",
+      kind: "sessions.kill",
+      sessionId: "",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("ReqSessionsRelaunch", () => {
+  it("accepts a valid relaunch request", () => {
+    const r = ReqSessionsRelaunch.safeParse({
+      id: "c-2",
+      kind: "sessions.relaunch",
+      sessionId: "s-1",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an empty sessionId", () => {
+    const r = ReqSessionsRelaunch.safeParse({
+      id: "c-2",
+      kind: "sessions.relaunch",
+      sessionId: "",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("ReqSessionsDrift", () => {
+  it("accepts a valid drift request", () => {
+    const r = ReqSessionsDrift.safeParse({
+      id: "c-3",
+      kind: "sessions.drift",
+      sessionId: "s-1",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a missing sessionId", () => {
+    const r = ReqSessionsDrift.safeParse({
+      id: "c-3",
+      kind: "sessions.drift",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("ReqSessionsSubscribe", () => {
+  it("accepts a no-body request", () => {
+    const r = ReqSessionsSubscribe.safeParse({
+      id: "c-4",
+      kind: "sessions.subscribe",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects extra fields (strict)", () => {
+    const r = ReqSessionsSubscribe.safeParse({
+      id: "c-4",
+      kind: "sessions.subscribe",
+      channel: "sessions",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespSessionsKillOk", () => {
+  it("accepts kill ok without exitCode", () => {
+    const r = RespSessionsKillOk.safeParse({
+      id: "c-1",
+      kind: "sessions.kill.ok",
+      killed: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts kill ok with exitCode", () => {
+    const r = RespSessionsKillOk.safeParse({
+      id: "c-1",
+      kind: "sessions.kill.ok",
+      killed: true,
+      exitCode: 0,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects missing killed", () => {
+    const r = RespSessionsKillOk.safeParse({
+      id: "c-1",
+      kind: "sessions.kill.ok",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespSessionsRelaunchOk", () => {
+  it("accepts a full relaunch ok payload", () => {
+    const r = RespSessionsRelaunchOk.safeParse({
+      id: "c-2",
+      kind: "sessions.relaunch.ok",
+      sessionId: "s-2",
+      capabilityToken: "tok",
+      expiresAtMs: 1_700_000_000,
+      relaunchedFrom: "s-1",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects missing relaunchedFrom", () => {
+    const r = RespSessionsRelaunchOk.safeParse({
+      id: "c-2",
+      kind: "sessions.relaunch.ok",
+      sessionId: "s-2",
+      capabilityToken: "tok",
+      expiresAtMs: 1_700_000_000,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespSessionsDriftOk", () => {
+  it("accepts drift=false with empty scopesChanged", () => {
+    const r = RespSessionsDriftOk.safeParse({
+      id: "c-3",
+      kind: "sessions.drift.ok",
+      drifted: false,
+      scopesChanged: [],
+      oldHash: "abc",
+      newHash: "abc",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts drift=true with populated scopesChanged", () => {
+    const r = RespSessionsDriftOk.safeParse({
+      id: "c-3",
+      kind: "sessions.drift.ok",
+      drifted: true,
+      scopesChanged: ["~/.myclaude/config/global/shared.yml"],
+      oldHash: "abc",
+      newHash: "def",
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("RespSessionsSubscribeOk", () => {
+  it("accepts subscribed:true ack", () => {
+    const r = RespSessionsSubscribeOk.safeParse({
+      id: "c-4",
+      kind: "sessions.subscribe.ok",
+      subscribed: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects subscribed:false (literal true required)", () => {
+    const r = RespSessionsSubscribeOk.safeParse({
+      id: "c-4",
+      kind: "sessions.subscribe.ok",
+      subscribed: false,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("EvtSessionsEvent", () => {
+  it.each(["started", "idle", "exited", "killed", "drifted"] as const)(
+    "accepts event=%s",
+    (event) => {
+      const r = EvtSessionsEvent.safeParse({
+        kind: "sessions.event",
+        sessionId: "s-1",
+        event,
+        ts: 1_700_000_000,
+      });
+      expect(r.success).toBe(true);
+    }
+  );
+
+  it("accepts an event with exitCode", () => {
+    const r = EvtSessionsEvent.safeParse({
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "exited",
+      exitCode: 137,
+      ts: 1_700_000_000,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown event variant", () => {
+    const r = EvtSessionsEvent.safeParse({
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "paused",
+      ts: 1_700_000_000,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects an event with an id field", () => {
+    // Events are unsolicited and never carry an `id`. Strict() forbids one.
+    const r = EvtSessionsEvent.safeParse({
+      id: "c-1",
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "started",
+      ts: 1_700_000_000,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a missing ts", () => {
+    const r = EvtSessionsEvent.safeParse({
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "started",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("Frame union", () => {
+  it("parses a typical response frame", () => {
+    const r = Frame.safeParse({
+      id: "c-9",
+      kind: "auth.list.ok",
+      profiles: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("parses an event frame", () => {
+    const r = Frame.safeParse({
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "killed",
+      ts: 1,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects an unknown kind", () => {
+    const r = Frame.safeParse({
+      kind: "auth.list",
+      profiles: [],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("SessionRecordEnrichment narrower", () => {
+  it("accepts a record with all enrichment fields", () => {
+    const r = SessionRecordEnrichment.safeParse({
+      sessionId: "s-1",
+      liveCapability: true,
+      capabilityExpiresAtMs: 1_700_000_000,
+      processAlive: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a record without enrichment fields (legacy / standalone)", () => {
+    const r = SessionRecordEnrichment.safeParse({ sessionId: "s-1" });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects negative capabilityExpiresAtMs", () => {
+    const r = SessionRecordEnrichment.safeParse({
+      capabilityExpiresAtMs: -1,
+    });
+    expect(r.success).toBe(false);
   });
 });

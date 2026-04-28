@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { MAX_LINE_BYTES, MessageDecoder, encodeMessage } from "../src/codec.js";
-import type { ReqT } from "../src/messages.js";
+import type { EvtT, ReqT } from "../src/messages.js";
 
 function makeStream(): Readable {
   return new Readable({
@@ -33,6 +33,45 @@ describe("encodeMessage", () => {
       name: big,
     } as ReqT;
     expect(() => encodeMessage(msg)).toThrow(/MAX_LINE_BYTES/);
+  });
+
+  it("round-trips a push event frame without an id", async () => {
+    const evt: EvtT = {
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "killed",
+      ts: 1_700_000_000,
+    };
+    const encoded = encodeMessage(evt);
+    expect(encoded[encoded.length - 1]).toBe(0x0a);
+    const line = encoded.subarray(0, encoded.length - 1).toString("utf8");
+    expect(line).not.toContain('"id"');
+    const decoded = JSON.parse(line);
+    expect(decoded).toEqual(evt);
+  });
+
+  it("decodes a push event frame as a regular line", async () => {
+    const stream = makeStream();
+    const messages: unknown[] = [];
+    const decoder = new MessageDecoder({
+      stream,
+      onMessage: (m) => messages.push(m),
+      onError: () => {
+        throw new Error("unexpected error");
+      },
+    });
+
+    const evt: EvtT = {
+      kind: "sessions.event",
+      sessionId: "s-1",
+      event: "drifted",
+      ts: 42,
+    };
+    stream.push(encodeMessage(evt));
+    await new Promise((r) => setImmediate(r));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(evt);
+    decoder.close();
   });
 });
 

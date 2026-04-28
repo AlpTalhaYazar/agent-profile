@@ -26,7 +26,7 @@
  */
 
 import type { Readable } from "node:stream";
-import type { ReqT, RespT } from "./messages.js";
+import type { EvtT, ReqT, RespT } from "./messages.js";
 
 /**
  * Maximum encoded byte length for a single NDJSON line, including the trailing
@@ -40,18 +40,22 @@ import type { ReqT, RespT } from "./messages.js";
 export const MAX_LINE_BYTES = 1_048_576;
 
 /**
- * Serialize a request or response into a single NDJSON line.
+ * Serialize a request, response, or event frame into a single NDJSON line.
  *
  * Throws synchronously if the encoded line (including the trailing `\n`) would
  * exceed {@link MAX_LINE_BYTES}. Callers should treat such an error as a
  * programmer bug — if you are sending a message that big, the wire shape needs
  * to change.
  *
- * @param msg - Any valid {@link ReqT} or {@link RespT} object.
+ * Event frames ({@link EvtT}) are encoded without an `id` field. The codec
+ * intentionally accepts the union without re-validating against the schema —
+ * the message-routing layer above (client/server) owns Zod validation.
+ *
+ * @param msg - Any valid {@link ReqT}, {@link RespT}, or {@link EvtT} object.
  * @returns A `Buffer` containing the JSON-stringified message followed by `\n`.
  * @throws {Error} When the encoded line exceeds {@link MAX_LINE_BYTES}.
  */
-export function encodeMessage(msg: ReqT | RespT): Buffer {
+export function encodeMessage(msg: ReqT | RespT | EvtT): Buffer {
   const json = JSON.stringify(msg);
   const buf = Buffer.from(`${json}\n`, "utf8");
   if (buf.byteLength > MAX_LINE_BYTES) {

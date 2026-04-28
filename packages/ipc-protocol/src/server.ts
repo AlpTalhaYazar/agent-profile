@@ -29,7 +29,17 @@ import * as net from "node:net";
 import { MessageDecoder, encodeMessage } from "./codec.js";
 import { IpcError } from "./errors.js";
 import { negotiateVersion, validateCookie } from "./handshake.js";
-import { type IpcErrorCode, Req, type ReqT, type RespErrorT, type RespT } from "./messages.js";
+import {
+  type EvtT,
+  type IpcErrorCode,
+  Req,
+  type ReqT,
+  type RespErrorT,
+  type RespT,
+} from "./messages.js";
+
+/** Push channels a connection can subscribe to. */
+type SubscriptionChannel = "sessions";
 
 /** Mapping from request kind to its `*.ok` response kind. */
 const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
@@ -52,6 +62,10 @@ const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
   "session.end": "session.end.ok",
   "secret.get": "secret.get.ok",
   "secrets.migrate": "secrets.migrate.ok",
+  "sessions.kill": "sessions.kill.ok",
+  "sessions.relaunch": "sessions.relaunch.ok",
+  "sessions.drift": "sessions.drift.ok",
+  "sessions.subscribe": "sessions.subscribe.ok",
 };
 
 /**
@@ -116,6 +130,13 @@ export interface DrainOptions {
 export { IpcError } from "./errors.js";
 
 /**
+ * Predicate evaluated for each subscribed connection during a broadcast.
+ *
+ * Receives the connection's socket; returning `false` skips that connection.
+ */
+export type BroadcastPredicate = (ctx: { socket: net.Socket }) => boolean;
+
+/**
  * Daemon-side IPC server.
  *
  * Single-instance. Construct one per running daemon.
@@ -124,6 +145,15 @@ export class DaemonServer {
   private readonly opts: DaemonServerOptions;
   private readonly server: net.Server;
   private readonly connections: Set<ConnectionState> = new Set();
+  /**
+   * Per-channel subscriber sets.
+   *
+   * Populated by the framework-owned `sessions.subscribe` handler when a
+   * connection asks to receive push frames; entries are removed in
+   * `handleConnection`'s `close` listener so a disconnected client never sits
+   * in the broadcast loop.
+   */
+  private readonly subscribers: Map<SubscriptionChannel, Set<ConnectionState>> = new Map();
   private inFlight = 0;
   private started = false;
   private closing = false;
@@ -184,14 +214,15 @@ export class DaemonServer {
     this.closing = true;
     const drainMs = opts.drainMs ?? 2000;
 
-    // Stop accepting new connections.
-    await new Promise<void>((resolve) => {
+    // Tell the listener to stop accepting new connections, but **do not
+    // await** the close callback yet — `net.Server.close`'s callback fires
+    // only after every existing socket has gone, and we still need to
+    // force-destroy lingering subscribers below. Awaiting first would
+    // deadlock the drain on idle subscribers.
+    const closePromise = new Promise<void>((resolve) => {
       this.server.close(() => {
         resolve();
       });
-      // `close` doesn't fire until all existing sockets are gone, so we'll
-      // close the sockets explicitly below. The promise still resolves once
-      // `net.Server` reports the listener gone.
     });
 
     // Wait for in-flight handlers up to `drainMs`.
@@ -200,11 +231,17 @@ export class DaemonServer {
       await new Promise((r) => setTimeout(r, 25));
     }
 
-    // Force-close any lingering connections.
+    // Force-close any lingering connections (idle subscribers, slow handlers,
+    // etc.). With every socket destroyed, the listener-close callback above
+    // will fire on the next tick.
     for (const conn of this.connections) {
       conn.destroy();
     }
     this.connections.clear();
+    this.subscribers.clear();
+
+    // Now safe to await the listener-close callback.
+    await closePromise;
 
     // Best-effort unlink. Windows pipes don't have a filesystem entry to remove.
     if (process.platform !== "win32") {
@@ -216,12 +253,73 @@ export class DaemonServer {
     }
   }
 
+  /**
+   * Broadcast an event frame to every connection currently subscribed to its
+   * matching channel.
+   *
+   * The channel is derived from the event's `kind` discriminator —
+   * `sessions.event` routes to the `"sessions"` subscriber set. Connections
+   * that fail to write are detached and destroyed; a single bad peer never
+   * blocks the rest of the broadcast.
+   *
+   * Optionally filter the recipient set with `predicate` (e.g. to skip the
+   * connection that triggered the event). The predicate runs after the
+   * subscription check.
+   *
+   * @param evt - The event frame to send. Must validate against {@link EvtT}.
+   * @param predicate - Optional filter applied to each candidate connection.
+   * @returns The number of connections the frame was successfully written to.
+   */
+  broadcast(evt: EvtT, predicate?: BroadcastPredicate): number {
+    const channel = channelForEvent(evt);
+    const subs = this.subscribers.get(channel);
+    if (!subs || subs.size === 0) return 0;
+
+    let encoded: Buffer;
+    try {
+      encoded = encodeMessage(evt);
+    } catch {
+      // Encoding failure (e.g. MAX_LINE_BYTES) is a programmer bug at the
+      // caller. We swallow it here so a single bad event cannot tear down
+      // every subscriber.
+      return 0;
+    }
+
+    let delivered = 0;
+    // Snapshot to a copy so a write-time `destroy()` mutating `subs` doesn't
+    // invalidate the iterator.
+    for (const conn of Array.from(subs)) {
+      const sock = conn.getSocket();
+      if (predicate && !predicate({ socket: sock })) continue;
+      if (conn.isClosed() || sock.destroyed) {
+        subs.delete(conn);
+        continue;
+      }
+      try {
+        sock.write(encoded);
+        delivered += 1;
+      } catch {
+        // The peer has gone away or the socket buffer is broken; drop the
+        // subscription and let the close listener clean up the rest.
+        subs.delete(conn);
+        conn.destroy();
+      }
+    }
+    return delivered;
+  }
+
   /** Handle a freshly-accepted connection: build per-connection state. */
   private handleConnection(socket: net.Socket): void {
     const conn = new ConnectionState(socket, this);
     this.connections.add(conn);
     socket.on("close", () => {
       this.connections.delete(conn);
+      // Drop the connection from every channel it had joined. Subscriber sets
+      // are bounded by the live connection count, so a `for..of` here is
+      // negligible.
+      for (const subs of this.subscribers.values()) {
+        subs.delete(conn);
+      }
       this.opts.onClientDisconnected?.(socket);
     });
   }
@@ -256,6 +354,38 @@ export class DaemonServer {
   endHandler(): void {
     this.inFlight = Math.max(0, this.inFlight - 1);
   }
+  /**
+   * @internal
+   * Add `conn` to the subscriber set for `channel`. Idempotent.
+   */
+  addSubscription(conn: ConnectionState, channel: SubscriptionChannel): void {
+    let set = this.subscribers.get(channel);
+    if (!set) {
+      set = new Set();
+      this.subscribers.set(channel, set);
+    }
+    set.add(conn);
+  }
+
+  /**
+   * @internal
+   * Number of subscribers currently attached to `channel`. Test-only — the
+   * runtime broadcast path does not need this.
+   */
+  subscriberCount(channel: SubscriptionChannel): number {
+    return this.subscribers.get(channel)?.size ?? 0;
+  }
+}
+
+/** Map an event frame to the subscriber channel it should reach. */
+function channelForEvent(evt: EvtT): SubscriptionChannel {
+  // The kind discriminator is exhaustive over `EvtT`; a future channel adds
+  // a branch here. Today every event lands on `"sessions"`.
+  if (evt.kind === "sessions.event") return "sessions";
+  // Defensive fallback: TypeScript will flag this branch if a new event kind
+  // is added without updating the routing table.
+  const exhaustive: never = evt.kind;
+  throw new Error(`ipc-protocol: no subscriber channel for event kind ${String(exhaustive)}`);
 }
 
 /**
@@ -302,6 +432,16 @@ class ConnectionState {
     if (!this.socket.destroyed) {
       this.socket.destroy();
     }
+  }
+
+  /** @internal — accessor for the parent server's broadcast loop. */
+  getSocket(): net.Socket {
+    return this.socket;
+  }
+
+  /** @internal — accessor for the parent server's broadcast loop. */
+  isClosed(): boolean {
+    return this.phase === "closed";
   }
 
   private async handleRaw(raw: unknown): Promise<void> {
@@ -360,6 +500,14 @@ class ConnectionState {
   }
 
   private async dispatch(req: ReqT): Promise<void> {
+    // `sessions.subscribe` is owned by the framework — it mutates per-connection
+    // bookkeeping that the user's handler map cannot reach. Idempotent ack.
+    if (req.kind === "sessions.subscribe") {
+      this.parent.addSubscription(this, "sessions");
+      this.sendOk("sessions.subscribe.ok", req.id, { subscribed: true });
+      return;
+    }
+
     const handler = this.parent.getHandler(req.kind);
     if (!handler) {
       this.sendError("NOT_FOUND", `no handler for kind ${req.kind}`, req.id, req.kind);

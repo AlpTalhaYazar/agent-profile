@@ -23,12 +23,42 @@
  * CLI's daemon-detection layer handles spin-up + retry above this client.
  */
 
+import { EventEmitter } from "node:events";
 import type net from "node:net";
 import { createConnection } from "node:net";
 import type { Duplex } from "node:stream";
 import { MessageDecoder, encodeMessage } from "./codec.js";
 import { IpcError } from "./errors.js";
-import { type ReqT, Resp, type RespT } from "./messages.js";
+import {
+  Evt,
+  type EvtSessionsEventT,
+  type ReqT,
+  Resp,
+  type RespSessionsSubscribeOkT,
+  type RespT,
+} from "./messages.js";
+
+/**
+ * Push channels a client may subscribe to.
+ *
+ * Single-element today (the `sessions.event` push frame); a future event kind
+ * adds another literal here — the {@link DaemonClient.subscribe} switch will
+ * fail to compile without an exhaustive update.
+ */
+export type SubscriptionChannel = "sessions";
+
+/**
+ * Typed event map for {@link DaemonClient}.
+ *
+ * Listed here so consumers get autocompleted event names and payload types
+ * without `as` casts. The `node:events` `EventEmitter` is dynamically typed;
+ * we layer a typed `on`/`off`/`once`/`emit` overload set on top via interface
+ * declaration merging.
+ */
+export interface DaemonClientEvents {
+  /** A `sessions.event` push frame from the daemon. */
+  "sessions.event": (event: EvtSessionsEventT) => void;
+}
 
 /** Default per-request timeout. Matches the 5s daemon-unreachable budget in `docs/04-cli-spec.md`. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
@@ -66,12 +96,35 @@ export interface ConnectResult {
 }
 
 /**
+ * Typed `EventEmitter` overlay for {@link DaemonClient}.
+ *
+ * Declaration merging so callers can `client.on("sessions.event", handler)`
+ * with full type safety on the payload.
+ */
+export interface DaemonClient {
+  on<K extends keyof DaemonClientEvents>(event: K, listener: DaemonClientEvents[K]): this;
+  off<K extends keyof DaemonClientEvents>(event: K, listener: DaemonClientEvents[K]): this;
+  once<K extends keyof DaemonClientEvents>(event: K, listener: DaemonClientEvents[K]): this;
+  emit<K extends keyof DaemonClientEvents>(
+    event: K,
+    ...args: Parameters<DaemonClientEvents[K]>
+  ): boolean;
+  removeAllListeners<K extends keyof DaemonClientEvents>(event?: K): this;
+}
+
+/**
  * Newline-delimited JSON IPC client.
  *
  * Construct one per connection. Reuse across multiple `request` calls is the
  * intended pattern — the client multiplexes requests onto a single stream.
+ *
+ * In addition to request/response, the client emits push events received from
+ * the daemon (see {@link subscribe}). Push frames carry no `id`; the dispatch
+ * loop recognises them and routes through the typed {@link DaemonClientEvents}
+ * map rather than the pending-request table.
  */
-export class DaemonClient {
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: typed EventEmitter overlay — the merged interface only declares method overload signatures, not new initialised properties, so the rule's concern (unchecked initialisers) does not apply.
+export class DaemonClient extends EventEmitter {
   private readonly stream: Duplex;
   private readonly clientVersion: string;
   private readonly cookie: string;
@@ -84,6 +137,7 @@ export class DaemonClient {
 
   /** Construct a client. Does not send anything yet — call {@link connect}. */
   constructor(opts: DaemonClientOptions) {
+    super();
     this.stream = opts.stream;
     this.clientVersion = opts.clientVersion;
     this.cookie = opts.cookie;
@@ -184,16 +238,41 @@ export class DaemonClient {
   }
 
   /**
+   * Subscribe the connection to a daemon push channel.
+   *
+   * After the ack arrives, the daemon will start pushing frames matching the
+   * channel onto this connection. Frames are surfaced via the typed event
+   * emitter — for `"sessions"`, attach a listener with
+   * `client.on("sessions.event", handler)`.
+   *
+   * Idempotent on the server side: re-subscribing returns a fresh ack without
+   * duplicating delivery.
+   *
+   * @param channel - Currently only `"sessions"` is defined.
+   */
+  async subscribe(channel: SubscriptionChannel): Promise<void> {
+    if (channel !== "sessions") {
+      // Exhaustiveness guard: a future channel adds another arm; the type
+      // system flags this branch when the union widens.
+      const exhaustive: never = channel;
+      throw new IpcError("BAD_REQUEST", `unknown subscription channel: ${String(exhaustive)}`);
+    }
+    await this.request<RespSessionsSubscribeOkT>("sessions.subscribe", {});
+  }
+
+  /**
    * Tear the client down.
    *
-   * Destroys the underlying stream (best-effort) and rejects every in-flight
-   * request with `IpcError("DISCONNECTED", ...)`. Idempotent.
+   * Destroys the underlying stream (best-effort), rejects every in-flight
+   * request with `IpcError("DISCONNECTED", ...)`, and clears event listeners
+   * so a stuck handler never leaks. Idempotent.
    */
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.decoder.close();
     this.failAll(new IpcError("DISCONNECTED", "DaemonClient closed by caller"));
+    this.removeAllListeners();
     if (!this.stream.destroyed) {
       this.stream.destroy();
     }
@@ -233,8 +312,34 @@ export class DaemonClient {
     });
   }
 
-  /** Route an incoming raw object to the matching pending entry. */
+  /**
+   * Route an incoming raw object to either the pending-request table or the
+   * event emitter.
+   *
+   * Frames carry an `id` only when they are responses to a previous request.
+   * Push events ({@link EvtT}) intentionally have no `id`. The dispatcher
+   * checks for that field first; an id-less frame is parsed against the
+   * {@link Evt} discriminated union and emitted on the matching event name.
+   * Anything else falls through to the existing response router.
+   */
   private dispatch(raw: unknown): void {
+    if (isEventFrame(raw)) {
+      const evtResult = Evt.safeParse(raw);
+      if (!evtResult.success) {
+        // A known-event-shape frame that fails Zod validation is a server bug
+        // or version-skew; ignore rather than tearing down every pending
+        // request — this client may simply not understand a newer event kind.
+        return;
+      }
+      const evt = evtResult.data;
+      if (evt.kind === "sessions.event") {
+        this.emit("sessions.event", evt);
+      }
+      // Unknown event kinds (post `sessions.event` channel growth) fall
+      // through silently — the channel-router on the server is exhaustive.
+      return;
+    }
+
     const result = Resp.safeParse(raw);
     if (!result.success) {
       // Unknown shape: surface to all in-flight callers as a transport error,
@@ -306,6 +411,20 @@ export async function connectToSocket(opts: ConnectToSocketOptions): Promise<Dae
     throw err;
   }
   return client;
+}
+
+/**
+ * Heuristic: a frame is an event when it has a `kind` field but no `id`.
+ *
+ * Cheap structural test before the relatively expensive Zod parse — the
+ * dispatcher runs this on every inbound frame, so a fast accept/reject keeps
+ * the hot path tight. Full validation lives one step downstream
+ * (`Evt.safeParse`).
+ */
+function isEventFrame(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as { id?: unknown; kind?: unknown };
+  return candidate.kind !== undefined && candidate.id === undefined;
 }
 
 /** Promise-wrap `net.createConnection` so it integrates with `await`. */

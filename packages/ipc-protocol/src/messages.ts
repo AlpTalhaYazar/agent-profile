@@ -304,6 +304,67 @@ export const ReqSecretsMigrate = z
   })
   .strict();
 
+// ─── Session monitor request schemas (Phase 2 milestone 5) ──────────────────
+//
+// The session monitor expands the read-only `sessions.list` surface with three
+// mutating operations and one push-channel subscription:
+//
+//  - `sessions.kill` — stop a running session by signal.
+//  - `sessions.relaunch` — re-spawn a session under a freshly minted id while
+//    preserving the original's `(role, authProfileId, cwd)` tuple.
+//  - `sessions.drift` — re-resolve the cascade for a live session and report
+//    whether the effective config has drifted from the launch-time hash.
+//  - `sessions.subscribe` — opt the connection into the unsolicited
+//    `sessions.event` push channel; idempotent ack.
+
+/** Request to kill a running session. The daemon honours optional signal selection. */
+export const ReqSessionsKill = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.kill"),
+    sessionId: z.string().min(1),
+    signal: z.enum(["SIGTERM", "SIGKILL"]).optional(),
+  })
+  .strict();
+
+/**
+ * Request to relaunch a session.
+ *
+ * The daemon mints a new `sessionId` (linked back via `relaunchedFrom`) and
+ * issues a fresh capability token bound to the same auth profile. The original
+ * record is left intact for audit/lineage.
+ */
+export const ReqSessionsRelaunch = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.relaunch"),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+/** Request to recompute the drift hash for a session and diff against its launch-time hash. */
+export const ReqSessionsDrift = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.drift"),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Request to subscribe the calling connection to the `sessions.event` push
+ * channel.
+ *
+ * Idempotent — re-subscribing has no effect beyond a fresh ack. The server
+ * tears the subscription down automatically when the socket closes.
+ */
+export const ReqSessionsSubscribe = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.subscribe"),
+  })
+  .strict();
+
 /**
  * Discriminated union of every request shape the daemon accepts.
  *
@@ -331,6 +392,10 @@ export const Req = z.discriminatedUnion("kind", [
   ReqSessionEnd,
   ReqSecretGet,
   ReqSecretsMigrate,
+  ReqSessionsKill,
+  ReqSessionsRelaunch,
+  ReqSessionsDrift,
+  ReqSessionsSubscribe,
 ]);
 
 /** Static type for the {@link Req} discriminated union. */
@@ -374,6 +439,14 @@ export type ReqSessionEndT = z.infer<typeof ReqSessionEnd>;
 export type ReqSecretGetT = z.infer<typeof ReqSecretGet>;
 /** Static type for `secrets.migrate` requests. */
 export type ReqSecretsMigrateT = z.infer<typeof ReqSecretsMigrate>;
+/** Static type for `sessions.kill` requests. */
+export type ReqSessionsKillT = z.infer<typeof ReqSessionsKill>;
+/** Static type for `sessions.relaunch` requests. */
+export type ReqSessionsRelaunchT = z.infer<typeof ReqSessionsRelaunch>;
+/** Static type for `sessions.drift` requests. */
+export type ReqSessionsDriftT = z.infer<typeof ReqSessionsDrift>;
+/** Static type for `sessions.subscribe` requests. */
+export type ReqSessionsSubscribeT = z.infer<typeof ReqSessionsSubscribe>;
 /** Auth profile metadata embedded in `ReqAuthAdd.spec`. */
 export type AuthProfileSpecT = z.infer<typeof AuthProfileSpec>;
 
@@ -508,10 +581,45 @@ export const RespProfilePreviewOk = z
   .strict();
 
 /**
+ * Optional per-record enrichment the daemon path attaches to each entry in
+ * `sessions.list.ok`.
+ *
+ * The fields are populated only by the daemon transport (which has access to
+ * the live capability table and can probe PID liveness via `process.kill(pid,
+ * 0)`). The standalone in-process transport and older daemons omit them.
+ *
+ *  - `liveCapability` — `true` if the capability table currently holds a
+ *    non-revoked entry for this session.
+ *  - `capabilityExpiresAtMs` — absolute epoch when the live capability
+ *    expires; only meaningful when `liveCapability` is `true`.
+ *  - `processAlive` — `true` if `process.kill(pid, 0)` succeeded.
+ *
+ * The schema is `passthrough()` so the underlying record shape (which lives
+ * in `apps/cli`) is preserved verbatim; it merely adds the optional fields
+ * the Session Monitor wants to surface.
+ */
+export const SessionRecordEnrichment = z
+  .object({
+    liveCapability: z.boolean().optional(),
+    capabilityExpiresAtMs: z.number().int().nonnegative().optional(),
+    processAlive: z.boolean().optional(),
+  })
+  .passthrough();
+
+/**
  * Response to `sessions.list`.
  *
  * Session record shapes currently live in `apps/cli`. We keep them loose
- * (`z.unknown()`) on the wire until they migrate into a shared package.
+ * (`z.unknown()`) on the wire until they migrate into a shared package — but
+ * the daemon path enriches each record with the optional fields described in
+ * {@link SessionRecordEnrichment} so the Session Monitor can display
+ * capability + process liveness without round-tripping back to the daemon.
+ *
+ * Older daemons and the standalone in-process transport omit the enrichment
+ * fields entirely. The wire schema stays `z.unknown()` so it is
+ * back-compatible regardless of whether the enrichment is present; consumers
+ * Zod-narrow with {@link SessionRecordEnrichment} when they want to pull the
+ * enrichment fields off a record.
  */
 export const RespSessionsListOk = z
   .object({
@@ -662,6 +770,78 @@ export const RespSecretsMigrateOk = z
   })
   .strict();
 
+// ─── Session monitor response schemas (Phase 2 milestone 5) ─────────────────
+
+/**
+ * Response to `sessions.kill`.
+ *
+ * `killed` is `true` when the daemon successfully delivered the requested
+ * signal to the live PID. `exitCode` is included when the daemon observed the
+ * child exit before the response was queued.
+ */
+export const RespSessionsKillOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.kill.ok"),
+    killed: z.boolean(),
+    exitCode: z.number().int().optional(),
+  })
+  .strict();
+
+/**
+ * Response to `sessions.relaunch`.
+ *
+ * Carries the freshly minted `sessionId`, the new capability token + expiry,
+ * and `relaunchedFrom` linking back to the original session. The original
+ * record is left intact for audit/lineage.
+ */
+export const RespSessionsRelaunchOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.relaunch.ok"),
+    sessionId: z.string().min(1),
+    capabilityToken: z.string().min(1),
+    expiresAtMs: z.number().int().nonnegative(),
+    relaunchedFrom: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Response to `sessions.drift`.
+ *
+ * `drifted` is `true` when `newHash !== oldHash`. `scopesChanged` lists scope
+ * paths whose contents differ between the launch-time provenance and the
+ * just-recomputed cascade; an empty array means the hashes drifted but the
+ * scope-file diff is empty (e.g. an authProfile rotation invalidated the
+ * effective config without changing any scope file).
+ */
+export const RespSessionsDriftOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.drift.ok"),
+    drifted: z.boolean(),
+    scopesChanged: z.array(z.string()),
+    oldHash: z.string(),
+    newHash: z.string(),
+  })
+  .strict();
+
+/**
+ * Response to `sessions.subscribe`.
+ *
+ * `subscribed: true` is a bare ack. The server tears the subscription down
+ * automatically when the socket closes; there is no `unsubscribe` request —
+ * close the connection (or send another `sessions.subscribe`, which is
+ * idempotent).
+ */
+export const RespSessionsSubscribeOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("sessions.subscribe.ok"),
+    subscribed: z.literal(true),
+  })
+  .strict();
+
 /**
  * Discriminated union of every response shape.
  *
@@ -691,6 +871,87 @@ export const Resp = z.discriminatedUnion("kind", [
   RespSessionEndOk,
   RespSecretGetOk,
   RespSecretsMigrateOk,
+  RespSessionsKillOk,
+  RespSessionsRelaunchOk,
+  RespSessionsDriftOk,
+  RespSessionsSubscribeOk,
+]);
+
+// ─── Event schemas (Phase 2 milestone 5 — push channel) ─────────────────────
+//
+// The third envelope type. Event frames are unsolicited push messages emitted
+// by the server to subscribed connections. Two structural differences from
+// the request/response envelope:
+//
+//  - There is no `id` field. Events are not correlated to any pending
+//    request; the client routes them by `kind` discriminator only.
+//  - There is no `error` variant. If the server cannot construct an event,
+//    it simply does not emit; transport errors close the socket and are
+//    surfaced through the in-flight request mechanism instead.
+
+/**
+ * Push frame emitted to subscribed connections whenever a session's lifecycle
+ * state changes.
+ *
+ * `event` is the lifecycle transition. `exitCode` accompanies `"exited"` and
+ * `"killed"` events when the daemon observed the child exit. `ts` is the
+ * server-side wall-clock millisecond at the time the event was recorded;
+ * monotonically increasing in practice but not guaranteed across reboots.
+ */
+export const EvtSessionsEvent = z
+  .object({
+    kind: z.literal("sessions.event"),
+    sessionId: z.string().min(1),
+    event: z.enum(["started", "idle", "exited", "killed", "drifted"]),
+    exitCode: z.number().int().optional(),
+    ts: z.number(),
+  })
+  .strict();
+
+/**
+ * Discriminated union of every event shape.
+ *
+ * The union has a single member today; it is shaped as a union so future
+ * channels (e.g. `auth.event`, `daemon.event`) can be added without
+ * destabilising downstream Zod call sites.
+ */
+export const Evt = z.discriminatedUnion("kind", [EvtSessionsEvent]);
+
+/**
+ * Discriminated union of every frame the server can write on a connection —
+ * responses (`Resp`) and unsolicited events (`Evt`).
+ *
+ * Clients that demultiplex the incoming stream parse with `Frame.safeParse`
+ * and route by the presence of `id`: response frames carry an `id` correlator
+ * tied to a pending request; event frames have no `id` and dispatch via the
+ * client's emitter API.
+ */
+export const Frame = z.discriminatedUnion("kind", [
+  RespHelloOk,
+  RespAuthListOk,
+  RespAuthGetSecretRefOk,
+  RespProfileShowOk,
+  RespProfileListOk,
+  RespProfileValidateOk,
+  RespProfilePreviewOk,
+  RespSessionsListOk,
+  RespDaemonStatusOk,
+  RespDaemonStopOk,
+  RespProfileSaveOk,
+  RespError,
+  RespAuthAddOk,
+  RespAuthSetSecretOk,
+  RespAuthRotateOk,
+  RespAuthRemoveOk,
+  RespSessionStartOk,
+  RespSessionEndOk,
+  RespSecretGetOk,
+  RespSecretsMigrateOk,
+  RespSessionsKillOk,
+  RespSessionsRelaunchOk,
+  RespSessionsDriftOk,
+  RespSessionsSubscribeOk,
+  EvtSessionsEvent,
 ]);
 
 /** Static type for the {@link Resp} discriminated union. */
@@ -736,6 +997,14 @@ export type RespSessionEndOkT = z.infer<typeof RespSessionEndOk>;
 export type RespSecretGetOkT = z.infer<typeof RespSecretGetOk>;
 /** Static type for `secrets.migrate.ok` responses. */
 export type RespSecretsMigrateOkT = z.infer<typeof RespSecretsMigrateOk>;
+/** Static type for `sessions.kill.ok` responses. */
+export type RespSessionsKillOkT = z.infer<typeof RespSessionsKillOk>;
+/** Static type for `sessions.relaunch.ok` responses. */
+export type RespSessionsRelaunchOkT = z.infer<typeof RespSessionsRelaunchOk>;
+/** Static type for `sessions.drift.ok` responses. */
+export type RespSessionsDriftOkT = z.infer<typeof RespSessionsDriftOk>;
+/** Static type for `sessions.subscribe.ok` responses. */
+export type RespSessionsSubscribeOkT = z.infer<typeof RespSessionsSubscribeOk>;
 /** Static type for a profile validation issue. */
 export type ProfileIssueT = z.infer<typeof ProfileIssue>;
 /** Static type for a discovered scope entry. */
@@ -744,6 +1013,15 @@ export type ProfileScopeEntryT = z.infer<typeof ProfileScopeEntry>;
 export type ProfilePreviewPayloadT = z.infer<typeof ProfilePreviewPayload>;
 /** Static type for a compact preview diff entry. */
 export type ProfileDiffEntryT = z.infer<typeof ProfileDiffEntry>;
+/** Static type for the optional per-record enrichment in `sessions.list.ok`. */
+export type SessionRecordEnrichmentT = z.infer<typeof SessionRecordEnrichment>;
+
+/** Static type for the {@link Evt} discriminated union. */
+export type EvtT = z.infer<typeof Evt>;
+/** Static type for `sessions.event` push frames. */
+export type EvtSessionsEventT = z.infer<typeof EvtSessionsEvent>;
+/** Static type for the {@link Frame} discriminated union (responses ∪ events). */
+export type FrameT = z.infer<typeof Frame>;
 
 /** Closed enum of error codes the IPC layer is allowed to emit. */
 export type IpcErrorCode = RespErrorT["code"];
