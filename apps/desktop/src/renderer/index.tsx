@@ -1,181 +1,72 @@
 import { Button, CodeEditor, Field, Input, Select, Switch, cn } from "@agent-profile/ui";
-import { atom, useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import "./global.css";
-
-type MergeMode = "replace" | "deep";
-type EditorMode = "form" | "json";
-type TransportType = "stdio" | "http" | "streamable-http" | "sse";
-type ScopeKind =
-  | "global-shared"
-  | "global-role"
-  | "project-shared"
-  | "project-shared-local"
-  | "project-role"
-  | string;
-
-interface ScopeDocPersona {
-  claudeMd?: string[];
-  agents?: string[];
-  skills?: string[];
-  slashCmds?: string[];
-  memory?: string[];
-}
-
-interface ScopeDocServerEntry {
-  type?: string;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  headers?: Record<string, string>;
-  url?: string;
-  enabled?: boolean;
-  __merge?: MergeMode;
-  __extends?: string;
-}
-
-interface ScopeDoc {
-  version: 1;
-  mcpServers: Record<string, ScopeDocServerEntry | null>;
-  auth?: { profileId: string };
-  env: Record<string, string>;
-  settings: Record<string, unknown>;
-  persona?: ScopeDocPersona;
-  use: string[];
-  disabledServers: string[];
-}
-
-interface ScopeListEntry {
-  scope: ScopeKind;
-  role: string;
-  path: string;
-  content: ScopeDoc | null;
-}
-
-interface AuthProfileOption {
-  id: string;
-  displayName: string;
-  mode: string;
-  secretCount: number;
-}
-
-interface FieldProvenance {
-  source?: string;
-  chain?: string[];
-}
-
-interface McpServerProvenance {
-  source?: string;
-  suppressedBy?: string;
-  overriddenFields?: string[];
-  chain?: Array<{ scope?: string; event?: string }>;
-}
-
-interface Provenance {
-  mcpServers: Record<string, McpServerProvenance>;
-  env: Record<string, FieldProvenance>;
-  settings: Record<string, FieldProvenance>;
-  persona: Array<{ source?: string; files?: string[] }>;
-}
-
-interface EffectiveConfig {
-  mcpServers: Record<string, ScopeDocServerEntry>;
-  env: Record<string, string>;
-  settings: Record<string, unknown>;
-  persona: Required<ScopeDocPersona>;
-  auth?: { profileId: string };
-}
-
-interface EffectiveState {
-  effective: EffectiveConfig | null;
-  provenance: Provenance | null;
-}
-
-interface ValidationIssue {
-  path: string;
-  message: string;
-  severity: string;
-}
-
-interface ValidationState {
-  status: "idle" | "loading" | "ready" | "error";
-  issues: ValidationIssue[];
-  errorMessage: string | null;
-}
-
-interface DiffItem {
-  section: "mcpServers" | "env" | "settings" | "persona";
-  key: string;
-  change: "added" | "removed" | "changed";
-  before?: string;
-  after?: string;
-}
-
-interface PreviewState {
-  status: "idle" | "loading" | "ready" | "error";
-  effective: EffectiveConfig | null;
-  diff: DiffItem[];
-  errorMessage: string | null;
-}
-
-type JsonState = { text: string; parseError: null } | { text: string; parseError: string };
-
-const scopeEntriesAtom = atom<ScopeListEntry[]>([]);
-const authProfilesAtom = atom<AuthProfileOption[]>([]);
-const availableRolesAtom = atom<string[]>([]);
-const selectedRoleAtom = atom("");
-const selectedAuthIdAtom = atom("");
-const cwdAtom = atom("");
-const versionAtom = atom<string | null>(null);
-const selectedScopePathAtom = atom<string | null>(null);
-const effectiveStateAtom = atom<EffectiveState>({ effective: null, provenance: null });
-const editorModeAtom = atom<EditorMode>("form");
-const draftDocAtom = atom<ScopeDoc | null>(null);
-const originalDocAtom = atom<ScopeDoc | null>(null);
-const jsonStateAtom = atom<JsonState>({ text: "", parseError: null });
-const settingsTextAtom = atom("{}");
-const settingsParseErrorAtom = atom<string | null>(null);
-const validationStateAtom = atom<ValidationState>({
-  status: "idle",
-  issues: [],
-  errorMessage: null,
-});
-const previewStateAtom = atom<PreviewState>({
-  status: "idle",
-  effective: null,
-  diff: [],
-  errorMessage: null,
-});
-const appErrorAtom = atom<string | null>(null);
-const isBootstrappingAtom = atom(true);
-const isRefreshingAtom = atom(false);
-const isSavingAtom = atom(false);
-
-const selectedScopeAtom = atom((get) => {
-  const selectedScopePath = get(selectedScopePathAtom);
-  if (!selectedScopePath) return null;
-  return get(scopeEntriesAtom).find((entry) => entry.path === selectedScopePath) ?? null;
-});
-
-const selectedScopeLabelAtom = atom((get) => {
-  const selectedScope = get(selectedScopeAtom);
-  if (!selectedScope) return "No scope selected";
-  const roleSuffix = selectedScope.role !== "—" ? `/${selectedScope.role}` : "";
-  return `${selectedScope.scope}${roleSuffix}`;
-});
-
-const hasUnsavedChangesAtom = atom((get) => {
-  const draft = get(draftDocAtom);
-  const original = get(originalDocAtom);
-  if (!draft || !original) return false;
-  return stableStringify(draft) !== stableStringify(original);
-});
-
-const issuesByPathAtom = atom((get) => {
-  const issues = get(validationStateAtom).issues;
-  return new Map(issues.map((issue) => [issue.path, issue.message]));
-});
+import {
+  appErrorAtom,
+  authProfilesAtom,
+  availableRolesAtom,
+  cwdAtom,
+  draftDocAtom,
+  editorModeAtom,
+  effectiveStateAtom,
+  hasUnsavedChangesAtom,
+  isBootstrappingAtom,
+  isRefreshingAtom,
+  isSavingAtom,
+  issuesByPathAtom,
+  jsonStateAtom,
+  originalDocAtom,
+  previewStateAtom,
+  scopeEntriesAtom,
+  selectedAuthIdAtom,
+  selectedRoleAtom,
+  selectedScopeAtom,
+  selectedScopeLabelAtom,
+  selectedScopePathAtom,
+  settingsParseErrorAtom,
+  settingsTextAtom,
+  validationStateAtom,
+  versionAtom,
+} from "./lib/atoms.js";
+import {
+  cloneDoc,
+  createId,
+  flattenObject,
+  parseJsonObject,
+  redactText,
+  sortedUnion,
+  stableStringify,
+  stringifyDoc,
+  stringifyInline,
+  stringifyValue,
+} from "./lib/clone.js";
+import {
+  asString,
+  collectRoles,
+  emptyPersona,
+  getErrorMessage,
+  isRecord,
+  normalizeAuthProfiles,
+  normalizeEffectiveState,
+  normalizeScopeDoc,
+  normalizeScopeList,
+  normalizeValidationIssues,
+  removeAuthBinding,
+} from "./lib/normalize.js";
+import type {
+  DiffItem,
+  EffectiveConfig,
+  MergeMode,
+  Provenance,
+  ScopeDoc,
+  ScopeDocPersona,
+  ScopeDocServerEntry,
+  ScopeKind,
+  ScopeListEntry,
+  TransportType,
+} from "./lib/types.js";
 
 function App(): React.ReactElement {
   const [version, setVersion] = useAtom(versionAtom);
@@ -1676,222 +1567,6 @@ function StringListEditor({
   );
 }
 
-function normalizeAuthProfiles(input: unknown): AuthProfileOption[] {
-  const candidates = Array.isArray(input)
-    ? input
-    : isRecord(input) && Array.isArray(input.profiles)
-      ? input.profiles
-      : [];
-
-  return candidates.flatMap((candidate) => {
-    if (!isRecord(candidate)) return [];
-    const id = asString(candidate.id);
-    if (!id) return [];
-    return [
-      {
-        id,
-        displayName: asString(candidate.displayName) ?? id,
-        mode: asString(candidate.mode) ?? "unknown",
-        secretCount: Array.isArray(candidate.secrets) ? candidate.secrets.length : 0,
-      },
-    ];
-  });
-}
-
-function normalizeScopeList(input: unknown): ScopeListEntry[] {
-  const candidates = Array.isArray(input)
-    ? input
-    : isRecord(input) && Array.isArray(input.entries)
-      ? input.entries
-      : isRecord(input) && Array.isArray(input.scopes)
-        ? input.scopes
-        : [];
-
-  return candidates.flatMap((candidate) => {
-    if (!isRecord(candidate)) return [];
-    const path =
-      asString(candidate.path) ?? asString(candidate.filePath) ?? asString(candidate.scopePath);
-    const scope = asString(candidate.scope) ?? "unknown";
-    if (!path) return [];
-    const contentCandidate = candidate.content ?? candidate.doc ?? candidate.scopeDoc ?? null;
-    return [
-      {
-        path,
-        scope,
-        role: asString(candidate.role) ?? "—",
-        content: normalizeMaybeScopeDoc(contentCandidate),
-      },
-    ];
-  });
-}
-
-function normalizeEffectiveState(input: unknown): EffectiveState {
-  if (!input || !isRecord(input)) return { effective: null, provenance: null };
-  const effectiveCandidate =
-    isRecord(input.effective) || Array.isArray(input.effective) ? input.effective : input;
-  const provenanceCandidate = isRecord(input.provenance) ? input.provenance : null;
-  return {
-    effective: normalizeEffectiveConfig(effectiveCandidate),
-    provenance: normalizeProvenance(provenanceCandidate),
-  };
-}
-
-function normalizeEffectiveConfig(input: unknown): EffectiveConfig | null {
-  if (!isRecord(input)) return null;
-  const persona = isRecord(input.persona) ? input.persona : {};
-  return {
-    mcpServers: normalizeServersRecord(input.mcpServers),
-    env: normalizeStringRecord(input.env),
-    settings: normalizeUnknownRecord(input.settings),
-    persona: {
-      claudeMd: normalizeStringArray(persona.claudeMd),
-      agents: normalizeStringArray(persona.agents),
-      skills: normalizeStringArray(persona.skills),
-      slashCmds: normalizeStringArray(persona.slashCmds),
-      memory: normalizeStringArray(persona.memory),
-    },
-    ...(isRecord(input.auth) && typeof input.auth.profileId === "string"
-      ? { auth: { profileId: input.auth.profileId } }
-      : {}),
-  };
-}
-
-function normalizeProvenance(input: unknown): Provenance | null {
-  if (!isRecord(input)) return null;
-  return {
-    mcpServers: isRecord(input.mcpServers)
-      ? (input.mcpServers as Record<string, McpServerProvenance>)
-      : {},
-    env: isRecord(input.env) ? (input.env as Record<string, FieldProvenance>) : {},
-    settings: isRecord(input.settings) ? (input.settings as Record<string, FieldProvenance>) : {},
-    persona: Array.isArray(input.persona) ? (input.persona as Provenance["persona"]) : [],
-  };
-}
-
-function normalizeValidationIssues(input: unknown): ValidationIssue[] {
-  if (Array.isArray(input)) {
-    return input.flatMap((issue) => normalizeValidationIssue(issue));
-  }
-
-  if (isRecord(input) && Array.isArray(input.issues)) {
-    return input.issues.flatMap((issue) => normalizeValidationIssue(issue));
-  }
-
-  if (isRecord(input) && typeof input.ok === "boolean") {
-    return input.ok ? [] : [{ path: "document", message: "Validation failed", severity: "error" }];
-  }
-
-  if (typeof input === "string") {
-    return [{ path: "document", message: input, severity: "error" }];
-  }
-
-  return [];
-}
-
-function normalizeValidationIssue(input: unknown): ValidationIssue[] {
-  if (typeof input === "string") {
-    return [{ path: "document", message: input, severity: "error" }];
-  }
-  if (!isRecord(input)) return [];
-  return [
-    {
-      path: asString(input.path) ?? asString(input.fieldPath) ?? "document",
-      message: asString(input.message) ?? "Validation issue",
-      severity: asString(input.severity) ?? "error",
-    },
-  ];
-}
-
-function normalizeMaybeScopeDoc(input: unknown): ScopeDoc | null {
-  if (!isRecord(input)) return null;
-  return normalizeScopeDoc(input);
-}
-
-function normalizeScopeDoc(input: unknown): ScopeDoc {
-  const record = isRecord(input) ? input : {};
-  // ScopeDoc schema requires version: 1 (literal); normalize unknown shapes to 1.
-  const version: 1 = 1;
-  const persona = normalizePersona(record.persona);
-  return {
-    version,
-    mcpServers: normalizeNullableServerRecord(record.mcpServers),
-    env: normalizeStringRecord(record.env),
-    settings: normalizeUnknownRecord(record.settings),
-    use: normalizeStringArray(record.use),
-    disabledServers: normalizeStringArray(record.disabledServers),
-    ...(isRecord(record.auth) && typeof record.auth.profileId === "string"
-      ? { auth: { profileId: record.auth.profileId } }
-      : {}),
-    ...(persona ? { persona } : {}),
-  };
-}
-
-function normalizePersona(input: unknown): ScopeDocPersona | undefined {
-  if (!isRecord(input)) return undefined;
-  return {
-    claudeMd: normalizeStringArray(input.claudeMd),
-    agents: normalizeStringArray(input.agents),
-    skills: normalizeStringArray(input.skills),
-    slashCmds: normalizeStringArray(input.slashCmds),
-    memory: normalizeStringArray(input.memory),
-  };
-}
-
-function removeAuthBinding(scopeDoc: ScopeDoc): ScopeDoc {
-  const { auth: _auth, ...next } = scopeDoc;
-  return next;
-}
-
-function normalizeNullableServerRecord(input: unknown): Record<string, ScopeDocServerEntry | null> {
-  if (!isRecord(input)) return {};
-  const next: Record<string, ScopeDocServerEntry | null> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value === null) {
-      next[key] = null;
-      continue;
-    }
-    if (!isRecord(value)) continue;
-    next[key] = {
-      ...(typeof value.type === "string" ? { type: value.type } : {}),
-      ...(typeof value.command === "string" ? { command: value.command } : {}),
-      ...(Array.isArray(value.args) ? { args: normalizeStringArray(value.args) } : {}),
-      ...(isRecord(value.env) ? { env: normalizeStringRecord(value.env) } : {}),
-      ...(isRecord(value.headers) ? { headers: normalizeStringRecord(value.headers) } : {}),
-      ...(typeof value.url === "string" ? { url: value.url } : {}),
-      ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
-      ...(typeof value.__merge === "string" ? { __merge: value.__merge as MergeMode } : {}),
-      ...(typeof value.__extends === "string" ? { __extends: value.__extends } : {}),
-    };
-  }
-  return next;
-}
-
-function normalizeServersRecord(input: unknown): Record<string, ScopeDocServerEntry> {
-  const nullable = normalizeNullableServerRecord(input);
-  return Object.fromEntries(
-    Object.entries(nullable).flatMap(([name, value]) => (value ? [[name, value]] : []))
-  );
-}
-
-function normalizeStringArray(input: unknown): string[] {
-  return Array.isArray(input)
-    ? input.filter((value): value is string => typeof value === "string")
-    : [];
-}
-
-function normalizeStringRecord(input: unknown): Record<string, string> {
-  if (!isRecord(input)) return {};
-  return Object.fromEntries(
-    Object.entries(input).flatMap(([key, value]) =>
-      typeof value === "string" ? [[key, value]] : []
-    )
-  );
-}
-
-function normalizeUnknownRecord(input: unknown): Record<string, unknown> {
-  return isRecord(input) ? { ...input } : {};
-}
-
 function createDiffSummary(
   current: EffectiveConfig | null,
   preview: EffectiveConfig | null
@@ -1983,56 +1658,6 @@ function createDiffSummary(
   }
 
   return items;
-}
-
-function collectRoles(entries: ScopeListEntry[]): string[] {
-  return Array.from(
-    new Set(entries.map((entry) => entry.role).filter((role) => role && role !== "—"))
-  ).sort();
-}
-
-function emptyPersona(): Required<ScopeDocPersona> {
-  return {
-    claudeMd: [],
-    agents: [],
-    skills: [],
-    slashCmds: [],
-    memory: [],
-  };
-}
-
-function cloneDoc(doc: ScopeDoc): ScopeDoc {
-  return structuredClone(doc);
-}
-
-function stringifyDoc(doc: ScopeDoc): string {
-  return JSON.stringify(doc, null, 2);
-}
-
-function stringifyValue(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-function stableStringify(value: unknown): string {
-  return JSON.stringify(sortValue(value));
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortValue);
-  if (isRecord(value)) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, sortValue(nested)])
-    );
-  }
-  return value;
-}
-
-function parseJsonObject(text: string): Record<string, unknown> {
-  const parsed = JSON.parse(text) as unknown;
-  if (!isRecord(parsed)) throw new Error("Expected a JSON object");
-  return parsed;
 }
 
 function recordToPairs(record?: Record<string, string>): KeyValuePair[] {
@@ -2183,48 +1808,6 @@ function uniqueServerName(servers: Record<string, ScopeDocServerEntry | null>): 
     candidate = `server-${index}`;
   }
   return candidate;
-}
-
-function createId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function flattenObject(value: Record<string, unknown>, prefix = ""): Array<[string, unknown]> {
-  const entries: Array<[string, unknown]> = [];
-  for (const [key, nested] of Object.entries(value)) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (isRecord(nested)) {
-      entries.push(...flattenObject(nested, path));
-    } else {
-      entries.push([path, nested]);
-    }
-  }
-  return entries;
-}
-
-function sortedUnion(left: string[], right: string[]): string[] {
-  return Array.from(new Set([...left, ...right])).sort();
-}
-
-function stringifyInline(value: unknown): string {
-  if (typeof value === "string") return redactText(value);
-  return JSON.stringify(value);
-}
-
-function redactText(value: string): string {
-  return /secret:|keyring:\/\//i.test(value) ? "•••• redacted ref ••••" : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown error";
 }
 
 const root = document.getElementById("root");
