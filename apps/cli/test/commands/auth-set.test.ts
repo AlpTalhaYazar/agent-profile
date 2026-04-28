@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAuthProfiles } from "../../src/auth/profiles-file.js";
 import { runAuthSet } from "../../src/commands/auth/set.js";
+import * as transportModule from "../../src/transport/index.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
 const FIXTURE_YAML = `
@@ -50,6 +51,7 @@ describe("auth set", () => {
       name: "github.pat",
       value: "ghp_test_token",
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -78,6 +80,7 @@ describe("auth set", () => {
       name: "github.pat",
       stdin: true,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -93,6 +96,7 @@ describe("auth set", () => {
         name: "github.pat",
         value: "ghp_test",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 3 });
@@ -107,6 +111,7 @@ describe("auth set", () => {
         name: "unknown.secret",
         value: "test-value",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 3 });
@@ -118,6 +123,7 @@ describe("auth set", () => {
         name: "unknown.secret",
         value: "test-value",
         home: tmpHome,
+        standalone: true,
         backend,
       });
     } catch (err) {
@@ -134,6 +140,7 @@ describe("auth set", () => {
       value: "new-value-123",
       register: true,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -151,6 +158,7 @@ describe("auth set", () => {
         name: "github.pat",
         value: "ghp_test",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 3 });
@@ -176,6 +184,7 @@ authProfiles:
         name: "some.secret",
         value: "test-value",
         home: tmpHome,
+        standalone: true,
         backend,
       });
     } catch (err) {
@@ -192,9 +201,39 @@ authProfiles:
       name: "github.pat",
       value: secretValue,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
     expect(stdout).not.toContain(secretValue);
+  });
+
+  it("routes through daemon transport when selected and skips direct backend writes", async () => {
+    const backend = new MockBackend("keychain-macos");
+    const backendSetSpy = vi.spyOn(backend, "set");
+    const authSetSecretSpy = vi.fn().mockResolvedValue(undefined);
+    const closeSpy = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(transportModule, "getTransport").mockResolvedValue({
+      transportKind: "daemon",
+      authSetSecret: authSetSecretSpy,
+      close: closeSpy,
+    } as unknown as Awaited<ReturnType<typeof transportModule.getTransport>>);
+
+    await runAuthSet({
+      id: "work",
+      name: "github.pat",
+      value: "ghp-daemon-token",
+      home: tmpHome,
+      backend,
+    });
+
+    expect(authSetSecretSpy).toHaveBeenCalledWith({
+      authId: "work",
+      name: "github.pat",
+      value: "ghp-daemon-token",
+      register: false,
+    });
+    expect(backendSetSpy).not.toHaveBeenCalled();
+    expect(closeSpy).toHaveBeenCalledOnce();
   });
 });

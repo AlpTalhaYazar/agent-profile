@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAuthProfiles } from "../../src/auth/profiles-file.js";
 import { runAuthRemove } from "../../src/commands/auth/remove.js";
+import * as transportModule from "../../src/transport/index.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
 const FIXTURE_YAML = `
@@ -55,7 +56,7 @@ describe("auth remove", () => {
     backend.seed("agent-profile.github.work", "ghp_value");
     backend.seed("agent-profile.postgres.acme-prod", "pg_password");
 
-    await runAuthRemove({ id: "work", yes: true, home: tmpHome, backend });
+    await runAuthRemove({ id: "work", yes: true, home: tmpHome, standalone: true, backend });
 
     // Metadata removed.
     const doc = loadAuthProfiles(tmpHome);
@@ -76,7 +77,7 @@ describe("auth remove", () => {
     const backend = new MockBackend("keychain-macos");
 
     await expect(
-      runAuthRemove({ id: "work", yes: false, home: tmpHome, backend })
+      runAuthRemove({ id: "work", yes: false, home: tmpHome, standalone: true, backend })
     ).rejects.toMatchObject({ exitCode: 6 });
   });
 
@@ -84,11 +85,17 @@ describe("auth remove", () => {
     const backend = new MockBackend("keychain-macos");
 
     await expect(
-      runAuthRemove({ id: "nonexistent", yes: true, home: tmpHome, backend })
+      runAuthRemove({ id: "nonexistent", yes: true, home: tmpHome, standalone: true, backend })
     ).rejects.toMatchObject({ exitCode: 3 });
 
     try {
-      await runAuthRemove({ id: "nonexistent", yes: true, home: tmpHome, backend });
+      await runAuthRemove({
+        id: "nonexistent",
+        yes: true,
+        home: tmpHome,
+        standalone: true,
+        backend,
+      });
     } catch (err) {
       expect((err as Error).message).toContain("nonexistent");
     }
@@ -119,12 +126,43 @@ describe("auth remove", () => {
     });
 
     await expect(
-      runAuthRemove({ id: "work", yes: true, home: tmpHome, backend })
+      runAuthRemove({ id: "work", yes: true, home: tmpHome, standalone: true, backend })
     ).rejects.toThrow();
 
     // Metadata should still be removed.
     const doc = loadAuthProfiles(tmpHome);
     expect(doc.authProfiles.work).toBeUndefined();
+
+    exitSpy.mockRestore();
+  });
+
+  it("routes through daemon transport when selected and skips direct backend writes", async () => {
+    const backend = new MockBackend("keychain-macos");
+    const backendRemoveSpy = vi.spyOn(backend, "remove");
+    const authRemoveSpy = vi.fn().mockResolvedValue({ failed: ["github.pat"] });
+    const closeSpy = vi.fn().mockResolvedValue(undefined);
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
+    vi.spyOn(transportModule, "getTransport").mockResolvedValue({
+      transportKind: "daemon",
+      authRemove: authRemoveSpy,
+      close: closeSpy,
+    } as unknown as Awaited<ReturnType<typeof transportModule.getTransport>>);
+
+    await expect(runAuthRemove({ id: "work", yes: true, home: tmpHome, backend })).rejects.toThrow(
+      "process.exit called"
+    );
+
+    expect(authRemoveSpy).toHaveBeenCalledWith({ authId: "work", yes: true });
+    expect(backendRemoveSpy).not.toHaveBeenCalled();
+    expect(stderr.join("")).toContain("github.pat");
+    expect(closeSpy).toHaveBeenCalledOnce();
 
     exitSpy.mockRestore();
   });

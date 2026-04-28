@@ -2,12 +2,13 @@
  * Tests for `auth add` command.
  * Uses MockBackend — never touches the real OS keychain.
  */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAuthProfiles } from "../../src/auth/profiles-file.js";
 import { runAuthAdd } from "../../src/commands/auth/add.js";
+import * as transportModule from "../../src/transport/index.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
 describe("auth add (scripted)", () => {
@@ -38,6 +39,7 @@ describe("auth add (scripted)", () => {
       anthropicMode: "apiKey",
       anthropicSecret: "sk-ant-test-secret",
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -65,6 +67,7 @@ describe("auth add (scripted)", () => {
       anthropicMode: "apiKey",
       anthropicSecret: "sk-ant-first",
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -76,6 +79,7 @@ describe("auth add (scripted)", () => {
         anthropicMode: "apiKey",
         anthropicSecret: "sk-ant-second",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 1 });
@@ -88,6 +92,7 @@ describe("auth add (scripted)", () => {
       anthropicMode: "apiKey",
       anthropicSecret: "sk-ant-first",
       home: tmpHome,
+      standalone: true,
       backend,
     });
     await runAuthAdd({
@@ -97,6 +102,7 @@ describe("auth add (scripted)", () => {
       anthropicSecret: "sk-ant-second",
       force: true,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -114,6 +120,7 @@ describe("auth add (scripted)", () => {
         anthropicMode: "apiKey",
         anthropicSecret: "sk-ant-test",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 2 });
@@ -130,6 +137,7 @@ describe("auth add (scripted)", () => {
         anthropicMode: "apiKey",
         anthropicSecret: "sk-ant-test",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toMatchObject({ exitCode: 3 });
@@ -150,6 +158,7 @@ describe("auth add (scripted)", () => {
         // anthropicMode intentionally omitted — non-TTY should throw
         anthropicSecret: "sk-ant-test",
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toThrow();
@@ -167,6 +176,7 @@ describe("auth add (scripted)", () => {
         // anthropicSecret intentionally omitted, stdin=false — non-TTY should throw
         stdin: false,
         home: tmpHome,
+        standalone: true,
         backend,
       })
     ).rejects.toThrow();
@@ -190,6 +200,7 @@ describe("auth add (scripted)", () => {
       anthropicMode: "apiKey",
       stdin: true,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
@@ -208,10 +219,45 @@ describe("auth add (scripted)", () => {
       anthropicMode: "apiKey",
       anthropicSecret: secretValue,
       home: tmpHome,
+      standalone: true,
       backend,
     });
 
     // The secret value must not appear in stdout.
     expect(stdout).not.toContain(secretValue);
+  });
+
+  it("routes through daemon transport when selected and skips direct backend writes", async () => {
+    const backend = new MockBackend("keychain-macos");
+    const backendSetSpy = vi.spyOn(backend, "set");
+    const authAddSpy = vi.fn().mockResolvedValue(undefined);
+    const closeSpy = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(transportModule, "getTransport").mockResolvedValue({
+      transportKind: "daemon",
+      authAdd: authAddSpy,
+      close: closeSpy,
+    } as unknown as Awaited<ReturnType<typeof transportModule.getTransport>>);
+
+    await runAuthAdd({
+      id: "work",
+      display: "Work",
+      anthropicMode: "apiKey",
+      anthropicSecret: "sk-ant-daemon",
+      home: tmpHome,
+      backend,
+    });
+
+    expect(authAddSpy).toHaveBeenCalledWith({
+      spec: {
+        id: "work",
+        displayName: "Work",
+        anthropic: { mode: "apiKey", secretRef: "keyring://anthropic/work" },
+        mcpSecretRefs: {},
+      },
+      anthropicSecret: "sk-ant-daemon",
+      force: false,
+    });
+    expect(backendSetSpy).not.toHaveBeenCalled();
+    expect(closeSpy).toHaveBeenCalledOnce();
   });
 });

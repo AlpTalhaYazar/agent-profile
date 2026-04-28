@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAuthProfiles } from "../../src/auth/profiles-file.js";
 import { runAuthRotate } from "../../src/commands/auth/rotate.js";
+import * as transportModule from "../../src/transport/index.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
 const FIXTURE_YAML = `
@@ -48,7 +49,6 @@ describe("auth rotate", () => {
     backend.seed("agent-profile.anthropic.work", "sk-ant-old");
 
     // Stub stdin by mocking readStdin via stdin event emitter.
-    const originalOn = process.stdin.on.bind(process.stdin);
     vi.spyOn(process.stdin, "on").mockImplementation(
       (event: string, handler: (...args: unknown[]) => void) => {
         if (event === "data") handler("sk-ant-new-value");
@@ -58,7 +58,7 @@ describe("auth rotate", () => {
     );
     vi.spyOn(process.stdin, "setEncoding").mockReturnValue(process.stdin);
 
-    await runAuthRotate({ id: "work", stdin: true, home: tmpHome, backend });
+    await runAuthRotate({ id: "work", stdin: true, home: tmpHome, standalone: true, backend });
 
     // Backend should have the new value at the same key.
     const newVal = await backend.get("agent-profile.anthropic.work");
@@ -75,11 +75,17 @@ describe("auth rotate", () => {
     const backend = new MockBackend("keychain-macos");
 
     await expect(
-      runAuthRotate({ id: "nonexistent", stdin: true, home: tmpHome, backend })
+      runAuthRotate({ id: "nonexistent", stdin: true, home: tmpHome, standalone: true, backend })
     ).rejects.toMatchObject({ exitCode: 3 });
 
     try {
-      await runAuthRotate({ id: "nonexistent", stdin: true, home: tmpHome, backend });
+      await runAuthRotate({
+        id: "nonexistent",
+        stdin: true,
+        home: tmpHome,
+        standalone: true,
+        backend,
+      });
     } catch (err) {
       expect((err as Error).message).toContain("nonexistent");
     }
@@ -89,7 +95,7 @@ describe("auth rotate", () => {
     const backend = new MockBackend("keychain-macos");
 
     await expect(
-      runAuthRotate({ id: "work", stdin: false, home: tmpHome, backend })
+      runAuthRotate({ id: "work", stdin: false, home: tmpHome, standalone: true, backend })
     ).rejects.toThrow();
   });
 
@@ -98,7 +104,7 @@ describe("auth rotate", () => {
     process.env.MYCLAUDE_ALLOW_PLAINTEXT = undefined;
 
     await expect(
-      runAuthRotate({ id: "work", stdin: true, home: tmpHome, backend })
+      runAuthRotate({ id: "work", stdin: true, home: tmpHome, standalone: true, backend })
     ).rejects.toMatchObject({ exitCode: 3 });
   });
 
@@ -115,8 +121,38 @@ describe("auth rotate", () => {
     );
     vi.spyOn(process.stdin, "setEncoding").mockReturnValue(process.stdin);
 
-    await runAuthRotate({ id: "work", stdin: true, home: tmpHome, backend });
+    await runAuthRotate({ id: "work", stdin: true, home: tmpHome, standalone: true, backend });
 
     expect(stdout).not.toContain(newSecretValue);
+  });
+
+  it("routes through daemon transport when selected and skips direct backend writes", async () => {
+    const backend = new MockBackend("keychain-macos");
+    const backendSetSpy = vi.spyOn(backend, "set");
+    const authRotateSpy = vi.fn().mockResolvedValue(undefined);
+    const closeSpy = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(transportModule, "getTransport").mockResolvedValue({
+      transportKind: "daemon",
+      authRotate: authRotateSpy,
+      close: closeSpy,
+    } as unknown as Awaited<ReturnType<typeof transportModule.getTransport>>);
+
+    vi.spyOn(process.stdin, "on").mockImplementation(
+      (event: string, handler: (...args: unknown[]) => void) => {
+        if (event === "data") handler("sk-ant-daemon-rotated");
+        if (event === "end") handler();
+        return process.stdin;
+      }
+    );
+    vi.spyOn(process.stdin, "setEncoding").mockReturnValue(process.stdin);
+
+    await runAuthRotate({ id: "work", stdin: true, home: tmpHome, backend });
+
+    expect(authRotateSpy).toHaveBeenCalledWith({
+      authId: "work",
+      anthropicSecret: "sk-ant-daemon-rotated",
+    });
+    expect(backendSetSpy).not.toHaveBeenCalled();
+    expect(closeSpy).toHaveBeenCalledOnce();
   });
 });

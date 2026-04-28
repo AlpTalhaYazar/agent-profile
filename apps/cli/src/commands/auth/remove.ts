@@ -24,6 +24,7 @@ import { defineCommand } from "citty";
 import { loadAuthProfiles, saveAuthProfiles } from "../../auth/profiles-file.js";
 import { isTTY, promptConfirm } from "../../auth/prompt-secrets.js";
 import { CliError, EXIT_GENERIC, EXIT_USER_CANCELLED } from "../../errors.js";
+import { getTransport } from "../../transport/index.js";
 
 /** Exit code 3: auth failure / not found. */
 const EXIT_AUTH = 3;
@@ -38,6 +39,10 @@ export interface AuthRemoveOptions {
   yes?: boolean;
   /** Override myclaude home directory (for tests). */
   home?: string;
+  /** Exit 4 if daemon routing is required and no daemon is reachable. */
+  requireDaemon?: boolean;
+  /** Force standalone path; skips any daemon attempt. */
+  standalone?: boolean;
   /** Injected backend (for tests). */
   backend?: Backend;
 }
@@ -49,6 +54,27 @@ export interface AuthRemoveOptions {
  * @throws {CliError} If the profile is not found or the user declines.
  */
 export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (opts.home !== undefined) transportOpts.home = opts.home;
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+
+  const transport = await getTransport(transportOpts);
+  try {
+    if (transport.transportKind === "daemon") {
+      await runAuthRemoveViaDaemon(opts, transport);
+      return;
+    }
+    await runAuthRemoveDirect(opts);
+  } finally {
+    await transport.close();
+  }
+}
+
+async function runAuthRemoveViaDaemon(
+  opts: AuthRemoveOptions,
+  transport: Awaited<ReturnType<typeof getTransport>>
+): Promise<void> {
   const { id, yes = false, home } = opts;
 
   const doc = loadAuthProfiles(home);
@@ -58,7 +84,6 @@ export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
     throw new CliError(`Auth profile "${id}" not found.`, EXIT_AUTH);
   }
 
-  // Confirm destructive action.
   if (!yes) {
     if (!isTTY()) {
       throw new CliError(
@@ -74,13 +99,48 @@ export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
     }
   }
 
-  // Resolve backend.
+  const { failed } = await transport.authRemove({ authId: id, yes });
+
+  if (failed.length > 0) {
+    process.stderr.write(`Warning: failed to delete keychain entries for: ${failed.join(", ")}\n`);
+    process.stdout.write(
+      `Auth profile "${id}" metadata removed. Some keychain entries may remain.\n`
+    );
+    process.exit(EXIT_GENERIC);
+  }
+
+  process.stdout.write(`Auth profile "${id}" removed.\n`);
+}
+
+async function runAuthRemoveDirect(opts: AuthRemoveOptions): Promise<void> {
+  const { id, yes = false, home } = opts;
+
+  const doc = loadAuthProfiles(home);
+
+  const profile = doc.authProfiles[id];
+  if (!profile) {
+    throw new CliError(`Auth profile "${id}" not found.`, EXIT_AUTH);
+  }
+
+  if (!yes) {
+    if (!isTTY()) {
+      throw new CliError(
+        `Non-TTY mode requires --yes to confirm removal of "${id}".`,
+        EXIT_USER_CANCELLED
+      );
+    }
+    const confirmed = await promptConfirm(
+      `Remove auth profile "${id}" and all its keychain entries?`
+    );
+    if (!confirmed) {
+      throw new CliError("Removal cancelled by user.", EXIT_USER_CANCELLED);
+    }
+  }
+
   const backend = opts.backend ?? (await getBackend());
 
-  // Build list of keychain entries to delete.
   const entries: Array<{ service: string; account: string; name: string }> = [];
 
-  // Anthropic secret.
   try {
     const parsed = parseKeyringUri(profile.anthropic.secretRef);
     entries.push({ ...parsed, name: "anthropic" });
@@ -88,7 +148,6 @@ export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
     // Invalid URI — skip.
   }
 
-  // MCP secret refs.
   for (const [secretName, ref] of Object.entries(profile.mcpSecretRefs)) {
     try {
       const parsed = parseKeyringUri(ref);
@@ -98,7 +157,6 @@ export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
     }
   }
 
-  // Delete all keychain entries, collecting failures.
   const failed: string[] = [];
   for (const entry of entries) {
     try {
@@ -108,7 +166,6 @@ export async function runAuthRemove(opts: AuthRemoveOptions): Promise<void> {
     }
   }
 
-  // Remove metadata.
   delete doc.authProfiles[id];
   saveAuthProfiles(doc, home);
 

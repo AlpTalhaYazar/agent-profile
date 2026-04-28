@@ -1,6 +1,5 @@
 import type { Backend } from "@agent-profile/secrets";
 import { getBackend, parseKeyringUri, setSecret } from "@agent-profile/secrets";
-import { BackendUnsafeError } from "@agent-profile/secrets";
 /**
  * @module commands/auth/add
  *
@@ -34,6 +33,7 @@ import {
   readStdin,
 } from "../../auth/prompt-secrets.js";
 import { CliError, EXIT_CONFIG_INVALID, EXIT_GENERIC } from "../../errors.js";
+import { getTransport } from "../../transport/index.js";
 
 /** Valid auth profile ID pattern. */
 const ID_RE = /^[a-z0-9_\-]+$/;
@@ -66,6 +66,10 @@ export interface AuthAddOptions {
   force?: boolean;
   /** Override myclaude home directory (for tests). */
   home?: string;
+  /** Exit 4 if daemon routing is required and no daemon is reachable. */
+  requireDaemon?: boolean;
+  /** Force standalone path; skips any daemon attempt. */
+  standalone?: boolean;
   /** Injected backend (for tests). If omitted, uses `getBackend()`. */
   backend?: Backend;
 }
@@ -77,9 +81,29 @@ export interface AuthAddOptions {
  * @throws {CliError} On validation or write errors.
  */
 export async function runAuthAdd(opts: AuthAddOptions): Promise<void> {
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (opts.home !== undefined) transportOpts.home = opts.home;
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+
+  const transport = await getTransport(transportOpts);
+  try {
+    if (transport.transportKind === "daemon") {
+      await runAuthAddViaDaemon(opts, transport);
+      return;
+    }
+    await runAuthAddDirect(opts);
+  } finally {
+    await transport.close();
+  }
+}
+
+async function runAuthAddViaDaemon(
+  opts: AuthAddOptions,
+  transport: Awaited<ReturnType<typeof getTransport>>
+): Promise<void> {
   const { id, force = false, stdin = false, home } = opts;
 
-  // Validate the ID format.
   if (!ID_RE.test(id)) {
     throw new CliError(
       `Invalid auth profile ID "${id}". IDs must match [a-z0-9_-].`,
@@ -89,30 +113,12 @@ export async function runAuthAdd(opts: AuthAddOptions): Promise<void> {
 
   const doc = loadAuthProfiles(home);
 
-  // Check for existing ID.
   if (doc.authProfiles[id] !== undefined && !force) {
     throw new CliError(
       `Auth profile "${id}" already exists. Use --force to overwrite.`,
       EXIT_GENERIC
     );
   }
-
-  // Resolve backend — fail closed if unsafe.
-  const backend = opts.backend ?? (await getBackend());
-  if (backend.kind === "basic-text" && process.env.MYCLAUDE_ALLOW_PLAINTEXT !== "1") {
-    throw new CliError(
-      "Linux secret service unavailable (basic-text backend detected).\n" +
-        "Refusing to persist secrets unencrypted.\n" +
-        "Fix:\n" +
-        "  Debian/Ubuntu:  sudo apt install libsecret-1-0 gnome-keyring\n" +
-        "  Fedora:         sudo dnf install libsecret\n" +
-        "  Arch:           sudo pacman -S libsecret\n\n" +
-        "Or set MYCLAUDE_ALLOW_PLAINTEXT=1 if this is a disposable CI container.",
-      3 // EXIT_AUTH_FAILURE
-    );
-  }
-
-  // --- Collect inputs (prompt if needed) ---
 
   let displayName: string;
   if (opts.display !== undefined) {
@@ -149,17 +155,103 @@ export async function runAuthAdd(opts: AuthAddOptions): Promise<void> {
     );
   }
 
-  // Write secret to keychain.
+  try {
+    await transport.authAdd({
+      spec: {
+        id,
+        ...(displayName ? { displayName } : {}),
+        anthropic: {
+          mode: anthropicMode,
+          secretRef: anthropicKeyringUri(id),
+        },
+        mcpSecretRefs: {},
+      },
+      anthropicSecret: secretValue,
+      force,
+    });
+  } finally {
+    secretValue = "";
+  }
+
+  process.stdout.write(`Auth profile "${id}" created.\n`);
+}
+
+async function runAuthAddDirect(opts: AuthAddOptions): Promise<void> {
+  const { id, force = false, stdin = false, home } = opts;
+
+  if (!ID_RE.test(id)) {
+    throw new CliError(
+      `Invalid auth profile ID "${id}". IDs must match [a-z0-9_-].`,
+      EXIT_CONFIG_INVALID
+    );
+  }
+
+  const doc = loadAuthProfiles(home);
+
+  if (doc.authProfiles[id] !== undefined && !force) {
+    throw new CliError(
+      `Auth profile "${id}" already exists. Use --force to overwrite.`,
+      EXIT_GENERIC
+    );
+  }
+
+  const backend = opts.backend ?? (await getBackend());
+  if (backend.kind === "basic-text" && process.env.MYCLAUDE_ALLOW_PLAINTEXT !== "1") {
+    throw new CliError(
+      "Linux secret service unavailable (basic-text backend detected).\n" +
+        "Refusing to persist secrets unencrypted.\n" +
+        "Fix:\n" +
+        "  Debian/Ubuntu:  sudo apt install libsecret-1-0 gnome-keyring\n" +
+        "  Fedora:         sudo dnf install libsecret\n" +
+        "  Arch:           sudo pacman -S libsecret\n\n" +
+        "Or set MYCLAUDE_ALLOW_PLAINTEXT=1 if this is a disposable CI container.",
+      3 // EXIT_AUTH_FAILURE
+    );
+  }
+
+  let displayName: string;
+  if (opts.display !== undefined) {
+    displayName = opts.display;
+  } else if (isTTY()) {
+    displayName = await promptDisplayName();
+  } else {
+    displayName = id;
+  }
+
+  let anthropicMode: "apiKey" | "bedrock" | "vertex" | "gateway";
+  if (opts.anthropicMode !== undefined) {
+    anthropicMode = opts.anthropicMode;
+  } else if (isTTY()) {
+    anthropicMode = await promptAnthropicMode();
+  } else {
+    throw new CliError(
+      "Non-TTY mode requires --anthropic-mode (e.g. --anthropic-mode apiKey).",
+      EXIT_GENERIC
+    );
+  }
+
+  let secretValue: string;
+  if (opts.anthropicSecret !== undefined) {
+    secretValue = opts.anthropicSecret;
+  } else if (stdin) {
+    secretValue = await readStdin();
+  } else if (isTTY()) {
+    secretValue = await promptSecret("Anthropic secret:");
+  } else {
+    throw new CliError(
+      "Non-TTY mode requires --anthropic-secret <value> or --stdin.",
+      EXIT_GENERIC
+    );
+  }
+
   const secretRef = anthropicKeyringUri(id);
   const { service, account } = parseKeyringUri(secretRef);
   try {
     await setSecret(service, account, secretValue, backend);
   } finally {
-    // Zero out the secret value after use.
     secretValue = "";
   }
 
-  // Update metadata in authProfiles.yml.
   doc.authProfiles[id] = {
     displayName: displayName || undefined,
     anthropic: {

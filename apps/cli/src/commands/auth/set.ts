@@ -19,6 +19,7 @@ import { defineCommand } from "citty";
 import { loadAuthProfiles, saveAuthProfiles } from "../../auth/profiles-file.js";
 import { isTTY, promptSecret, readStdin } from "../../auth/prompt-secrets.js";
 import { CliError, EXIT_GENERIC } from "../../errors.js";
+import { getTransport } from "../../transport/index.js";
 
 /** Exit code 3: auth failure / not found. */
 const EXIT_AUTH = 3;
@@ -39,6 +40,10 @@ export interface AuthSetOptions {
   register?: boolean;
   /** Override myclaude home directory (for tests). */
   home?: string;
+  /** Exit 4 if daemon routing is required and no daemon is reachable. */
+  requireDaemon?: boolean;
+  /** Force standalone path; skips any daemon attempt. */
+  standalone?: boolean;
   /** Injected backend (for tests). */
   backend?: Backend;
 }
@@ -50,6 +55,27 @@ export interface AuthSetOptions {
  * @throws {CliError} If the profile or secret name is not found.
  */
 export async function runAuthSet(opts: AuthSetOptions): Promise<void> {
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (opts.home !== undefined) transportOpts.home = opts.home;
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+
+  const transport = await getTransport(transportOpts);
+  try {
+    if (transport.transportKind === "daemon") {
+      await runAuthSetViaDaemon(opts, transport);
+      return;
+    }
+    await runAuthSetDirect(opts);
+  } finally {
+    await transport.close();
+  }
+}
+
+async function runAuthSetViaDaemon(
+  opts: AuthSetOptions,
+  transport: Awaited<ReturnType<typeof getTransport>>
+): Promise<void> {
   const { id, name, stdin = false, register = false, home } = opts;
 
   const doc = loadAuthProfiles(home);
@@ -77,7 +103,57 @@ export async function runAuthSet(opts: AuthSetOptions): Promise<void> {
     );
   }
 
-  // Resolve backend — fail closed if unsafe.
+  let secretValue: string;
+  if (opts.value !== undefined) {
+    secretValue = opts.value;
+  } else if (stdin) {
+    secretValue = await readStdin();
+  } else if (isTTY()) {
+    secretValue = await promptSecret(`Value for ${id}.${name}:`);
+  } else {
+    throw new CliError("Non-TTY mode requires a value argument or --stdin.", EXIT_GENERIC);
+  }
+
+  try {
+    await transport.authSetSecret({
+      authId: id,
+      name,
+      value: secretValue,
+      register,
+    });
+  } finally {
+    secretValue = "";
+  }
+
+  process.stdout.write(`Secret "${id}.${name}" updated.\n`);
+}
+
+async function runAuthSetDirect(opts: AuthSetOptions): Promise<void> {
+  const { id, name, stdin = false, register = false, home } = opts;
+
+  const doc = loadAuthProfiles(home);
+
+  const profile = doc.authProfiles[id];
+  if (!profile) {
+    throw new CliError(
+      `Auth profile "${id}" not found. Create it first with: myclaude auth add ${id}`,
+      EXIT_AUTH
+    );
+  }
+
+  const existingRef = profile.mcpSecretRefs[name];
+  if (!existingRef && !register) {
+    const available = Object.keys(profile.mcpSecretRefs);
+    const hint =
+      available.length > 0
+        ? `Available: ${available.join(", ")}. Add --register to create a new entry.`
+        : "No secrets registered yet. Use --register to add one.";
+    throw new CliError(
+      `Secret "${name}" not in authProfiles.${id}.mcpSecretRefs. ${hint}`,
+      EXIT_AUTH
+    );
+  }
+
   const backend = opts.backend ?? (await getBackend());
   if (backend.kind === "basic-text" && process.env.MYCLAUDE_ALLOW_PLAINTEXT !== "1") {
     throw new CliError(
@@ -92,7 +168,6 @@ export async function runAuthSet(opts: AuthSetOptions): Promise<void> {
     );
   }
 
-  // Collect the value.
   let secretValue: string;
   if (opts.value !== undefined) {
     secretValue = opts.value;
@@ -104,7 +179,6 @@ export async function runAuthSet(opts: AuthSetOptions): Promise<void> {
     throw new CliError("Non-TTY mode requires a value argument or --stdin.", EXIT_GENERIC);
   }
 
-  // Determine or create the keyring URI.
   const keyringUri = existingRef ?? `keyring://${name.replace(/\./g, "-")}/${id}`;
   const { service, account } = parseKeyringUri(keyringUri);
 
@@ -114,7 +188,6 @@ export async function runAuthSet(opts: AuthSetOptions): Promise<void> {
     secretValue = "";
   }
 
-  // Update mcpSecretRefs if registering a new entry.
   if (!existingRef) {
     profile.mcpSecretRefs[name] = keyringUri;
     saveAuthProfiles(doc, home);
