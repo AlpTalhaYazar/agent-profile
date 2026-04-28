@@ -51,6 +51,7 @@ import {
   type ReqProfileShowT,
   type ReqSessionsListT,
 } from "@agent-profile/ipc-protocol";
+import { type WriteHandlerDeps, createWriteHandlers } from "./handlers-write.js";
 
 /**
  * Resolve the "myclaude home" given a user home dir. The myclaude home is the
@@ -99,14 +100,17 @@ export interface LifecycleHandle {
  * @param userHome - The OS user home directory (e.g. `/Users/alice`).
  *   Defaults to `os.homedir()`. Tests pass a tmpdir whose `.myclaude/`
  *   subtree contains the fixture config.
+ * @param writeDeps - When provided, the write-side handler map is merged in.
+ *   Tests that only need read-side coverage may omit this.
  */
 export function createHandlers(
   lifecycle: LifecycleHandle,
-  userHome: string = homedir()
+  userHome: string = homedir(),
+  writeDeps?: WriteHandlerDeps
 ): HandlerMap {
   const myClaudeHome = myClaudeHomeFor(userHome);
 
-  return {
+  const readHandlers: HandlerMap = {
     "auth.list": wrap<ReqAuthListT>(async (req) => {
       const result: AuthListResult = authListService({
         home: myClaudeHome,
@@ -179,6 +183,9 @@ export function createHandlers(
       return {};
     }),
   };
+
+  if (!writeDeps) return readHandlers;
+  return { ...readHandlers, ...createWriteHandlers(writeDeps) };
 }
 
 /**

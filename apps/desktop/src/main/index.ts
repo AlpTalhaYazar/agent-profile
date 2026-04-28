@@ -16,12 +16,17 @@
  * UI sprints add `auth.*`, `profile.*`, `sessions.*` channels here.
  */
 
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSocketPath } from "@agent-profile/ipc-protocol";
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain } from "electron";
+import { getBackend } from "@agent-profile/secrets";
+import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, safeStorage } from "electron";
+import { AuditLog } from "./daemon/audit.js";
+import { buildCapabilityRegistry } from "./daemon/capability-registry.js";
 import { rotateBootCookie } from "./daemon/cookie.js";
 import { DaemonLifecycle } from "./daemon/lifecycle.js";
+import { buildSecretsStore } from "./daemon/secrets-store.js";
 import { createSecureWindow, validateSenderFrame } from "./security.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,11 +68,27 @@ async function startup(): Promise<void> {
 
   const cookie = await rotateBootCookie();
   const socketPath = defaultSocketPath();
+
+  const myClaudeHome = process.env.MYCLAUDE_HOME ?? join(homedir(), ".myclaude");
+  const store = await buildSecretsStore({ myClaudeHome, safeStorage });
+  const capability = buildCapabilityRegistry();
+  const audit = new AuditLog({ filePath: join(myClaudeHome, "audit.log") });
+  const keyring = await getBackend().catch(() => undefined);
+
   await lifecycle.start({
     socketPath,
     cookie,
     serverVersion: SERVER_VERSION,
     requestShutdown: () => app.quit(),
+    writeHandlers: {
+      myClaudeHome,
+      store,
+      ...(keyring ? { keyring } : {}),
+      issuer: capability.issuer,
+      verifier: capability.verifier,
+      audit,
+      daemonPid: process.pid,
+    },
   });
 
   // Renderer-facing IPC surface (preload-only; Renderer reaches it via

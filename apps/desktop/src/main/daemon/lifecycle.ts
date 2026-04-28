@@ -34,6 +34,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DaemonServer, type HandlerMap } from "@agent-profile/ipc-protocol";
+import type { WriteHandlerDeps } from "./handlers-write.js";
 import { type LifecycleHandle, createHandlers } from "./handlers.js";
 
 /** Local mirror of `sessionsRootDefault()` parameterised by home. */
@@ -66,6 +67,13 @@ export interface LifecycleStartOpts {
   requestShutdown?: () => void;
   /** Optional `Date.now()` override for deterministic startedAt timestamps. */
   nowMs?: number;
+  /**
+   * Write-side handler dependencies. When provided, the daemon advertises and
+   * serves the credential / session / migrate kinds. When omitted (e.g. unit
+   * tests that only exercise read handlers), the daemon only serves the
+   * read-only surface.
+   */
+  writeHandlers?: WriteHandlerDeps;
 }
 
 /** Shape persisted to `~/.myclaude/daemon.lock` for diagnostic introspection. */
@@ -125,20 +133,34 @@ export class DaemonLifecycle {
       },
     };
 
-    const handlers: HandlerMap = createHandlers(handle, this.home);
+    const handlers: HandlerMap = createHandlers(handle, this.home, opts.writeHandlers);
+
+    const features = [
+      "auth.list",
+      "auth.get-secret-ref",
+      "profile.show",
+      "sessions.list",
+      "daemon.status",
+      "daemon.stop",
+    ];
+    if (opts.writeHandlers) {
+      features.push(
+        "auth.add",
+        "auth.setSecret",
+        "auth.rotate",
+        "auth.remove",
+        "session.start",
+        "session.end",
+        "secret.get",
+        "secrets.migrate"
+      );
+    }
 
     this.server = new DaemonServer({
       socketPath: this.socketPath,
       cookie: opts.cookie,
       serverVersion: opts.serverVersion,
-      features: [
-        "auth.list",
-        "auth.get-secret-ref",
-        "profile.show",
-        "sessions.list",
-        "daemon.status",
-        "daemon.stop",
-      ],
+      features,
       handlers,
     });
 
