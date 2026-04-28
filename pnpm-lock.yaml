@@ -145,6 +145,9 @@ importers:
       '@agent-profile/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agent-profile/ipc-protocol':
+        specifier: workspace:*
+        version: link:../../packages/ipc-protocol
       '@agent-profile/persona-deployer':
         specifier: workspace:*
         version: link:../../packages/persona-deployer

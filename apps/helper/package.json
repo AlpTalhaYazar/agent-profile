@@ -14,6 +14,7 @@
   "dependencies": {
     "@agent-profile/capability": "workspace:*",
     "@agent-profile/core": "workspace:*",
+    "@agent-profile/ipc-protocol": "workspace:*",
     "@agent-profile/persona-deployer": "workspace:*",
     "@agent-profile/secrets": "workspace:*",
     "zod": "^4.0.0"
