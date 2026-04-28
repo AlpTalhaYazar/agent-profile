@@ -47,12 +47,19 @@ export interface TokenPayload {
   expiresAtMs: number;
 }
 
-/** Result of {@link verifyToken}. Discriminated on `ok`. */
+/**
+ * Result of {@link verifyToken} or {@link CapabilityVerifier.verify}.
+ * Discriminated on `ok`.
+ *
+ * `"revoked"` is only ever produced by {@link CapabilityVerifier} (which
+ * consults a {@link RevocationRegistry}); the standalone {@link verifyToken}
+ * never emits it because it has no notion of revocation.
+ */
 export type VerifyResult =
   | { ok: true; payload: TokenPayload }
   | {
       ok: false;
-      reason: "malformed" | "bad-signature" | "expired" | "unknown";
+      reason: "malformed" | "bad-signature" | "expired" | "revoked" | "unknown";
     };
 
 /**

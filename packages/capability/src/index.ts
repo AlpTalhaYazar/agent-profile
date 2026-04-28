@@ -15,3 +15,15 @@ export {
   type TokenPayload,
   type VerifyResult,
 } from "./token.js";
+export { RevocationRegistry } from "./revocation.js";
+export {
+  CapabilityIssuer,
+  type CapabilityIssuerOptions,
+  type IssueArgs,
+  type IssuedToken,
+} from "./issuer.js";
+export {
+  CapabilityVerifier,
+  type CapabilityVerifierOptions,
+  type VerifyOptions,
+} from "./verifier.js";
