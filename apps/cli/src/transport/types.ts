@@ -92,6 +92,67 @@ export interface TransportDaemonStopInput {
   force?: boolean;
 }
 
+// ─── Write-side I/O (Phase 2 milestone 3) ────────────────────────────────────
+
+/** Auth profile spec used by `transport.authAdd`. */
+export interface TransportAuthAddSpec {
+  id: string;
+  displayName?: string;
+  anthropic: {
+    mode: "apiKey" | "bedrock" | "vertex" | "gateway";
+    secretRef: string;
+  };
+  mcpSecretRefs?: Record<string, string>;
+}
+
+/** Input for `transport.authAdd`. */
+export interface TransportAuthAddInput {
+  spec: TransportAuthAddSpec;
+  /** Plaintext Anthropic secret. The transport encodes to base64 before sending. */
+  anthropicSecret: string;
+  force?: boolean;
+}
+
+/** Input for `transport.authSetSecret`. */
+export interface TransportAuthSetSecretInput {
+  authId: string;
+  name: string;
+  value: string;
+  register?: boolean;
+}
+
+/** Input for `transport.authRotate`. */
+export interface TransportAuthRotateInput {
+  authId: string;
+  anthropicSecret: string;
+}
+
+/** Input for `transport.authRemove`. */
+export interface TransportAuthRemoveInput {
+  authId: string;
+  yes?: boolean;
+}
+
+/** Result of `transport.authRemove`. */
+export interface TransportAuthRemoveResult {
+  /** Secret names whose keychain delete failed (empty on full success). */
+  failed: string[];
+}
+
+/** Input for `transport.secretsMigrate`. */
+export interface TransportSecretsMigrateInput {
+  dryRun?: boolean;
+  keepKeyring?: boolean;
+}
+
+/** Result of `transport.secretsMigrate`. */
+export interface TransportSecretsMigrateResult {
+  scanned: number;
+  migrated: number;
+  skipped: number;
+  errors: { key: string; reason: string }[];
+}
+
 /** Result of `transport.daemonStatus`. Identical shape to `RespDaemonStatusOk` body. */
 export interface TransportDaemonStatusResult {
   pid: number;
@@ -125,6 +186,16 @@ export interface CliTransport {
   daemonStatus(): Promise<TransportDaemonStatusResult>;
 
   daemonStop(input: TransportDaemonStopInput): Promise<void>;
+
+  authAdd(input: TransportAuthAddInput): Promise<void>;
+
+  authSetSecret(input: TransportAuthSetSecretInput): Promise<void>;
+
+  authRotate(input: TransportAuthRotateInput): Promise<void>;
+
+  authRemove(input: TransportAuthRemoveInput): Promise<TransportAuthRemoveResult>;
+
+  secretsMigrate(input: TransportSecretsMigrateInput): Promise<TransportSecretsMigrateResult>;
 
   /** Release any underlying connection. Idempotent and safe to call on either transport. */
   close(): Promise<void>;

@@ -17,6 +17,7 @@ import { launchCommand } from "./commands/launch/index.js";
 import { profileCommand } from "./commands/profile/index.js";
 import { renderCommand } from "./commands/render.js";
 import { schemaCommand } from "./commands/schema.js";
+import { secretsCommand } from "./commands/secrets/index.js";
 import { sessionsCommand } from "./commands/sessions.js";
 import { unuseCommand } from "./commands/unuse.js";
 import { useCommand } from "./commands/use.js";
@@ -43,6 +44,7 @@ const main = defineCommand({
     unuse: unuseCommand,
     render: renderCommand,
     sessions: sessionsCommand,
+    secrets: secretsCommand,
     schema: schemaCommand,
     daemon: daemonCommand,
     doctor: doctorCommand,

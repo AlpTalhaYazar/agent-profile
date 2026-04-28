@@ -25,14 +25,21 @@ import { IpcError } from "@agent-profile/ipc-protocol";
 import { CliError, EXIT_AUTH_FAILURE, EXIT_DAEMON_UNREACHABLE, EXIT_GENERIC } from "../errors.js";
 import type {
   CliTransport,
+  TransportAuthAddInput,
   TransportAuthGetSecretRefInput,
   TransportAuthGetSecretRefResult,
   TransportAuthListInput,
   TransportAuthListResult,
+  TransportAuthRemoveInput,
+  TransportAuthRemoveResult,
+  TransportAuthRotateInput,
+  TransportAuthSetSecretInput,
   TransportDaemonStatusResult,
   TransportDaemonStopInput,
   TransportProfileShowInput,
   TransportProfileShowResult,
+  TransportSecretsMigrateInput,
+  TransportSecretsMigrateResult,
   TransportSessionsListInput,
 } from "./types.js";
 
@@ -119,6 +126,65 @@ export class DaemonTransport implements CliTransport {
     const body: Record<string, unknown> = {};
     if (input.force !== undefined) body.force = input.force;
     await this.requestSafe<RespDaemonStopOkT>("daemon.stop", body);
+  }
+
+  async authAdd(input: TransportAuthAddInput): Promise<void> {
+    const body: Record<string, unknown> = {
+      spec: input.spec,
+      anthropicSecretB64: Buffer.from(input.anthropicSecret, "utf8").toString("base64"),
+    };
+    if (input.force !== undefined) body.force = input.force;
+    await this.requestSafe("auth.add", body);
+  }
+
+  async authSetSecret(input: TransportAuthSetSecretInput): Promise<void> {
+    const body: Record<string, unknown> = {
+      authId: input.authId,
+      name: input.name,
+      valueB64: Buffer.from(input.value, "utf8").toString("base64"),
+    };
+    if (input.register !== undefined) body.register = input.register;
+    await this.requestSafe("auth.setSecret", body);
+  }
+
+  async authRotate(input: TransportAuthRotateInput): Promise<void> {
+    await this.requestSafe("auth.rotate", {
+      authId: input.authId,
+      anthropicSecretB64: Buffer.from(input.anthropicSecret, "utf8").toString("base64"),
+    });
+  }
+
+  async authRemove(input: TransportAuthRemoveInput): Promise<TransportAuthRemoveResult> {
+    const body: Record<string, unknown> = { authId: input.authId };
+    if (input.yes !== undefined) body.yes = input.yes;
+    const resp = await this.requestSafe<{ kind: "auth.remove.ok"; failed: string[] } & RespT>(
+      "auth.remove",
+      body
+    );
+    return { failed: resp.failed };
+  }
+
+  async secretsMigrate(
+    input: TransportSecretsMigrateInput
+  ): Promise<TransportSecretsMigrateResult> {
+    const body: Record<string, unknown> = {};
+    if (input.dryRun !== undefined) body.dryRun = input.dryRun;
+    if (input.keepKeyring !== undefined) body.keepKeyring = input.keepKeyring;
+    const resp = await this.requestSafe<
+      {
+        kind: "secrets.migrate.ok";
+        scanned: number;
+        migrated: number;
+        skipped: number;
+        errors: { key: string; reason: string }[];
+      } & RespT
+    >("secrets.migrate", body);
+    return {
+      scanned: resp.scanned,
+      migrated: resp.migrated,
+      skipped: resp.skipped,
+      errors: resp.errors,
+    };
   }
 
   async close(): Promise<void> {

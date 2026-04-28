@@ -20,15 +20,22 @@ import {
 import { CliError, EXIT_DAEMON_UNREACHABLE } from "../errors.js";
 import type {
   CliTransport,
+  TransportAuthAddInput,
   TransportAuthGetSecretRefInput,
   TransportAuthGetSecretRefResult,
   TransportAuthListInput,
   TransportAuthListResult,
   TransportAuthProfile,
+  TransportAuthRemoveInput,
+  TransportAuthRemoveResult,
+  TransportAuthRotateInput,
+  TransportAuthSetSecretInput,
   TransportDaemonStatusResult,
   TransportDaemonStopInput,
   TransportProfileShowInput,
   TransportProfileShowResult,
+  TransportSecretsMigrateInput,
+  TransportSecretsMigrateResult,
   TransportSessionsListInput,
 } from "./types.js";
 
@@ -116,9 +123,52 @@ export class InProcTransport implements CliTransport {
     );
   }
 
+  // The standalone path keeps existing CLI commands writing keychain entries
+  // directly via `@agent-profile/secrets` (Phase 1 behavior). The transport
+  // exposes these methods so callers that *also* run with a daemon can route
+  // through the same surface; in-proc rejects them so the command layer falls
+  // back to its existing direct path.
+  async authAdd(_input: TransportAuthAddInput): Promise<void> {
+    throw daemonRequired("auth.add");
+  }
+  async authSetSecret(_input: TransportAuthSetSecretInput): Promise<void> {
+    throw daemonRequired("auth.setSecret");
+  }
+  async authRotate(_input: TransportAuthRotateInput): Promise<void> {
+    throw daemonRequired("auth.rotate");
+  }
+  async authRemove(_input: TransportAuthRemoveInput): Promise<TransportAuthRemoveResult> {
+    throw daemonRequired("auth.remove");
+  }
+  async secretsMigrate(
+    _input: TransportSecretsMigrateInput
+  ): Promise<TransportSecretsMigrateResult> {
+    throw new CliError(
+      "secrets migrate requires a running daemon.",
+      EXIT_DAEMON_UNREACHABLE,
+      "Start the daemon with `myclaude daemon start` and try again."
+    );
+  }
+
   async close(): Promise<void> {
     // No connection to release.
   }
+}
+
+/**
+ * Standalone-path stub for the four write methods. These calls only make
+ * sense when routed through the daemon (which owns `safeStorage`); the
+ * standalone CLI's existing `auth.add` / `auth.set` / `auth.rotate` /
+ * `auth.remove` commands write to the keychain directly without going
+ * through the transport, so this stub is only ever hit by callers that
+ * deliberately routed through `getTransport`.
+ */
+function daemonRequired(operation: string): CliError {
+  return new CliError(
+    `${operation} via transport requires a running daemon.`,
+    EXIT_DAEMON_UNREACHABLE,
+    "Start it with `myclaude daemon start` or use the equivalent direct command."
+  );
 }
 
 /** Project a service-layer entry into the transport's wire shape. */
