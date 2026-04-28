@@ -32,6 +32,8 @@ export interface DaemonStartOptions {
   pollTimeoutMs?: number;
   /** Override the polling interval. Defaults to 200ms. */
   pollIntervalMs?: number;
+  /** Override workspace root resolution for tests. */
+  workspaceRoot?: string;
 }
 
 /**
@@ -56,7 +58,7 @@ export async function runDaemonStart(opts: DaemonStartOptions = {}): Promise<voi
   const pollTimeoutMs = opts.pollTimeoutMs ?? 5000;
   const pollIntervalMs = opts.pollIntervalMs ?? 200;
 
-  const resolved = resolveDesktopEntry();
+  const resolved = resolveDesktopEntry(opts.workspaceRoot);
 
   const env: NodeJS.ProcessEnv = { ...process.env };
   env.MYCLAUDE_HEADLESS = headless ? "1" : "";
@@ -160,8 +162,8 @@ interface ResolvedDesktopEntry {
  * If any step fails, throw an actionable `CliError` directing the user to
  * build the desktop app.
  */
-function resolveDesktopEntry(): ResolvedDesktopEntry {
-  const workspaceRoot = findWorkspaceRoot();
+function resolveDesktopEntry(workspaceRootOverride?: string): ResolvedDesktopEntry {
+  const workspaceRoot = workspaceRootOverride ?? findWorkspaceRoot();
   if (!workspaceRoot) {
     throw new CliError(
       "Could not locate the workspace root from the CLI binary.",
