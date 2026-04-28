@@ -40,6 +40,7 @@ describe("--pretty implies --json and produces indented JSON", () => {
   let stdout = "";
 
   beforeEach(() => {
+    process.env.MYCLAUDE_FORCE_STANDALONE = "1";
     stdout = "";
     vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
       stdout += chunk.toString();
@@ -50,6 +51,8 @@ describe("--pretty implies --json and produces indented JSON", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // biome-ignore lint/performance/noDelete: must fully unset env vars
+    delete process.env.MYCLAUDE_FORCE_STANDALONE;
   });
 
   it("version --pretty emits indented JSON", async () => {
@@ -134,7 +137,7 @@ authProfiles:
 `.trim();
       writeFileSync(join(tempHome, "config", "authProfiles.yml"), yaml);
 
-      runAuthList({ home: tempHome, pretty: true });
+      await runAuthList({ home: tempHome, pretty: true });
 
       expect(stdout).toContain('"authProfiles"');
       expect(stdout).toContain("\n  ");

@@ -23,6 +23,8 @@ export const EXIT_GENERIC = 1;
 export const EXIT_CONFIG_INVALID = 2;
 /** Exit code 3: auth failure / keychain unavailable / secret resolution failure. */
 export const EXIT_AUTH_FAILURE = 3;
+/** Exit code 4: daemon unreachable (started or required, but not connectable). */
+export const EXIT_DAEMON_UNREACHABLE = 4;
 /** Exit code 5: failed to spawn the child process. */
 export const EXIT_SPAWN_FAILURE = 5;
 /** Exit code 6: user cancelled (declined prompt). */

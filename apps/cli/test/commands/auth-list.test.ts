@@ -12,6 +12,8 @@ describe("auth list", () => {
   let stdout: string;
 
   beforeEach(() => {
+    // Force the standalone path so the test never touches the real daemon.
+    process.env.MYCLAUDE_FORCE_STANDALONE = "1";
     tmpHome = join(tmpdir(), `ap-auth-list-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(join(tmpHome, "config"), { recursive: true });
     stdout = "";
@@ -24,20 +26,22 @@ describe("auth list", () => {
   afterEach(() => {
     rmSync(tmpHome, { recursive: true, force: true });
     vi.restoreAllMocks();
+    // biome-ignore lint/performance/noDelete: must fully unset env vars
+    delete process.env.MYCLAUDE_FORCE_STANDALONE;
   });
 
-  it('shows "No auth profiles configured" when file is missing', () => {
-    runAuthList({ home: tmpHome });
+  it('shows "No auth profiles configured" when file is missing', async () => {
+    await runAuthList({ home: tmpHome });
     expect(stdout).toContain("No auth profiles configured");
   });
 
-  it("shows empty state when file has no profiles", () => {
+  it("shows empty state when file has no profiles", async () => {
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), "version: 1\nauthProfiles: {}\n");
-    runAuthList({ home: tmpHome });
+    await runAuthList({ home: tmpHome });
     expect(stdout).toContain("No auth profiles configured");
   });
 
-  it("shows table with ID, DISPLAY NAME, MODE, SECRETS for two profiles", () => {
+  it("shows table with ID, DISPLAY NAME, MODE, SECRETS for two profiles", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -58,7 +62,7 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome });
+    await runAuthList({ home: tmpHome });
 
     expect(stdout).toContain("work");
     expect(stdout).toContain("Work (Acme Inc.)");
@@ -69,7 +73,7 @@ authProfiles:
     expect(stdout).toContain("Personal");
   });
 
-  it("shows keyring URIs with --show-refs", () => {
+  it("shows keyring URIs with --show-refs", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -83,13 +87,13 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome, showRefs: true });
+    await runAuthList({ home: tmpHome, showRefs: true });
 
     expect(stdout).toContain("keyring://anthropic/work");
     expect(stdout).toContain("keyring://github/work");
   });
 
-  it("does NOT show keyring URIs without --show-refs", () => {
+  it("does NOT show keyring URIs without --show-refs", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -103,7 +107,7 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome, showRefs: false });
+    await runAuthList({ home: tmpHome, showRefs: false });
 
     // Should contain secret names but not the keyring URIs.
     expect(stdout).toContain("github.pat");
@@ -111,7 +115,7 @@ authProfiles:
     // (They may appear in the auth table as secret names, not values.)
   });
 
-  it("emits JSON with --json flag", () => {
+  it("emits JSON with --json flag", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -125,7 +129,7 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome, json: true });
+    await runAuthList({ home: tmpHome, json: true });
 
     const parsed = JSON.parse(stdout);
     expect(parsed.authProfiles).toBeDefined();
@@ -134,7 +138,7 @@ authProfiles:
     expect(parsed.authProfiles[0].mode).toBe("apiKey");
   });
 
-  it("JSON output with --show-refs includes keyring URIs", () => {
+  it("JSON output with --show-refs includes keyring URIs", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -148,14 +152,14 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome, json: true, showRefs: true });
+    await runAuthList({ home: tmpHome, json: true, showRefs: true });
 
     const parsed = JSON.parse(stdout);
     expect(parsed.authProfiles[0].anthropicRef).toBe("keyring://anthropic/work");
     expect(parsed.authProfiles[0].mcpSecrets).toEqual({ "github.pat": "keyring://github/work" });
   });
 
-  it("JSON output does NOT contain secret values", () => {
+  it("JSON output does NOT contain secret values", async () => {
     const yaml = `
 version: 1
 authProfiles:
@@ -169,7 +173,7 @@ authProfiles:
 `.trim();
     writeFileSync(join(tmpHome, "config", "authProfiles.yml"), yaml);
 
-    runAuthList({ home: tmpHome, json: true });
+    await runAuthList({ home: tmpHome, json: true });
 
     // The output should not contain any real secret values.
     // keyring:// URIs are references, not values — they are acceptable to show

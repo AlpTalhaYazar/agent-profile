@@ -10,12 +10,7 @@
  * With `--resolve-secrets`, runs `resolveSecrets` after cascade and
  * replaces sensitive fields with `«redacted»` (unless `--show-values` is set).
  */
-import {
-  type EffectiveConfig,
-  type EffectiveSessionConfig,
-  type ScopeDocT,
-  resolve as coreResolve,
-} from "@agent-profile/core";
+import type { EffectiveConfig, EffectiveSessionConfig, ScopeDocT } from "@agent-profile/core";
 import type { Backend } from "@agent-profile/secrets";
 import { BackendUnsafeError, getBackend, resolveSecrets } from "@agent-profile/secrets";
 import { defineCommand } from "citty";
@@ -23,7 +18,8 @@ import { loadAuthProfiles } from "../../auth/profiles-file.js";
 import { CliError, EXIT_CONFIG_INVALID, mapCoreError } from "../../errors.js";
 import { formatEffectiveConfig, renderResolved } from "../../output/format.js";
 import { writeJson } from "../../output/json.js";
-import { globalConfigDir, globalFragmentsDir } from "../../utils/paths.js";
+import { getTransport } from "../../transport/index.js";
+import { myClaudeHome } from "../../utils/paths.js";
 
 /**
  * Adapts an `EffectiveConfig` to a `ScopeDocT` so it can be passed to
@@ -65,6 +61,10 @@ export interface ShowOptions {
   showValues?: boolean;
   /** Injected backend for secret resolution (for tests). */
   backend?: Backend;
+  /** Exit 4 if the daemon is unreachable instead of falling back to standalone. */
+  requireDaemon?: boolean;
+  /** Force standalone path; skip the daemon attempt entirely. */
+  standalone?: boolean;
 }
 
 /**
@@ -89,19 +89,32 @@ export async function runShow(opts: ShowOptions): Promise<void> {
   // --pretty implies --json so scripts can always opt into structured output.
   const json = Boolean(opts.json) || pretty;
 
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (home !== undefined) transportOpts.home = home;
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+  const transport = await getTransport(transportOpts);
+
   let result: EffectiveSessionConfig;
   try {
-    const resolveInput: Parameters<typeof coreResolve>[0] = {
+    const serviceInput: Parameters<typeof transport.profileShow>[0] = {
       role,
       cwd: cwd ?? process.cwd(),
-      globalConfigDir: globalConfigDir(home),
-      fragmentDirs: [globalFragmentsDir(home)],
+      home: home ?? myClaudeHome(),
     };
-    if (auth !== undefined) resolveInput.authProfileId = auth;
-    result = coreResolve(resolveInput);
+    if (auth !== undefined) serviceInput.authProfileId = auth;
+    const transportResult = await transport.profileShow(serviceInput);
+    result = {
+      effective: transportResult.effective as EffectiveSessionConfig["effective"],
+      provenance: transportResult.provenance as EffectiveSessionConfig["provenance"],
+      runtimePaths: null,
+    };
   } catch (err) {
+    if (err instanceof CliError) throw err;
     const mapped = mapCoreError(err);
     throw new CliError(mapped.message, mapped.exitCode, mapped.hint);
+  } finally {
+    await transport.close();
   }
 
   // Non-resolve path — existing behavior.
@@ -263,6 +276,16 @@ export const profileShowCommand = defineCommand({
       type: "string",
       description: "Override working directory (for testing)",
     },
+    "require-daemon": {
+      type: "boolean",
+      description: "Exit 4 if the daemon is unreachable",
+      default: false,
+    },
+    standalone: {
+      type: "boolean",
+      description: "Skip the daemon attempt; always run in-process",
+      default: false,
+    },
   },
   async run({ args }) {
     if (!args.role) {
@@ -278,6 +301,8 @@ export const profileShowCommand = defineCommand({
       showValues: args["show-values"],
       home: args.home,
       cwd: args.cwd,
+      requireDaemon: Boolean(args["require-daemon"]),
+      standalone: Boolean(args.standalone),
     });
   },
 });

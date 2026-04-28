@@ -19,6 +19,7 @@ import {
   readSessionRecord,
   updateSessionRecord,
 } from "../session/registry.js";
+import { getTransport } from "../transport/index.js";
 
 export interface SessionsBaseOptions {
   sessionsRoot?: string;
@@ -31,6 +32,12 @@ export interface SessionsListOptions extends SessionsBaseOptions {
   active?: boolean;
   all?: boolean;
   nowMs?: number;
+  /** Override myclaude home directory (cookie lookup). */
+  home?: string;
+  /** Exit 4 if the daemon is unreachable instead of falling back to standalone. */
+  requireDaemon?: boolean;
+  /** Force standalone path; skip the daemon attempt entirely. */
+  standalone?: boolean;
 }
 
 export interface SessionsShowOptions extends SessionsBaseOptions {
@@ -69,9 +76,21 @@ export interface SessionsGcResult {
 /** List active and recent sessions from the registry. */
 export async function runSessionsList(opts: SessionsListOptions = {}): Promise<SessionRecord[]> {
   const sessionsRoot = resolveSessionsRoot(opts);
-  let records = await listSessionRecords({ sessionsRoot });
-  if (opts.active) {
-    records = records.filter((record) => record.status === "running");
+
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (opts.home !== undefined) transportOpts.home = opts.home;
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+  const transport = await getTransport(transportOpts);
+
+  let records: SessionRecord[];
+  try {
+    records = await transport.sessionsList({
+      sessionsRoot,
+      activeOnly: Boolean(opts.active),
+    });
+  } finally {
+    await transport.close();
   }
 
   const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
@@ -270,6 +289,16 @@ export const sessionsCommand = defineCommand({
           description: "Pretty-print JSON output (implies --json)",
           default: false,
         },
+        "require-daemon": {
+          type: "boolean",
+          description: "Exit 4 if the daemon is unreachable",
+          default: false,
+        },
+        standalone: {
+          type: "boolean",
+          description: "Skip the daemon attempt; always run in-process",
+          default: false,
+        },
       },
       async run({ args }) {
         await runSessionsList({
@@ -277,6 +306,8 @@ export const sessionsCommand = defineCommand({
           all: Boolean(args.all),
           json: Boolean(args.json),
           pretty: Boolean(args.pretty),
+          requireDaemon: Boolean(args["require-daemon"]),
+          standalone: Boolean(args.standalone),
         });
       },
     }),

@@ -11,6 +11,7 @@
 import { defineCommand, runMain } from "citty";
 import { createConsola } from "consola";
 import { authCommand } from "./commands/auth/index.js";
+import { daemonCommand } from "./commands/daemon/index.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { launchCommand } from "./commands/launch/index.js";
 import { profileCommand } from "./commands/profile/index.js";
@@ -41,6 +42,7 @@ const main = defineCommand({
     render: renderCommand,
     sessions: sessionsCommand,
     schema: schemaCommand,
+    daemon: daemonCommand,
     doctor: doctorCommand,
     version: versionCommand,
   },
