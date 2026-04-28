@@ -1,0 +1,4 @@
+out/
+.vite/
+dist/
+node_modules/
