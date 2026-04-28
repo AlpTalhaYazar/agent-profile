@@ -203,7 +203,7 @@ describe("daemon write handlers", () => {
     expect(await store.get("agent-profile.github-pat.work")).toBe("PAT");
   });
 
-  it("auth.rotate replaces the stored secret and revokes live sessions", async () => {
+  it("auth.rotate replaces the stored secret and revokes live sessions bound to that profile", async () => {
     const handler = build();
     await handler["auth.add"]?.(
       req("auth.add", {
@@ -215,14 +215,29 @@ describe("daemon write handlers", () => {
       }),
       ctx
     );
+    const start = (await handler["session.start"]?.(
+      req("session.start", {
+        sessionId: "s-rotate",
+        pid: 41,
+        authProfileId: "work",
+        ttlMs: 60_000,
+      }),
+      ctx
+    )) as { capabilityToken: string };
     await handler["auth.rotate"]?.(
       req("auth.rotate", { authId: "work", anthropicSecretB64: b64("A2") }),
       ctx
     );
     expect(await store.get("agent-profile.anthropic.work")).toBe("A2");
+    await expect(
+      handler["secret.get"]?.(
+        req("secret.get", { capabilityToken: start.capabilityToken, name: "anthropic" }),
+        ctx
+      )
+    ).rejects.toMatchObject({ code: "AUTH" });
   });
 
-  it("auth.remove deletes metadata and store entries", async () => {
+  it("auth.remove deletes metadata, store entries, and revokes live sessions bound to that profile", async () => {
     const handler = build();
     await handler["auth.add"]?.(
       req("auth.add", {
@@ -234,11 +249,26 @@ describe("daemon write handlers", () => {
       }),
       ctx
     );
+    const start = (await handler["session.start"]?.(
+      req("session.start", {
+        sessionId: "s-remove",
+        pid: 42,
+        authProfileId: "work",
+        ttlMs: 60_000,
+      }),
+      ctx
+    )) as { capabilityToken: string };
     const body = (await handler["auth.remove"]?.(req("auth.remove", { authId: "work" }), ctx)) as {
       failed: string[];
     };
     expect(body.failed).toEqual([]);
     expect(await store.get("agent-profile.anthropic.work")).toBeNull();
+    await expect(
+      handler["secret.get"]?.(
+        req("secret.get", { capabilityToken: start.capabilityToken, name: "anthropic" }),
+        ctx
+      )
+    ).rejects.toMatchObject({ code: "AUTH" });
   });
 
   it("session.start issues a token, secret.get verifies, session.end revokes", async () => {
@@ -255,7 +285,7 @@ describe("daemon write handlers", () => {
       ctx
     );
     const start = (await handler["session.start"]?.(
-      req("session.start", { sessionId: "s-1", pid: 7777, ttlMs: 60_000 }),
+      req("session.start", { sessionId: "s-1", pid: 7777, authProfileId: "work", ttlMs: 60_000 }),
       ctx
     )) as { capabilityToken: string; expiresAtMs: number };
     expect(start.capabilityToken).toBeTruthy();
@@ -285,6 +315,101 @@ describe("daemon write handlers", () => {
         ctx
       )
     ).rejects.toMatchObject({ code: "AUTH" });
+  });
+
+  it("secret.get rejects a verified token whose session is not live as AUTH", async () => {
+    const handler = build();
+    const ghost = issuer.issue({ sessionId: "ghost", pid: 333, ttlMs: 60_000 });
+
+    await expect(
+      handler["secret.get"]?.(
+        req("secret.get", { capabilityToken: ghost.token, name: "anthropic" }),
+        ctx
+      )
+    ).rejects.toMatchObject({ code: "AUTH" });
+  });
+
+  it("secret.get rejects an unbound live session as BAD_REQUEST", async () => {
+    const handler = build();
+    await handler["auth.add"]?.(
+      req("auth.add", {
+        spec: {
+          id: "work",
+          anthropic: { mode: "apiKey", secretRef: "keyring://anthropic/work" },
+        },
+        anthropicSecretB64: b64("SECRET-A"),
+      }),
+      ctx
+    );
+    const start = (await handler["session.start"]?.(
+      req("session.start", { sessionId: "s-unbound", pid: 444, ttlMs: 60_000 }),
+      ctx
+    )) as { capabilityToken: string };
+
+    await expect(
+      handler["secret.get"]?.(
+        req("secret.get", { capabilityToken: start.capabilityToken, name: "anthropic" }),
+        ctx
+      )
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("secret.get resolves MCP secrets only within the bound auth profile", async () => {
+    const handler = build();
+    await handler["auth.add"]?.(
+      req("auth.add", {
+        spec: {
+          id: "work",
+          anthropic: { mode: "apiKey", secretRef: "keyring://anthropic/work" },
+        },
+        anthropicSecretB64: b64("A"),
+      }),
+      ctx
+    );
+    await handler["auth.add"]?.(
+      req("auth.add", {
+        spec: {
+          id: "personal",
+          anthropic: { mode: "apiKey", secretRef: "keyring://anthropic/personal" },
+        },
+        anthropicSecretB64: b64("B"),
+      }),
+      ctx
+    );
+    await handler["auth.setSecret"]?.(
+      req("auth.setSecret", {
+        authId: "work",
+        name: "github.pat",
+        valueB64: b64("PAT-WORK"),
+        register: true,
+      }),
+      ctx
+    );
+    await handler["auth.setSecret"]?.(
+      req("auth.setSecret", {
+        authId: "personal",
+        name: "github.pat",
+        valueB64: b64("PAT-PERSONAL"),
+        register: true,
+      }),
+      ctx
+    );
+    const start = (await handler["session.start"]?.(
+      req("session.start", {
+        sessionId: "s-bound",
+        pid: 555,
+        authProfileId: "personal",
+        ttlMs: 60_000,
+      }),
+      ctx
+    )) as { capabilityToken: string };
+
+    const got = (await handler["secret.get"]?.(
+      req("secret.get", { capabilityToken: start.capabilityToken, name: "github.pat" }),
+      ctx
+    )) as { valueB64: string };
+
+    expect(Buffer.from(got.valueB64, "base64").toString("utf8")).toBe("PAT-PERSONAL");
   });
 
   it("secrets.migrate moves keyring entries into the safeStorage store", async () => {
@@ -324,7 +449,7 @@ describe("daemon write handlers", () => {
       ctx
     );
     const start = (await handler["session.start"]?.(
-      req("session.start", { sessionId: "s-1", pid: 1, ttlMs: 60_000 }),
+      req("session.start", { sessionId: "s-1", pid: 1, authProfileId: "work", ttlMs: 60_000 }),
       ctx
     )) as { capabilityToken: string };
     await handler["secret.get"]?.(

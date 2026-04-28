@@ -203,7 +203,8 @@ export const ReqAuthRemove = z
  * Begin a session and request a capability token.
  *
  * Default `ttlMs` (server-side): 60_000 for the initial token; the daemon may
- * extend the lifetime once the spawned process binds.
+ * extend the lifetime once the spawned process binds. `authProfileId` binds
+ * later `secret.get` calls to a single auth profile.
  */
 export const ReqSessionStart = z
   .object({
@@ -211,6 +212,7 @@ export const ReqSessionStart = z
     kind: z.literal("session.start"),
     sessionId: z.string().min(1),
     pid: z.number().int().nonnegative(),
+    authProfileId: z.string().min(1).optional(),
     ttlMs: z.number().int().positive().optional(),
   })
   .strict();
@@ -227,10 +229,9 @@ export const ReqSessionEnd = z
 /**
  * Fetch a secret on behalf of a spawned process.
  *
- * The daemon verifies the capability token, looks up the secret by `name`
- * (resolved against the session's auth profile), and returns the value as
- * base64. Any verification failure (bad signature, expired, revoked) maps to
- * `error.AUTH`.
+ * The daemon verifies the capability token, resolves `name` against the live
+ * session's bound auth profile, and returns the value as base64. Any
+ * verification failure (bad signature, expired, revoked) maps to `error.AUTH`.
  */
 export const ReqSecretGet = z
   .object({

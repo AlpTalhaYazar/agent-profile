@@ -53,7 +53,7 @@ import type { AuditLog } from "./audit.js";
 /** Default capability-token TTL (60s; matches docs/06-security.md). */
 const DEFAULT_SESSION_TTL_MS = 60_000;
 
-/** In-memory state mapping live sessions to their issued auth profile. */
+/** In-memory state mapping live sessions to their bound auth profile. */
 interface LiveSession {
   authProfileId?: string;
   pid: number;
@@ -217,6 +217,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       const ttlMs = req.ttlMs ?? DEFAULT_SESSION_TTL_MS;
       const issued = deps.issuer.issue({ sessionId: req.sessionId, pid: req.pid, ttlMs });
       sessions.set(req.sessionId, {
+        ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
         pid: req.pid,
         expiresAtMs: issued.expiresAtMs,
       });
@@ -225,6 +226,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         sessionId: req.sessionId,
         event: "started",
         spawnPid: req.pid,
+        ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
       });
       return { capabilityToken: issued.token, expiresAtMs: issued.expiresAtMs };
     }),
@@ -238,6 +240,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         sessionId: req.sessionId,
         event: "ended",
         spawnPid: info?.pid ?? 0,
+        ...(info?.authProfileId !== undefined ? { authProfileId: info.authProfileId } : {}),
       });
       return {};
     }),
@@ -257,11 +260,43 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       }
       const sessionId = result.payload.sessionId;
       const callerPid = result.payload.pid;
-      // Resolve the secret name via the session's auth profile. We don't
-      // track (sessionId → authProfileId) yet; for now, look up by name
-      // across every auth profile until we wire session.start to bind one.
+      const liveSession = sessions.get(sessionId);
+      if (!liveSession) {
+        await deps.audit.append({
+          kind: "secret_access",
+          sessionId,
+          secretName: req.name,
+          callerPid,
+          capabilityValid: true,
+          reason: "unknown-session",
+        });
+        throw new IpcError("AUTH", `session "${sessionId}" is not live`);
+      }
+      if (!liveSession.authProfileId) {
+        await deps.audit.append({
+          kind: "secret_access",
+          sessionId,
+          secretName: req.name,
+          callerPid,
+          capabilityValid: true,
+          reason: "unbound-session",
+        });
+        throw new IpcError("BAD_REQUEST", `session "${sessionId}" is not bound to an auth profile`);
+      }
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
-      const ref = resolveSecretRef(doc, req.name);
+      const profile = doc.authProfiles[liveSession.authProfileId];
+      if (!profile) {
+        await deps.audit.append({
+          kind: "secret_access",
+          sessionId,
+          secretName: req.name,
+          callerPid,
+          capabilityValid: true,
+          reason: "unknown-auth-profile",
+        });
+        throw new IpcError("NOT_FOUND", `auth profile "${liveSession.authProfileId}" not found`);
+      }
+      const ref = resolveSecretRef(profile, req.name);
       if (ref === null) {
         await deps.audit.append({
           kind: "secret_access",
@@ -271,7 +306,10 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
           capabilityValid: true,
           reason: "unknown-name",
         });
-        throw new IpcError("NOT_FOUND", `unknown secret name: ${req.name}`);
+        throw new IpcError(
+          "NOT_FOUND",
+          `unknown secret name for auth profile "${liveSession.authProfileId}": ${req.name}`
+        );
       }
       const { service, account } = parseAnthropicRef(ref);
       const plaintext = await deps.store.get(toKeyringKey(service, account));
@@ -374,15 +412,13 @@ function parseAnthropicRef(ref: string): { service: string; account: string } {
   }
 }
 
-/** Resolve `<authId>.<name>` → keyring URI for the first matching profile. */
-function resolveSecretRef(doc: AuthProfilesDocT, name: string): string | null {
-  for (const profile of Object.values(doc.authProfiles)) {
-    if (!profile) continue;
-    if (name === "anthropic") return profile.anthropic.secretRef;
-    const ref = profile.mcpSecretRefs[name];
-    if (ref) return ref;
-  }
-  return null;
+/** Resolve a logical secret name against a single auth profile. */
+function resolveSecretRef(
+  profile: AuthProfilesDocT["authProfiles"][string],
+  name: string
+): string | null {
+  if (name === "anthropic") return profile.anthropic.secretRef;
+  return profile.mcpSecretRefs[name] ?? null;
 }
 
 /** loadAuthProfiles wrapped to translate the cli-services home convention. */

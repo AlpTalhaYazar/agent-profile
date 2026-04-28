@@ -505,6 +505,17 @@ describe("write-side Req schemas", () => {
       expect(r.success).toBe(true);
     });
 
+    it("accepts an authProfileId binding", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 12345,
+        authProfileId: "work",
+      });
+      expect(r.success).toBe(true);
+    });
+
     it("rejects negative pid", () => {
       const r = ReqSessionStart.safeParse({
         id: "c-110",
@@ -522,6 +533,17 @@ describe("write-side Req schemas", () => {
         sessionId: "abc",
         pid: 1,
         ttlMs: 0,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejects empty authProfileId", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 1,
+        authProfileId: "",
       });
       expect(r.success).toBe(false);
     });
