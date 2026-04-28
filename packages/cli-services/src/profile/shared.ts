@@ -170,7 +170,7 @@ export function assertValidScopeDoc(content: unknown): ScopeDocT {
 
 export function assertAllowlistedScopePath(home: string, path: string): string {
   if (path.includes("\0")) {
-    throw new ServiceError("config-invalid", `Refusing to save path with null byte`);
+    throw new ServiceError("config-invalid", "Refusing to save path with null byte");
   }
   const targetPath = resolve(path);
   // Resolve symlinks for the security comparison so a symlink inside the
