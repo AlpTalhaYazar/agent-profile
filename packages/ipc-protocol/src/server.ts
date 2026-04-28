@@ -40,6 +40,14 @@ const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
   "sessions.list": "sessions.list.ok",
   "daemon.status": "daemon.status.ok",
   "daemon.stop": "daemon.stop.ok",
+  "auth.add": "auth.add.ok",
+  "auth.setSecret": "auth.setSecret.ok",
+  "auth.rotate": "auth.rotate.ok",
+  "auth.remove": "auth.remove.ok",
+  "session.start": "session.start.ok",
+  "session.end": "session.end.ok",
+  "secret.get": "secret.get.ok",
+  "secrets.migrate": "secrets.migrate.ok",
 };
 
 /**

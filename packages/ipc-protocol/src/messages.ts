@@ -114,6 +114,149 @@ export const ReqDaemonStop = z
   })
   .strict();
 
+// ─── Write-side request schemas (Phase 2 milestone 3) ────────────────────────
+//
+// These kinds carry credential-bearing payloads. Every secret value travels as
+// a base64 string (`*B64`) — the wire format never sees plaintext. The daemon
+// is responsible for decoding, gating on capability tokens where required, and
+// writing the audit trail.
+
+/** Auth-profile metadata posted at `auth.add` time. Mirrors the YAML shape but adds nothing wire-specific. */
+export const AuthProfileSpec = z
+  .object({
+    id: z.string().min(1),
+    displayName: z.string().optional(),
+    anthropic: z
+      .object({
+        mode: z.enum(["apiKey", "bedrock", "vertex", "gateway"]),
+        secretRef: z.string().min(1),
+      })
+      .strict(),
+    mcpSecretRefs: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+/**
+ * Create a new auth profile and store its Anthropic secret.
+ *
+ * `anthropicSecretB64` is base64(plaintext). The daemon decodes, encrypts via
+ * `safeStorage`, persists the metadata, and zeros the plaintext buffer.
+ */
+export const ReqAuthAdd = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.add"),
+    spec: AuthProfileSpec,
+    anthropicSecretB64: z.string().min(1),
+    force: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Set or replace a single MCP secret on an existing auth profile.
+ *
+ * `register: true` creates the `mcpSecretRefs` entry on the fly when the name
+ * is unknown; otherwise the daemon rejects with `BAD_REQUEST`.
+ */
+export const ReqAuthSetSecret = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.setSecret"),
+    authId: z.string().min(1),
+    name: z.string().min(1),
+    valueB64: z.string().min(1),
+    register: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Rotate the Anthropic secret on an existing auth profile.
+ *
+ * Issues an implicit `revokeSession` for every live capability bound to this
+ * `authProfileId` so any in-flight `secret.get` calls fail fast.
+ */
+export const ReqAuthRotate = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.rotate"),
+    authId: z.string().min(1),
+    anthropicSecretB64: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Delete an auth profile and every keychain entry it owns.
+ *
+ * `yes` is advisory; the CLI confirms with the user before sending. The
+ * daemon trusts the request once it arrives.
+ */
+export const ReqAuthRemove = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.remove"),
+    authId: z.string().min(1),
+    yes: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Begin a session and request a capability token.
+ *
+ * Default `ttlMs` (server-side): 60_000 for the initial token; the daemon may
+ * extend the lifetime once the spawned process binds.
+ */
+export const ReqSessionStart = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("session.start"),
+    sessionId: z.string().min(1),
+    pid: z.number().int().nonnegative(),
+    ttlMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+/** End a session and revoke every outstanding capability bound to it. */
+export const ReqSessionEnd = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("session.end"),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Fetch a secret on behalf of a spawned process.
+ *
+ * The daemon verifies the capability token, looks up the secret by `name`
+ * (resolved against the session's auth profile), and returns the value as
+ * base64. Any verification failure (bad signature, expired, revoked) maps to
+ * `error.AUTH`.
+ */
+export const ReqSecretGet = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("secret.get"),
+    capabilityToken: z.string().min(1),
+    name: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Idempotent one-shot migration from `@napi-rs/keyring` to `safeStorage`.
+ *
+ * `dryRun: true` returns the plan without writing. `keepKeyring: true` (the
+ * default daemon-side) leaves the keyring entries in place so standalone CLI
+ * invocations retain read access.
+ */
+export const ReqSecretsMigrate = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("secrets.migrate"),
+    dryRun: z.boolean().optional(),
+    keepKeyring: z.boolean().optional(),
+  })
+  .strict();
+
 /**
  * Discriminated union of every request shape the daemon accepts.
  *
@@ -129,6 +272,14 @@ export const Req = z.discriminatedUnion("kind", [
   ReqSessionsList,
   ReqDaemonStatus,
   ReqDaemonStop,
+  ReqAuthAdd,
+  ReqAuthSetSecret,
+  ReqAuthRotate,
+  ReqAuthRemove,
+  ReqSessionStart,
+  ReqSessionEnd,
+  ReqSecretGet,
+  ReqSecretsMigrate,
 ]);
 
 /** Static type for the {@link Req} discriminated union. */
@@ -148,6 +299,24 @@ export type ReqSessionsListT = z.infer<typeof ReqSessionsList>;
 export type ReqDaemonStatusT = z.infer<typeof ReqDaemonStatus>;
 /** Static type for `daemon.stop` requests. */
 export type ReqDaemonStopT = z.infer<typeof ReqDaemonStop>;
+/** Static type for `auth.add` requests (write-side). */
+export type ReqAuthAddT = z.infer<typeof ReqAuthAdd>;
+/** Static type for `auth.setSecret` requests (write-side). */
+export type ReqAuthSetSecretT = z.infer<typeof ReqAuthSetSecret>;
+/** Static type for `auth.rotate` requests (write-side). */
+export type ReqAuthRotateT = z.infer<typeof ReqAuthRotate>;
+/** Static type for `auth.remove` requests (write-side). */
+export type ReqAuthRemoveT = z.infer<typeof ReqAuthRemove>;
+/** Static type for `session.start` requests (issues a capability token). */
+export type ReqSessionStartT = z.infer<typeof ReqSessionStart>;
+/** Static type for `session.end` requests (revokes capabilities). */
+export type ReqSessionEndT = z.infer<typeof ReqSessionEnd>;
+/** Static type for `secret.get` requests (capability-token-gated). */
+export type ReqSecretGetT = z.infer<typeof ReqSecretGet>;
+/** Static type for `secrets.migrate` requests. */
+export type ReqSecretsMigrateT = z.infer<typeof ReqSecretsMigrate>;
+/** Auth profile metadata embedded in `ReqAuthAdd.spec`. */
+export type AuthProfileSpecT = z.infer<typeof AuthProfileSpec>;
 
 // ─── Response schemas ─────────────────────────────────────────────────────────
 
@@ -272,6 +441,93 @@ export const RespError = z
   })
   .strict();
 
+// ─── Write-side response schemas (Phase 2 milestone 3) ───────────────────────
+
+/** Response to `auth.add`. The body is empty; success is indicated by the kind. */
+export const RespAuthAddOk = z
+  .object({ id: z.string().min(1), kind: z.literal("auth.add.ok") })
+  .strict();
+
+/** Response to `auth.setSecret`. */
+export const RespAuthSetSecretOk = z
+  .object({ id: z.string().min(1), kind: z.literal("auth.setSecret.ok") })
+  .strict();
+
+/** Response to `auth.rotate`. */
+export const RespAuthRotateOk = z
+  .object({ id: z.string().min(1), kind: z.literal("auth.rotate.ok") })
+  .strict();
+
+/**
+ * Response to `auth.remove`.
+ *
+ * `failed` lists the secret names whose keychain delete failed; the metadata
+ * is always removed regardless. CLI surfaces a partial-success message when
+ * `failed.length > 0`.
+ */
+export const RespAuthRemoveOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.remove.ok"),
+    failed: z.array(z.string()),
+  })
+  .strict();
+
+/**
+ * Response to `session.start`. Carries the freshly minted capability token
+ * and its absolute expiry epoch.
+ */
+export const RespSessionStartOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("session.start.ok"),
+    capabilityToken: z.string().min(1),
+    expiresAtMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Response to `session.end`. */
+export const RespSessionEndOk = z
+  .object({ id: z.string().min(1), kind: z.literal("session.end.ok") })
+  .strict();
+
+/**
+ * Response to `secret.get`.
+ *
+ * `valueB64` is the base64-encoded secret value. The daemon never returns
+ * plaintext on the wire; consumers decode just-in-time.
+ */
+export const RespSecretGetOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("secret.get.ok"),
+    valueB64: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Response to `secrets.migrate`. The four counters always sum to `scanned`
+ * (`migrated + skipped + errors.length === scanned`); CLI surfaces them
+ * verbatim.
+ */
+export const RespSecretsMigrateOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("secrets.migrate.ok"),
+    scanned: z.number().int().nonnegative(),
+    migrated: z.number().int().nonnegative(),
+    skipped: z.number().int().nonnegative(),
+    errors: z.array(
+      z
+        .object({
+          key: z.string(),
+          reason: z.string(),
+        })
+        .strict()
+    ),
+  })
+  .strict();
+
 /**
  * Discriminated union of every response shape.
  *
@@ -289,6 +545,14 @@ export const Resp = z.discriminatedUnion("kind", [
   RespDaemonStatusOk,
   RespDaemonStopOk,
   RespError,
+  RespAuthAddOk,
+  RespAuthSetSecretOk,
+  RespAuthRotateOk,
+  RespAuthRemoveOk,
+  RespSessionStartOk,
+  RespSessionEndOk,
+  RespSecretGetOk,
+  RespSecretsMigrateOk,
 ]);
 
 /** Static type for the {@link Resp} discriminated union. */
@@ -310,6 +574,22 @@ export type RespDaemonStatusOkT = z.infer<typeof RespDaemonStatusOk>;
 export type RespDaemonStopOkT = z.infer<typeof RespDaemonStopOk>;
 /** Static type for transport-level `error` responses. */
 export type RespErrorT = z.infer<typeof RespError>;
+/** Static type for `auth.add.ok` responses. */
+export type RespAuthAddOkT = z.infer<typeof RespAuthAddOk>;
+/** Static type for `auth.setSecret.ok` responses. */
+export type RespAuthSetSecretOkT = z.infer<typeof RespAuthSetSecretOk>;
+/** Static type for `auth.rotate.ok` responses. */
+export type RespAuthRotateOkT = z.infer<typeof RespAuthRotateOk>;
+/** Static type for `auth.remove.ok` responses. */
+export type RespAuthRemoveOkT = z.infer<typeof RespAuthRemoveOk>;
+/** Static type for `session.start.ok` responses. */
+export type RespSessionStartOkT = z.infer<typeof RespSessionStartOk>;
+/** Static type for `session.end.ok` responses. */
+export type RespSessionEndOkT = z.infer<typeof RespSessionEndOk>;
+/** Static type for `secret.get.ok` responses. */
+export type RespSecretGetOkT = z.infer<typeof RespSecretGetOk>;
+/** Static type for `secrets.migrate.ok` responses. */
+export type RespSecretsMigrateOkT = z.infer<typeof RespSecretsMigrateOk>;
 
 /** Closed enum of error codes the IPC layer is allowed to emit. */
 export type IpcErrorCode = RespErrorT["code"];

@@ -1,21 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
   Req,
+  ReqAuthAdd,
   ReqAuthGetSecretRef,
   ReqAuthList,
+  ReqAuthRemove,
+  ReqAuthRotate,
+  ReqAuthSetSecret,
   ReqDaemonStatus,
   ReqDaemonStop,
   ReqHello,
   ReqProfileShow,
+  ReqSecretGet,
+  ReqSecretsMigrate,
+  ReqSessionEnd,
+  ReqSessionStart,
   ReqSessionsList,
   Resp,
+  RespAuthAddOk,
   RespAuthGetSecretRefOk,
   RespAuthListOk,
+  RespAuthRemoveOk,
+  RespAuthRotateOk,
+  RespAuthSetSecretOk,
   RespDaemonStatusOk,
   RespDaemonStopOk,
   RespError,
   RespHelloOk,
   RespProfileShowOk,
+  RespSecretGetOk,
+  RespSecretsMigrateOk,
+  RespSessionEndOk,
+  RespSessionStartOk,
   RespSessionsListOk,
 } from "../src/messages.js";
 
@@ -341,5 +357,409 @@ describe("Resp schemas", () => {
       });
       expect(result.success).toBe(false);
     });
+  });
+});
+
+// ─── Write-side Req schemas ──────────────────────────────────────────────────
+
+describe("write-side Req schemas", () => {
+  const validSpec = {
+    id: "work",
+    displayName: "Work",
+    anthropic: { mode: "apiKey" as const, secretRef: "keyring://anthropic/work" },
+  };
+
+  describe("ReqAuthAdd", () => {
+    it("accepts a valid auth.add", () => {
+      const r = ReqAuthAdd.safeParse({
+        id: "c-100",
+        kind: "auth.add",
+        spec: validSpec,
+        anthropicSecretB64: Buffer.from("hello").toString("base64"),
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("accepts the optional force flag", () => {
+      const r = ReqAuthAdd.safeParse({
+        id: "c-100",
+        kind: "auth.add",
+        spec: validSpec,
+        anthropicSecretB64: "aGk=",
+        force: true,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects when anthropicSecretB64 is missing", () => {
+      const r = ReqAuthAdd.safeParse({ id: "c-100", kind: "auth.add", spec: validSpec });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejects when spec.anthropic.mode is unknown", () => {
+      const r = ReqAuthAdd.safeParse({
+        id: "c-100",
+        kind: "auth.add",
+        spec: { ...validSpec, anthropic: { mode: "weird", secretRef: "keyring://x/y" } },
+        anthropicSecretB64: "aGk=",
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejects unknown spec keys (strict)", () => {
+      const r = ReqAuthAdd.safeParse({
+        id: "c-100",
+        kind: "auth.add",
+        spec: { ...validSpec, extra: "no" },
+        anthropicSecretB64: "aGk=",
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe("ReqAuthSetSecret", () => {
+    it("accepts valid input", () => {
+      const r = ReqAuthSetSecret.safeParse({
+        id: "c-101",
+        kind: "auth.setSecret",
+        authId: "work",
+        name: "github.pat",
+        valueB64: Buffer.from("pat-value").toString("base64"),
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects empty valueB64", () => {
+      const r = ReqAuthSetSecret.safeParse({
+        id: "c-101",
+        kind: "auth.setSecret",
+        authId: "work",
+        name: "github.pat",
+        valueB64: "",
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe("ReqAuthRotate", () => {
+    it("accepts valid input", () => {
+      const r = ReqAuthRotate.safeParse({
+        id: "c-102",
+        kind: "auth.rotate",
+        authId: "work",
+        anthropicSecretB64: "bmV3",
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects missing authId", () => {
+      const r = ReqAuthRotate.safeParse({
+        id: "c-102",
+        kind: "auth.rotate",
+        anthropicSecretB64: "bmV3",
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe("ReqAuthRemove", () => {
+    it("accepts with no flags", () => {
+      const r = ReqAuthRemove.safeParse({
+        id: "c-103",
+        kind: "auth.remove",
+        authId: "work",
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("accepts the advisory yes flag", () => {
+      const r = ReqAuthRemove.safeParse({
+        id: "c-103",
+        kind: "auth.remove",
+        authId: "work",
+        yes: true,
+      });
+      expect(r.success).toBe(true);
+    });
+  });
+
+  describe("ReqSessionStart", () => {
+    it("accepts a valid request", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 12345,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("accepts the optional ttlMs override", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 12345,
+        ttlMs: 30_000,
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects negative pid", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: -1,
+      });
+      expect(r.success).toBe(false);
+    });
+
+    it("rejects ttlMs <= 0", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 1,
+        ttlMs: 0,
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe("ReqSessionEnd", () => {
+    it("accepts a valid request", () => {
+      const r = ReqSessionEnd.safeParse({
+        id: "c-111",
+        kind: "session.end",
+        sessionId: "abc",
+      });
+      expect(r.success).toBe(true);
+    });
+  });
+
+  describe("ReqSecretGet", () => {
+    it("accepts valid input", () => {
+      const r = ReqSecretGet.safeParse({
+        id: "c-120",
+        kind: "secret.get",
+        capabilityToken: "p.m",
+        name: "anthropic",
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects empty capabilityToken", () => {
+      const r = ReqSecretGet.safeParse({
+        id: "c-120",
+        kind: "secret.get",
+        capabilityToken: "",
+        name: "anthropic",
+      });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  describe("ReqSecretsMigrate", () => {
+    it("accepts a bare request", () => {
+      const r = ReqSecretsMigrate.safeParse({ id: "c-130", kind: "secrets.migrate" });
+      expect(r.success).toBe(true);
+    });
+
+    it("accepts dryRun and keepKeyring", () => {
+      const r = ReqSecretsMigrate.safeParse({
+        id: "c-130",
+        kind: "secrets.migrate",
+        dryRun: true,
+        keepKeyring: true,
+      });
+      expect(r.success).toBe(true);
+    });
+  });
+
+  describe("Req union routes write-side kinds", () => {
+    it("routes auth.add", () => {
+      const r = Req.safeParse({
+        id: "c-140",
+        kind: "auth.add",
+        spec: validSpec,
+        anthropicSecretB64: "aGk=",
+      });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.kind).toBe("auth.add");
+    });
+
+    it("routes secret.get", () => {
+      const r = Req.safeParse({
+        id: "c-141",
+        kind: "secret.get",
+        capabilityToken: "x.y",
+        name: "anthropic",
+      });
+      expect(r.success).toBe(true);
+    });
+  });
+});
+
+// ─── Write-side Resp schemas ─────────────────────────────────────────────────
+
+describe("write-side Resp schemas", () => {
+  it("RespAuthAddOk parses", () => {
+    const r = RespAuthAddOk.safeParse({ id: "c-200", kind: "auth.add.ok" });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespAuthSetSecretOk parses", () => {
+    const r = RespAuthSetSecretOk.safeParse({ id: "c-201", kind: "auth.setSecret.ok" });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespAuthRotateOk parses", () => {
+    const r = RespAuthRotateOk.safeParse({ id: "c-202", kind: "auth.rotate.ok" });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespAuthRemoveOk parses with empty failed array", () => {
+    const r = RespAuthRemoveOk.safeParse({
+      id: "c-203",
+      kind: "auth.remove.ok",
+      failed: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespAuthRemoveOk parses with partial failures", () => {
+    const r = RespAuthRemoveOk.safeParse({
+      id: "c-203",
+      kind: "auth.remove.ok",
+      failed: ["github.pat"],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespSessionStartOk parses", () => {
+    const r = RespSessionStartOk.safeParse({
+      id: "c-210",
+      kind: "session.start.ok",
+      capabilityToken: "p.m",
+      expiresAtMs: 1_700_000_000_000,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespSessionStartOk rejects empty capabilityToken", () => {
+    const r = RespSessionStartOk.safeParse({
+      id: "c-210",
+      kind: "session.start.ok",
+      capabilityToken: "",
+      expiresAtMs: 1,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("RespSessionEndOk parses", () => {
+    const r = RespSessionEndOk.safeParse({ id: "c-211", kind: "session.end.ok" });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespSecretGetOk parses", () => {
+    const r = RespSecretGetOk.safeParse({
+      id: "c-220",
+      kind: "secret.get.ok",
+      valueB64: "c2VjcmV0",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespSecretGetOk rejects empty valueB64", () => {
+    const r = RespSecretGetOk.safeParse({
+      id: "c-220",
+      kind: "secret.get.ok",
+      valueB64: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("RespSecretsMigrateOk parses", () => {
+    const r = RespSecretsMigrateOk.safeParse({
+      id: "c-230",
+      kind: "secrets.migrate.ok",
+      scanned: 3,
+      migrated: 2,
+      skipped: 1,
+      errors: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("RespSecretsMigrateOk parses with errors", () => {
+    const r = RespSecretsMigrateOk.safeParse({
+      id: "c-230",
+      kind: "secrets.migrate.ok",
+      scanned: 2,
+      migrated: 1,
+      skipped: 0,
+      errors: [{ key: "agent-profile.x.y", reason: "decrypt failed" }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("Resp union routes write-side responses", () => {
+    const r = Resp.safeParse({
+      id: "c-240",
+      kind: "secret.get.ok",
+      valueB64: "AA==",
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+// ─── No-plaintext-on-the-wire invariant ──────────────────────────────────────
+
+describe("wire never contains plaintext secrets", () => {
+  const SECRET = "PLAINTEXT-VALUE-XYZ";
+  const SECRET_B64 = Buffer.from(SECRET, "utf8").toString("base64");
+
+  it("auth.add JSON does not echo plaintext", () => {
+    const msg = {
+      id: "c-300",
+      kind: "auth.add",
+      spec: {
+        id: "work",
+        displayName: "Work",
+        anthropic: { mode: "apiKey", secretRef: "keyring://anthropic/work" },
+      },
+      anthropicSecretB64: SECRET_B64,
+    };
+    const json = JSON.stringify(msg);
+    expect(json).toContain(SECRET_B64);
+    expect(json).not.toContain(SECRET);
+    expect(ReqAuthAdd.safeParse(msg).success).toBe(true);
+  });
+
+  it("auth.setSecret JSON does not echo plaintext", () => {
+    const msg = {
+      id: "c-301",
+      kind: "auth.setSecret",
+      authId: "work",
+      name: "github.pat",
+      valueB64: SECRET_B64,
+    };
+    const json = JSON.stringify(msg);
+    expect(json).toContain(SECRET_B64);
+    expect(json).not.toContain(SECRET);
+    expect(ReqAuthSetSecret.safeParse(msg).success).toBe(true);
+  });
+
+  it("secret.get.ok JSON does not echo plaintext", () => {
+    const msg = {
+      id: "c-302",
+      kind: "secret.get.ok",
+      valueB64: SECRET_B64,
+    };
+    const json = JSON.stringify(msg);
+    expect(json).toContain(SECRET_B64);
+    expect(json).not.toContain(SECRET);
+    expect(RespSecretGetOk.safeParse(msg).success).toBe(true);
   });
 });
