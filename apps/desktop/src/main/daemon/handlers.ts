@@ -144,21 +144,19 @@ export function createHandlers(
     }),
 
     "profile.show": wrap<ReqProfileShowT>("profile.show", async (req) => {
-      const effective = profileShowService({
+      const result = profileShowService({
         role: req.role,
         authProfileId: req.authProfileId,
         cwd: req.cwd,
         home: myClaudeHome,
       });
+      // `core.resolve` returns `{ effective, provenance, runtimePaths }`. The
+      // wire schema marks the two payload fields as `unknown`; consumers
+      // (CLI / GUI) re-validate against the core schemas. `runtimePaths` is
+      // always null inside the daemon; emitter packages populate it later.
       return {
-        // The wire schema marks both fields as `unknown`; we pass through
-        // whatever core returned. Concrete-shape narrowing happens in the
-        // CLI / GUI consumers.
-        effective,
-        // `core.resolve` returns the effective config + provenance bundled
-        // together; today we only have one object so we re-publish it under
-        // both fields. ST-F's `profile show` consumer only reads `effective`.
-        provenance: (effective as { provenance?: unknown }).provenance ?? null,
+        effective: result.effective,
+        provenance: result.provenance,
       };
     }),
 
