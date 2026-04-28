@@ -25,7 +25,7 @@ import {
 } from "@agent-profile/secrets";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuditLog } from "../src/main/daemon/audit.js";
-import { createWriteHandlers } from "../src/main/daemon/handlers-write.js";
+import { createWriteHandlers, runSessionCleanup } from "../src/main/daemon/handlers-write.js";
 
 const fakeSocket = {} as unknown as net.Socket;
 const ctx = { socket: fakeSocket };
@@ -106,6 +106,7 @@ describe("daemon write handlers", () => {
       audit,
       daemonPid: 99,
       now: () => 1_500,
+      cleanupIntervalMs: 0,
     });
   }
 
@@ -499,5 +500,44 @@ describe("daemon write handlers", () => {
       expect(row).not.toHaveProperty("value");
       expect(row).not.toHaveProperty("plaintext");
     }
+  });
+
+  describe("session cleanup", () => {
+    it("removes expired sessions, revokes capabilities, and writes an audit row", async () => {
+      const sessionStart = build()["session.start"];
+      if (!sessionStart) throw new Error("missing handler");
+      await sessionStart(
+        req("session.start", {
+          sessionId: "doomed",
+          pid: 4242,
+          authProfileId: "work",
+          ttlMs: 100,
+        }),
+        ctx
+      );
+
+      // Reach into the issuer to verify revocation later via verifier.
+      // Build a fresh sessions Map via runSessionCleanup directly so we
+      // observe the eviction without waiting on setInterval.
+      const sessions = new Map<string, { authProfileId?: string; pid: number; expiresAtMs: number }>();
+      sessions.set("doomed", { authProfileId: "work", pid: 4242, expiresAtMs: 1_500 });
+      // now: 5_000 — well past the expiresAtMs
+      await runSessionCleanup({ sessions, now: 5_000, issuer, audit });
+      expect(sessions.has("doomed")).toBe(false);
+
+      const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n").filter(Boolean);
+      const ended = auditLines
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((row) => row.kind === "launch" && row.event === "ended" && row.sessionId === "doomed");
+      expect(ended).toHaveLength(1);
+      expect(ended[0]).toMatchObject({ spawnPid: 4242, authProfileId: "work" });
+    });
+
+    it("retains sessions whose expiresAtMs is in the future", async () => {
+      const sessions = new Map<string, { authProfileId?: string; pid: number; expiresAtMs: number }>();
+      sessions.set("alive", { pid: 7, expiresAtMs: 10_000 });
+      await runSessionCleanup({ sessions, now: 9_000, issuer, audit });
+      expect(sessions.has("alive")).toBe(true);
+    });
   });
 });

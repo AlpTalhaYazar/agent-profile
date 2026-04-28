@@ -58,11 +58,43 @@ import { wrap } from "./wrap-handler.js";
 /** Default capability-token TTL (60s; matches docs/06-security.md). */
 const DEFAULT_SESSION_TTL_MS = 60_000;
 
+/** Default expired-session sweep interval (60s). */
+const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
+
 /** In-memory state mapping live sessions to their bound auth profile. */
 interface LiveSession {
   authProfileId?: string;
   pid: number;
   expiresAtMs: number;
+}
+
+/**
+ * Drop sessions whose `expiresAtMs` has passed, revoking the matching
+ * capability tokens and recording an audit row for each. Exported for unit
+ * testing; the periodic `setInterval` invokes the same function.
+ */
+export async function runSessionCleanup(args: {
+  sessions: Map<string, LiveSession>;
+  now: number;
+  issuer: CapabilityIssuer;
+  audit: AuditLog;
+}): Promise<void> {
+  const { sessions, now, issuer, audit } = args;
+  const expired: Array<[string, LiveSession]> = [];
+  for (const entry of sessions) {
+    if (entry[1].expiresAtMs <= now) expired.push(entry);
+  }
+  for (const [sessionId, info] of expired) {
+    sessions.delete(sessionId);
+    issuer.revokeSession(sessionId);
+    await audit.append({
+      kind: "launch",
+      sessionId,
+      event: "ended",
+      spawnPid: info.pid,
+      ...(info.authProfileId !== undefined ? { authProfileId: info.authProfileId } : {}),
+    });
+  }
 }
 
 /** Constructor-style options the desktop wires up at boot. */
@@ -82,6 +114,13 @@ export interface WriteHandlerDeps {
   daemonPid: number;
   /** Clock used for capability TTL math; defaults to `Date.now`. */
   now?: () => number;
+  /**
+   * Periodic interval (ms) at which the handler sweeps `sessions` for
+   * expired entries. `0` disables the sweep (tests opt out and call
+   * {@link runSessionCleanup} directly). Defaults to {@link
+   * DEFAULT_CLEANUP_INTERVAL_MS}.
+   */
+  cleanupIntervalMs?: number;
 }
 
 /**
@@ -92,6 +131,16 @@ export interface WriteHandlerDeps {
 export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
   const sessions: Map<string, LiveSession> = new Map();
   const now = deps.now ?? ((): number => Date.now());
+  const cleanupMs = deps.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
+
+  if (cleanupMs > 0) {
+    // unref so the timer never blocks process exit; lifecycle.drainAndClose
+    // does not need to track this timer for shutdown ordering.
+    const timer = setInterval(() => {
+      void runSessionCleanup({ sessions, now: now(), issuer: deps.issuer, audit: deps.audit });
+    }, cleanupMs);
+    timer.unref();
+  }
 
   return {
     "profile.save": wrap<ReqProfileSaveT>("profile.save", async (req) => {
