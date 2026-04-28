@@ -1951,7 +1951,8 @@ function normalizeMaybeScopeDoc(input: unknown): ScopeDoc | null {
 
 function normalizeScopeDoc(input: unknown): ScopeDoc {
   const record = isRecord(input) ? input : {};
-  const version = Number(record.version) === 1 ? 1 : 1;
+  // ScopeDoc schema requires version: 1 (literal); normalize unknown shapes to 1.
+  const version: 1 = 1;
   const persona = normalizePersona(record.persona);
   return {
     version,
