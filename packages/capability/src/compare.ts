@@ -1,5 +1,5 @@
 /**
- * @module client/capability
+ * @module @agent-profile/capability/compare
  *
  * Constant-time string comparison for capability tokens.
  *

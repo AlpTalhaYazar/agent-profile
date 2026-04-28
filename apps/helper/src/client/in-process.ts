@@ -16,6 +16,7 @@
  */
 
 import { join } from "node:path";
+import { timingSafeEqualString } from "@agent-profile/capability";
 import { sessionsRootDefault } from "@agent-profile/persona-deployer";
 import {
   type Backend,
@@ -26,7 +27,6 @@ import {
 } from "@agent-profile/secrets";
 import { EXIT_AUTH, EXIT_CAPABILITY_DENIED, EXIT_SESSION_UNKNOWN, HelperError } from "../errors.js";
 import { resolveHeaders } from "../resolve/headers.js";
-import { timingSafeEqualString } from "./capability.js";
 import { type SessionManifestT, loadSessionManifest } from "./manifest.js";
 import type { AnthropicRequest, HelperClient, McpHeadersRequest } from "./types.js";
 

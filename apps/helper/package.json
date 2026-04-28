@@ -12,6 +12,7 @@
     "dev": "tsup --watch"
   },
   "dependencies": {
+    "@agent-profile/capability": "workspace:*",
     "@agent-profile/core": "workspace:*",
     "@agent-profile/persona-deployer": "workspace:*",
     "@agent-profile/secrets": "workspace:*",

@@ -10,8 +10,13 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { generateCapabilityToken } from "@agent-profile/capability";
 import type { AuthProfilesDocT, EffectiveConfig } from "@agent-profile/core";
 import { CliError, EXIT_CONFIG_INVALID } from "../errors.js";
+
+// Re-exported so internal CLI tests and callers can keep importing from this
+// module while the canonical implementation now lives in `@agent-profile/capability`.
+export { generateCapabilityToken };
 
 const JSON_INDENT = 2;
 const MANIFEST_FILE = "session.json";
@@ -52,15 +57,6 @@ export interface WriteSessionManifestResult {
   manifestPath: string;
   manifest: SessionManifest;
   capabilityToken: string;
-}
-
-/**
- * Generate the per-session bearer token used by helper wrappers.
- *
- * `randomBytes(32).toString("base64url")` yields 43 unpadded base64url chars.
- */
-export function generateCapabilityToken(): string {
-  return randomBytes(32).toString("base64url");
 }
 
 /**
