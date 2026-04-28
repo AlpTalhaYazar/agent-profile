@@ -27,14 +27,12 @@
 
 import type { CapabilityIssuer, CapabilityVerifier } from "@agent-profile/capability";
 import {
-  ServiceError,
   loadAuthProfiles,
   profileSaveService,
   saveAuthProfiles,
 } from "@agent-profile/cli-services";
 import type { AuthProfilesDocT } from "@agent-profile/core";
 import {
-  type Handler,
   type HandlerMap,
   IpcError,
   type ReqAuthAddT,
@@ -55,6 +53,7 @@ import {
   toKeyringKey,
 } from "@agent-profile/secrets";
 import type { AuditLog } from "./audit.js";
+import { wrap } from "./wrap-handler.js";
 
 /** Default capability-token TTL (60s; matches docs/06-security.md). */
 const DEFAULT_SESSION_TTL_MS = 60_000;
@@ -95,7 +94,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
   const now = deps.now ?? ((): number => Date.now());
 
   return {
-    "profile.save": wrap<ReqProfileSaveT>(async (req) => {
+    "profile.save": wrap<ReqProfileSaveT>("profile.save", async (req) => {
       const result = profileSaveService({
         home: deps.myClaudeHome,
         path: req.path,
@@ -104,7 +103,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return { saved: result.saved, path: result.path };
     }),
 
-    "auth.add": wrap<ReqAuthAddT>(async (req) => {
+    "auth.add": wrap<ReqAuthAddT>("auth.add", async (req) => {
       const { spec, anthropicSecretB64, force } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
       if (doc.authProfiles[spec.id] !== undefined && !force) {
@@ -133,7 +132,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return {};
     }),
 
-    "auth.setSecret": wrap<ReqAuthSetSecretT>(async (req) => {
+    "auth.setSecret": wrap<ReqAuthSetSecretT>("auth.setSecret", async (req) => {
       const { authId, name, valueB64, register } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
       const profile = doc.authProfiles[authId];
@@ -165,7 +164,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return {};
     }),
 
-    "auth.rotate": wrap<ReqAuthRotateT>(async (req) => {
+    "auth.rotate": wrap<ReqAuthRotateT>("auth.rotate", async (req) => {
       const { authId, anthropicSecretB64 } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
       const profile = doc.authProfiles[authId];
@@ -192,7 +191,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return {};
     }),
 
-    "auth.remove": wrap<ReqAuthRemoveT>(async (req) => {
+    "auth.remove": wrap<ReqAuthRemoveT>("auth.remove", async (req) => {
       const { authId } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
       const profile = doc.authProfiles[authId];
@@ -228,7 +227,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return { failed };
     }),
 
-    "session.start": wrap<ReqSessionStartT>(async (req) => {
+    "session.start": wrap<ReqSessionStartT>("session.start", async (req) => {
       const ttlMs = req.ttlMs ?? DEFAULT_SESSION_TTL_MS;
       const issued = deps.issuer.issue({ sessionId: req.sessionId, pid: req.pid, ttlMs });
       sessions.set(req.sessionId, {
@@ -246,7 +245,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return { capabilityToken: issued.token, expiresAtMs: issued.expiresAtMs };
     }),
 
-    "session.end": wrap<ReqSessionEndT>(async (req) => {
+    "session.end": wrap<ReqSessionEndT>("session.end", async (req) => {
       deps.issuer.revokeSession(req.sessionId);
       const info = sessions.get(req.sessionId);
       sessions.delete(req.sessionId);
@@ -260,7 +259,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return {};
     }),
 
-    "secret.get": wrap<ReqSecretGetT>(async (req) => {
+    "secret.get": wrap<ReqSecretGetT>("secret.get", async (req) => {
       const result = deps.verifier.verify(req.capabilityToken, { now: now() });
       if (!result.ok) {
         await deps.audit.append({
@@ -363,7 +362,7 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return { valueB64: Buffer.from(plaintext, "utf8").toString("base64") };
     }),
 
-    "secrets.migrate": wrap<ReqSecretsMigrateT>(async (req) => {
+    "secrets.migrate": wrap<ReqSecretsMigrateT>("secrets.migrate", async (req) => {
       if (!deps.keyring) {
         throw new IpcError("BAD_REQUEST", "no keyring backend configured for migration");
       }
@@ -384,28 +383,6 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
-/** Wrap a handler so service errors map to IPC error codes. */
-function wrap<TReq>(fn: (req: TReq) => Promise<Record<string, unknown>>): Handler {
-  return async (req) => {
-    try {
-      return await fn(req as TReq);
-    } catch (err) {
-      if (err instanceof IpcError) throw err;
-      if (err instanceof ServiceError) {
-        const code =
-          err.code === "not-found"
-            ? "NOT_FOUND"
-            : err.code === "io-error"
-              ? "INTERNAL"
-              : "BAD_REQUEST";
-        throw new IpcError(code, err.message);
-      }
-      const reason = err instanceof Error ? err.message : "internal error";
-      throw new IpcError("INTERNAL", reason);
-    }
-  };
-}
 
 /** Decode a base64 field, mapping malformed input to `BAD_REQUEST`. */
 function decodeB64(b64: string, fieldName: string): string {

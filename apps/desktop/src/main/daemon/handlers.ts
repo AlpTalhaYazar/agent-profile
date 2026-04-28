@@ -36,7 +36,6 @@ import {
   type ProfileListResult,
   type ProfilePreviewResult,
   type ProfileValidateResult,
-  ServiceError,
   type SessionRecord,
   authGetSecretRefService,
   authListService,
@@ -48,9 +47,7 @@ import {
   sessionsListService,
 } from "@agent-profile/cli-services";
 import {
-  type Handler,
   type HandlerMap,
-  IpcError,
   type ReqAuthGetSecretRefT,
   type ReqAuthListT,
   type ReqDaemonStatusT,
@@ -61,6 +58,7 @@ import {
   type ReqSessionsListT,
 } from "@agent-profile/ipc-protocol";
 import { type WriteHandlerDeps, createWriteHandlers } from "./handlers-write.js";
+import { wrap } from "./wrap-handler.js";
 
 /**
  * Resolve the "myclaude home" given a user home dir. The myclaude home is the
@@ -120,7 +118,7 @@ export function createHandlers(
   const myClaudeHome = writeDeps?.myClaudeHome ?? myClaudeHomeFor(userHome);
 
   const readHandlers: HandlerMap = {
-    "auth.list": wrap<ReqAuthListT>(async (req) => {
+    "auth.list": wrap<ReqAuthListT>("auth.list", async (req) => {
       const result: AuthListResult = authListService({
         home: myClaudeHome,
         includeRefs: req.includeRefs ?? false,
@@ -136,7 +134,7 @@ export function createHandlers(
       };
     }),
 
-    "auth.get-secret-ref": wrap<ReqAuthGetSecretRefT>(async (req) => {
+    "auth.get-secret-ref": wrap<ReqAuthGetSecretRefT>("auth.get-secret-ref", async (req) => {
       const result: AuthGetSecretRefResult = authGetSecretRefService({
         home: myClaudeHome,
         authId: req.authId,
@@ -145,7 +143,7 @@ export function createHandlers(
       return { ref: result.ref };
     }),
 
-    "profile.show": wrap<ReqProfileShowT>(async (req) => {
+    "profile.show": wrap<ReqProfileShowT>("profile.show", async (req) => {
       const effective = profileShowService({
         role: req.role,
         authProfileId: req.authProfileId,
@@ -164,7 +162,7 @@ export function createHandlers(
       };
     }),
 
-    "profile.list": wrap<ReqProfileListT>(async (req) => {
+    "profile.list": wrap<ReqProfileListT>("profile.list", async (req) => {
       const result: ProfileListResult = profileListService({
         home: myClaudeHome,
         cwd: req.cwd,
@@ -173,14 +171,14 @@ export function createHandlers(
       return { scopes: result.scopes };
     }),
 
-    "profile.validate": wrap<ReqProfileValidateT>(async (req) => {
+    "profile.validate": wrap<ReqProfileValidateT>("profile.validate", async (req) => {
       const result: ProfileValidateResult = profileValidateService({
         content: req.content,
       });
       return { issues: result.issues };
     }),
 
-    "profile.preview": wrap<ReqProfilePreviewT>(async (req) => {
+    "profile.preview": wrap<ReqProfilePreviewT>("profile.preview", async (req) => {
       const result: ProfilePreviewResult = profilePreviewService({
         home: myClaudeHome,
         role: req.role,
@@ -196,7 +194,7 @@ export function createHandlers(
       };
     }),
 
-    "sessions.list": wrap<ReqSessionsListT>(async (req) => {
+    "sessions.list": wrap<ReqSessionsListT>("sessions.list", async (req) => {
       const sessions: SessionRecord[] = await sessionsListService({
         sessionsRoot: sessionsRootForMyClaude(myClaudeHome),
         activeOnly: req.activeOnly ?? false,
@@ -204,7 +202,7 @@ export function createHandlers(
       return { sessions };
     }),
 
-    "daemon.status": wrap<ReqDaemonStatusT>(async () => {
+    "daemon.status": wrap<ReqDaemonStatusT>("daemon.status", async () => {
       const status: DaemonStatus = await daemonStatusService({
         pid: lifecycle.pid,
         socketPath: lifecycle.socketPath,
@@ -219,7 +217,7 @@ export function createHandlers(
       };
     }),
 
-    "daemon.stop": wrap(async () => {
+    "daemon.stop": wrap("daemon.stop", async () => {
       lifecycle.requestShutdown();
       return {};
     }),
@@ -229,31 +227,3 @@ export function createHandlers(
   return { ...readHandlers, ...createWriteHandlers(writeDeps) };
 }
 
-/**
- * Wrap a typed handler so any thrown {@link ServiceError} or generic Error is
- * mapped to a corresponding {@link IpcError}.
- *
- * The IPC server already wraps unknown throws as `INTERNAL`; we still do the
- * mapping here so service-level codes (`not-found` ↔ `NOT_FOUND`) survive the
- * trip and so we control the user-visible reason string.
- */
-function wrap<TReq>(fn: (req: TReq) => Promise<Record<string, unknown>>): Handler {
-  return async (req) => {
-    try {
-      return await fn(req as TReq);
-    } catch (err) {
-      if (err instanceof ServiceError) {
-        const code =
-          err.code === "not-found"
-            ? "NOT_FOUND"
-            : err.code === "io-error"
-              ? "INTERNAL"
-              : "BAD_REQUEST";
-        throw new IpcError(code, err.message);
-      }
-      // Generic failure — keep the reason short to avoid leaking internals.
-      const reason = err instanceof Error ? err.message : "internal error";
-      throw new IpcError("INTERNAL", reason);
-    }
-  };
-}
