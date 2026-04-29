@@ -37,6 +37,14 @@ const config: ForgeConfig = {
           config: "vite.preload.config.ts",
           target: "preload",
         },
+        {
+          // Dedicated preload for the Main-owned secret-entry child window.
+          // Phase 2 milestone 5 hybrid plaintext flow: `auth.add` opens this
+          // modal so the Anthropic API key never crosses the Renderer.
+          entry: "src/secret-dialog/preload.ts",
+          config: "vite.preload.config.ts",
+          target: "preload",
+        },
       ],
       renderer: [
         {

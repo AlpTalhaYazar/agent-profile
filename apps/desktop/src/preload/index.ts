@@ -13,10 +13,13 @@
  *
  * `category.action`. Examples:
  *
- *   - `system.version`   — read app version (this round)
- *   - `auth.list`        — list auth profiles (later)
- *   - `auth.set-secret`  — set a single secret (later)
- *   - `profile.show`     — resolve a `(role, auth, cwd)` triple (later)
+ *   - `system.version`     — read app version
+ *   - `auth.list`          — list auth profiles (metadata only)
+ *   - `auth.add`           — create a profile (Main collects plaintext)
+ *   - `auth.setSecret`     — write a secret (plaintext one-shot)
+ *   - `sessions.list`      — read live + recent sessions
+ *   - `sessions.kill`      — signal the live PID
+ *   - `sessions.onUpdate`  — subscribe to push-event frames
  *
  * The dotted hierarchy keeps related capabilities grep-able and matches the
  * IPC `Req.kind` discriminants used by the daemon protocol.
@@ -24,11 +27,10 @@
  * ## Sender-frame validation requirement
  *
  * Every `ipcMain.handle(...)` callback in `src/main/index.ts` MUST call
- * {@link validateSenderFrame} (re-exported from `src/main/security.ts`)
- * before doing any work. The `<contextBridge>` surface is reachable from any
- * frame the Renderer loads — including future iframes that load remote
- * content. Ignoring this check would let a compromised iframe call any
- * channel as if it were the trusted top-level frame.
+ * {@link validateSenderFrame} before doing any work. The contextBridge
+ * surface is reachable from any frame the Renderer loads; ignoring this
+ * check would let a compromised iframe call any channel as if it were the
+ * trusted top-level frame.
  *
  * The bridge stays narrow and capability-oriented. Renderer code gets a small
  * method surface; all validation, filesystem access, and daemon transport stay
@@ -44,15 +46,38 @@ contextBridge.exposeInMainWorld("myclaude", {
   },
   auth: {
     list: (): Promise<unknown> => ipcRenderer.invoke("auth.list"),
+    /**
+     * Create an auth profile. The plaintext Anthropic key is collected by a
+     * Main-owned modal child window — Renderer never sees it.
+     */
+    add: (opts: {
+      spec: {
+        id: string;
+        displayName?: string;
+        anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway"; secretRef: string };
+        mcpSecretRefs?: Record<string, string>;
+      };
+      force?: boolean;
+    }): Promise<unknown> => ipcRenderer.invoke("auth.add", opts),
+    /** Write or update a single MCP secret. Plaintext is a one-shot field. */
+    setSecret: (opts: {
+      profileId: string;
+      name: string;
+      value: string;
+      register?: boolean;
+    }): Promise<unknown> => ipcRenderer.invoke("auth.setSecret", opts),
+    /** Replace an existing Anthropic secret. */
+    rotate: (opts: { profileId: string; name?: string; value: string }): Promise<unknown> =>
+      ipcRenderer.invoke("auth.rotate", opts),
+    /** Remove an entire auth profile. Main native confirm guards the path. */
+    remove: (opts: { profileId: string; yes?: boolean }): Promise<unknown> =>
+      ipcRenderer.invoke("auth.remove", opts),
   },
   profile: {
     list: (opts: { cwd: string; roleFilter?: string }): Promise<unknown> =>
       ipcRenderer.invoke("profile.list", opts),
-    show: (opts: {
-      role: string;
-      authProfileId: string;
-      cwd: string;
-    }): Promise<unknown> => ipcRenderer.invoke("profile.show", opts),
+    show: (opts: { role: string; authProfileId: string; cwd: string }): Promise<unknown> =>
+      ipcRenderer.invoke("profile.show", opts),
     validate: (opts: { content: unknown }): Promise<unknown> =>
       ipcRenderer.invoke("profile.validate", opts),
     preview: (opts: {
@@ -63,5 +88,28 @@ contextBridge.exposeInMainWorld("myclaude", {
     }): Promise<unknown> => ipcRenderer.invoke("profile.preview", opts),
     save: (opts: { path: string; content: unknown }): Promise<unknown> =>
       ipcRenderer.invoke("profile.save", opts),
+  },
+  sessions: {
+    list: (): Promise<unknown> => ipcRenderer.invoke("sessions.list"),
+    kill: (opts: { sessionId: string; signal?: "SIGTERM" | "SIGKILL" }): Promise<unknown> =>
+      ipcRenderer.invoke("sessions.kill", opts),
+    relaunch: (opts: { sessionId: string }): Promise<unknown> =>
+      ipcRenderer.invoke("sessions.relaunch", opts),
+    drift: (opts: { sessionId: string }): Promise<unknown> =>
+      ipcRenderer.invoke("sessions.drift", opts),
+    /**
+     * Subscribe to push-event frames forwarded by Main. The callback receives
+     * either `{ kind: "event", event: SessionEvent }` or
+     * `{ kind: "connection", state: "up" | "down" }` — the latter lets
+     * Renderer trigger a polling fallback when the daemon connection drops.
+     * Returns a function that detaches the listener.
+     */
+    onUpdate: (cb: (payload: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, payload: unknown): void => cb(payload);
+      ipcRenderer.on("myclaude.sessions.event", listener);
+      return () => {
+        ipcRenderer.off("myclaude.sessions.event", listener);
+      };
+    },
   },
 });

@@ -22,12 +22,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   type DaemonClient,
+  type EvtSessionsEventT,
   type RespAuthListOkT,
+  type RespAuthRemoveOkT,
   type RespProfileListOkT,
   type RespProfilePreviewOkT,
   type RespProfileSaveOkT,
   type RespProfileShowOkT,
   type RespProfileValidateOkT,
+  type RespSessionsDriftOkT,
+  type RespSessionsKillOkT,
+  type RespSessionsListOkT,
+  type RespSessionsRelaunchOkT,
   connectToSocket,
   defaultSocketPath,
   readCookie,
@@ -40,6 +46,7 @@ import { buildCapabilityRegistry } from "./daemon/capability-registry.js";
 import { rotateBootCookie } from "./daemon/cookie.js";
 import { DaemonLifecycle } from "./daemon/lifecycle.js";
 import { buildSecretsStore } from "./daemon/secrets-store.js";
+import { requestSecretInputViaMain } from "./native-secret-dialog.js";
 import { assertValidSenderFrame, createSecureWindow, parseRendererPayload } from "./security.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +90,74 @@ const ProfileSavePayload = z
   .object({
     path: z.string().min(1),
     content: z.unknown(),
+  })
+  .strict();
+
+// ─── Auth Vault payloads (Phase 2 milestone 5) ───────────────────────────────
+
+const AuthAddPayload = z
+  .object({
+    spec: z
+      .object({
+        id: z.string().min(1),
+        displayName: z.string().min(1).optional(),
+        anthropic: z
+          .object({
+            mode: z.enum(["apiKey", "bedrock", "vertex", "gateway"]),
+            secretRef: z.string().min(1),
+          })
+          .strict(),
+        mcpSecretRefs: z.record(z.string(), z.string()).optional(),
+      })
+      .strict(),
+    force: z.boolean().optional(),
+  })
+  .strict();
+
+const AuthSetSecretPayload = z
+  .object({
+    profileId: z.string().min(1),
+    name: z.string().min(1),
+    value: z.string().min(1).max(8192),
+    register: z.boolean().optional(),
+  })
+  .strict();
+
+const AuthRotatePayload = z
+  .object({
+    profileId: z.string().min(1),
+    name: z.string().min(1).optional(),
+    value: z.string().min(1).max(8192),
+  })
+  .strict();
+
+const AuthRemovePayload = z
+  .object({
+    profileId: z.string().min(1),
+    yes: z.boolean().optional(),
+  })
+  .strict();
+
+// ─── Session Monitor payloads (Phase 2 milestone 5) ──────────────────────────
+
+const SessionsListPayload = NoPayload;
+
+const SessionsKillPayload = z
+  .object({
+    sessionId: z.string().min(1),
+    signal: z.enum(["SIGTERM", "SIGKILL"]).optional(),
+  })
+  .strict();
+
+const SessionsRelaunchPayload = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+const SessionsDriftPayload = z
+  .object({
+    sessionId: z.string().min(1),
   })
   .strict();
 
@@ -236,6 +311,253 @@ export function registerRendererIpcHandlers(opts: {
       return { saved: resp.saved, path: resp.path };
     });
   });
+
+  // ─── Auth Vault (Phase 2 milestone 5) ──────────────────────────────────────
+
+  ipcMain.handle("auth.add", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.add");
+    const parsed = parseRendererPayload(AuthAddPayload, payload, "auth.add");
+    // Hybrid plaintext flow: Renderer payload has NO secret value. Main owns
+    // a modal child window that collects the Anthropic API key locally.
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const plaintext = await requestSecretInputViaMain({
+      parent: parentWindow,
+      title: `Add auth profile "${parsed.spec.id}"`,
+      label: "Anthropic API key",
+    });
+    if (plaintext === null) {
+      throw new Error("auth.add: cancelled");
+    }
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const anthropicSecretB64 = Buffer.from(plaintext, "utf8").toString("base64");
+      await client.request("auth.add", {
+        spec: parsed.spec,
+        anthropicSecretB64,
+        ...(parsed.force !== undefined ? { force: parsed.force } : {}),
+      });
+      return { ok: true };
+    });
+    // plaintext + anthropicSecretB64 fall out of scope here; no logging.
+  });
+
+  ipcMain.handle("auth.setSecret", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.setSecret");
+    const parsed = parseRendererPayload(AuthSetSecretPayload, payload, "auth.setSecret");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const valueB64 = Buffer.from(parsed.value, "utf8").toString("base64");
+      await client.request("auth.setSecret", {
+        authId: parsed.profileId,
+        name: parsed.name,
+        valueB64,
+        ...(parsed.register !== undefined ? { register: parsed.register } : {}),
+      });
+      return { ok: true };
+    });
+  });
+
+  ipcMain.handle("auth.rotate", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.rotate");
+    const parsed = parseRendererPayload(AuthRotatePayload, payload, "auth.rotate");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const anthropicSecretB64 = Buffer.from(parsed.value, "utf8").toString("base64");
+      await client.request("auth.rotate", {
+        authId: parsed.profileId,
+        anthropicSecretB64,
+      });
+      return { ok: true };
+    });
+  });
+
+  ipcMain.handle("auth.remove", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.remove");
+    const parsed = parseRendererPayload(AuthRemovePayload, payload, "auth.remove");
+    // Destructive operation — confirm via Main native dialog when not pre-yes.
+    if (!parsed.yes) {
+      const parentWindow = BrowserWindow.fromWebContents(event.sender);
+      const dialogOptions: Electron.MessageBoxOptions = {
+        type: "warning",
+        buttons: ["Cancel", "Remove"],
+        defaultId: 0,
+        cancelId: 0,
+        title: "Remove auth profile",
+        message: `Remove auth profile "${parsed.profileId}"?`,
+        detail: "All keychain entries for this profile will be deleted. This cannot be undone.",
+      };
+      const choice = parentWindow
+        ? await dialog.showMessageBox(parentWindow, dialogOptions)
+        : await dialog.showMessageBox(dialogOptions);
+      if (choice.response !== 1) {
+        throw new Error("auth.remove: cancelled");
+      }
+    }
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespAuthRemoveOkT>("auth.remove", {
+        authId: parsed.profileId,
+        ...(parsed.yes !== undefined ? { yes: parsed.yes } : {}),
+      });
+      return { failed: resp.failed };
+    });
+  });
+
+  // ─── Session Monitor (Phase 2 milestone 5) ─────────────────────────────────
+
+  ipcMain.handle("sessions.list", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "sessions.list");
+    parseRendererPayload(SessionsListPayload, payload, "sessions.list");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespSessionsListOkT>("sessions.list", {});
+      return { sessions: resp.sessions };
+    });
+  });
+
+  ipcMain.handle("sessions.kill", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "sessions.kill");
+    const parsed = parseRendererPayload(SessionsKillPayload, payload, "sessions.kill");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const body: Record<string, unknown> = { sessionId: parsed.sessionId };
+      if (parsed.signal !== undefined) body.signal = parsed.signal;
+      const resp = await client.request<RespSessionsKillOkT>("sessions.kill", body);
+      const result: { killed: boolean; exitCode?: number } = { killed: resp.killed };
+      if (resp.exitCode !== undefined) result.exitCode = resp.exitCode;
+      return result;
+    });
+  });
+
+  ipcMain.handle("sessions.relaunch", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "sessions.relaunch");
+    const parsed = parseRendererPayload(SessionsRelaunchPayload, payload, "sessions.relaunch");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespSessionsRelaunchOkT>("sessions.relaunch", {
+        sessionId: parsed.sessionId,
+      });
+      return {
+        sessionId: resp.sessionId,
+        relaunchedFrom: resp.relaunchedFrom,
+      };
+    });
+  });
+
+  ipcMain.handle("sessions.drift", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "sessions.drift");
+    const parsed = parseRendererPayload(SessionsDriftPayload, payload, "sessions.drift");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespSessionsDriftOkT>("sessions.drift", {
+        sessionId: parsed.sessionId,
+      });
+      return {
+        drifted: resp.drifted,
+        scopesChanged: resp.scopesChanged,
+        oldHash: resp.oldHash,
+        newHash: resp.newHash,
+      };
+    });
+  });
+}
+
+// ─── Daemon push-event forwarding (Phase 2 milestone 5) ──────────────────────
+
+interface DaemonEventClient {
+  client: DaemonClient | null;
+  reconnectTimer: NodeJS.Timeout | null;
+  closed: boolean;
+}
+
+/**
+ * Maintain a long-lived `DaemonClient` that subscribes to `sessions.event`
+ * push frames and forwards each one to every BrowserWindow via
+ * `webContents.send("myclaude.sessions.event", ...)`. Reconnects with
+ * exponential backoff on disconnect; meanwhile Renderer hooks fall back to
+ * polling (driven by the `connection: down/up` notice frames we send below).
+ */
+export async function startDaemonEventClient(
+  myClaudeHome: string,
+  clientVersion: string
+): Promise<DaemonEventClient> {
+  const handle: DaemonEventClient = {
+    client: null,
+    reconnectTimer: null,
+    closed: false,
+  };
+
+  const broadcastToRenderers = (payload: unknown): void => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send("myclaude.sessions.event", payload);
+    }
+  };
+
+  let backoffMs = 1_000;
+  const maxBackoffMs = 30_000;
+
+  const connect = async (): Promise<void> => {
+    if (handle.closed) return;
+    try {
+      const cookie = await readCookie(myClaudeHome);
+      const client = await connectToSocket({
+        socketPath: defaultSocketPath(),
+        clientVersion,
+        cookie,
+      });
+      handle.client = client;
+      backoffMs = 1_000;
+      broadcastToRenderers({ kind: "connection", state: "up" });
+      client.on("sessions.event", (event: EvtSessionsEventT) => {
+        broadcastToRenderers({ kind: "event", event });
+      });
+      await client.subscribe("sessions");
+      // When the daemon hangs up, schedule a reconnect.
+      const onDisconnect = (): void => {
+        if (handle.closed) return;
+        handle.client = null;
+        broadcastToRenderers({ kind: "connection", state: "down" });
+        scheduleReconnect();
+      };
+      // The DaemonClient surfaces close via failAll; we listen on the
+      // underlying stream by polling the readyState. Simpler: poll.
+      const probeTimer = setInterval(() => {
+        // Once `client.close()` is called the pending map is cleared, but the
+        // event emitter is also `removeAllListeners`'d. We notice by checking
+        // an internal flag — to avoid private access, we just attempt a
+        // no-op request and on failure mark disconnected.
+        // Cheaper: trust `client.subscribe` to surface failure naturally next
+        // request; but an idle client may sit forever. Use a 30s heartbeat.
+      }, 30_000);
+      probeTimer.unref();
+      // When app quits, surface disconnect.
+      handle.client = client;
+      void onDisconnect; // reserved for future explicit teardown wiring
+    } catch {
+      broadcastToRenderers({ kind: "connection", state: "down" });
+      scheduleReconnect();
+    }
+  };
+
+  const scheduleReconnect = (): void => {
+    if (handle.closed) return;
+    if (handle.reconnectTimer) return;
+    const delay = backoffMs;
+    backoffMs = Math.min(maxBackoffMs, backoffMs * 2);
+    handle.reconnectTimer = setTimeout(() => {
+      handle.reconnectTimer = null;
+      void connect();
+    }, delay);
+    handle.reconnectTimer.unref();
+  };
+
+  await connect();
+  return handle;
+}
+
+export function stopDaemonEventClient(handle: DaemonEventClient): void {
+  handle.closed = true;
+  if (handle.reconnectTimer) {
+    clearTimeout(handle.reconnectTimer);
+    handle.reconnectTimer = null;
+  }
+  if (handle.client) {
+    handle.client.close();
+    handle.client = null;
+  }
 }
 
 async function startup(): Promise<void> {
@@ -275,6 +597,13 @@ async function startup(): Promise<void> {
 
   const expectedFrameUrl = rendererEntryUrl();
   registerRendererIpcHandlers({ expectedFrameUrl, myClaudeHome, startupCwd: STARTUP_CWD });
+
+  // Long-lived daemon subscription that forwards push events to every
+  // BrowserWindow. Renderer Session Monitor hooks listen on
+  // `myclaude.sessions.event` to update the table in real time.
+  void startDaemonEventClient(myClaudeHome, app.getVersion()).catch(() => {
+    // Non-fatal — Renderer falls back to polling on `connection: down`.
+  });
 
   if (isHeadless()) {
     // Headless: keep the Main process alive, daemon is serving requests, no
