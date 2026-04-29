@@ -33,7 +33,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DaemonServer, type HandlerMap } from "@agent-profile/ipc-protocol";
+import { DaemonServer, type EvtT, type HandlerMap } from "@agent-profile/ipc-protocol";
 import type { WriteHandlerDeps } from "./handlers-write.js";
 import { type LifecycleHandle, createHandlers } from "./handlers.js";
 
@@ -141,7 +141,18 @@ export class DaemonLifecycle {
       },
     };
 
-    const handlers: HandlerMap = createHandlers(handle, this.home, opts.writeHandlers);
+    // The broadcast hook is a closure over `this.server` so the write-side
+    // handlers can fan-out `sessions.event` frames to subscribed connections.
+    // We thread it through writeHandlers before constructing the server so
+    // the closure captures `this.server` lazily — a no-op until `start()`
+    // assigns the real instance.
+    const broadcast = (evt: EvtT): void => {
+      this.server?.broadcast(evt);
+    };
+    const writeHandlersWithBroadcast: WriteHandlerDeps | undefined = opts.writeHandlers
+      ? { ...opts.writeHandlers, broadcast }
+      : undefined;
+    const handlers: HandlerMap = createHandlers(handle, this.home, writeHandlersWithBroadcast);
 
     const features = [
       "auth.list",
@@ -164,7 +175,11 @@ export class DaemonLifecycle {
         "session.start",
         "session.end",
         "secret.get",
-        "secrets.migrate"
+        "secrets.migrate",
+        "sessions.kill",
+        "sessions.relaunch",
+        "sessions.drift",
+        "sessions.subscribe"
       );
     }
 

@@ -28,13 +28,18 @@ export interface LaunchEntry {
   ts: number;
   /** session id (ULID-style) */
   sessionId: string;
-  /** "started" | "ended" */
-  event: "started" | "ended";
+  /** "started" | "ended" | "killed" */
+  event: "started" | "ended" | "killed";
   /** spawned process pid; 0 if unknown */
   spawnPid: number;
   role?: string;
   authProfileId?: string;
   cwd?: string;
+  /**
+   * For sessions started via `sessions.relaunch`, the parent session id this
+   * session was cloned from. Absent on first-launch entries.
+   */
+  relaunchedFrom?: string;
 }
 
 /** Maps onto `secret_accesses` — one row per `secret.get` call. */

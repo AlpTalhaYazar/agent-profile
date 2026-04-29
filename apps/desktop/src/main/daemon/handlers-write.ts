@@ -25,14 +25,24 @@
  * read shows every attempt — successful or not.
  */
 
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { CapabilityIssuer, CapabilityVerifier } from "@agent-profile/capability";
 import {
+  type SessionRecord,
+  driftService,
+  listSessionRecords,
   loadAuthProfiles,
   profileSaveService,
+  readSessionRecord,
   saveAuthProfiles,
+  sessionRegistryDir,
+  updateSessionRecord,
+  writeSessionRecord,
 } from "@agent-profile/cli-services";
 import type { AuthProfilesDocT } from "@agent-profile/core";
 import {
+  type EvtT,
   type HandlerMap,
   IpcError,
   type ReqAuthAddT,
@@ -44,6 +54,9 @@ import {
   type ReqSecretsMigrateT,
   type ReqSessionEndT,
   type ReqSessionStartT,
+  type ReqSessionsDriftT,
+  type ReqSessionsKillT,
+  type ReqSessionsRelaunchT,
 } from "@agent-profile/ipc-protocol";
 import {
   type Backend,
@@ -62,11 +75,19 @@ const DEFAULT_SESSION_TTL_MS = 60_000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
 
 /** In-memory state mapping live sessions to their bound auth profile. */
-interface LiveSession {
+export interface LiveSession {
   authProfileId?: string;
   pid: number;
   expiresAtMs: number;
+  /** Captured at `session.start` for drift detection / future relaunch. */
+  launchHash?: string;
+  /** Cached for sessions that may relaunch without re-reading the registry. */
+  role?: string;
+  cwd?: string;
 }
+
+/** Shared Map type: callers may inject one to share state across handler maps. */
+export type LiveSessionsMap = Map<string, LiveSession>;
 
 /**
  * Drop sessions whose `expiresAtMs` has passed, revoking the matching
@@ -74,12 +95,13 @@ interface LiveSession {
  * testing; the periodic `setInterval` invokes the same function.
  */
 export async function runSessionCleanup(args: {
-  sessions: Map<string, LiveSession>;
+  sessions: LiveSessionsMap;
   now: number;
   issuer: CapabilityIssuer;
   audit: AuditLog;
+  broadcast?: (evt: EvtT) => void;
 }): Promise<void> {
-  const { sessions, now, issuer, audit } = args;
+  const { sessions, now, issuer, audit, broadcast } = args;
   const expired: Array<[string, LiveSession]> = [];
   for (const entry of sessions) {
     if (entry[1].expiresAtMs <= now) expired.push(entry);
@@ -94,6 +116,7 @@ export async function runSessionCleanup(args: {
       spawnPid: info.pid,
       ...(info.authProfileId !== undefined ? { authProfileId: info.authProfileId } : {}),
     });
+    broadcast?.({ kind: "sessions.event", sessionId, event: "exited", ts: now });
   }
 }
 
@@ -121,6 +144,25 @@ export interface WriteHandlerDeps {
    * DEFAULT_CLEANUP_INTERVAL_MS}.
    */
   cleanupIntervalMs?: number;
+  /**
+   * Optional shared Map of live sessions. When provided, the read-side
+   * `sessions.list` handler can enrich each record with capability liveness
+   * by inspecting the same map this module mutates. When omitted, a fresh
+   * Map is created internally.
+   */
+  sessions?: LiveSessionsMap;
+  /**
+   * Optional broadcast hook invoked when a session lifecycle event happens
+   * (start / end / kill / relaunch / drift). When omitted (e.g. unit tests),
+   * the handlers run silently. Production wiring passes
+   * `evt => server.broadcast(evt)`.
+   */
+  broadcast?: (evt: EvtT) => void;
+  /**
+   * Override for `process.kill`. Tests pass a mock so killing a real PID is
+   * not required. Defaults to `process.kill`.
+   */
+  killProcess?: (pid: number, signal?: number | NodeJS.Signals) => boolean;
 }
 
 /**
@@ -129,17 +171,29 @@ export interface WriteHandlerDeps {
  * `HandlerMap` the daemon registers.
  */
 export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
-  const sessions: Map<string, LiveSession> = new Map();
+  const sessions: LiveSessionsMap = deps.sessions ?? new Map();
   const now = deps.now ?? ((): number => Date.now());
   const cleanupMs = deps.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
+  const broadcast = deps.broadcast;
+  const killProcess = deps.killProcess ?? ((pid, signal) => process.kill(pid, signal));
 
   if (cleanupMs > 0) {
     // unref so the timer never blocks process exit; lifecycle.drainAndClose
     // does not need to track this timer for shutdown ordering.
     const timer = setInterval(() => {
-      void runSessionCleanup({ sessions, now: now(), issuer: deps.issuer, audit: deps.audit });
+      void runSessionCleanup({
+        sessions,
+        now: now(),
+        issuer: deps.issuer,
+        audit: deps.audit,
+        ...(broadcast ? { broadcast } : {}),
+      });
     }, cleanupMs);
     timer.unref();
+  }
+
+  function sessionsRoot(): string {
+    return join(deps.myClaudeHome, "sessions");
   }
 
   return {
@@ -279,17 +333,25 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
     "session.start": wrap<ReqSessionStartT>("session.start", async (req) => {
       const ttlMs = req.ttlMs ?? DEFAULT_SESSION_TTL_MS;
       const issued = deps.issuer.issue({ sessionId: req.sessionId, pid: req.pid, ttlMs });
-      sessions.set(req.sessionId, {
-        ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
+      const live: LiveSession = {
         pid: req.pid,
         expiresAtMs: issued.expiresAtMs,
-      });
+        ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
+        ...(req.launchHash !== undefined ? { launchHash: req.launchHash } : {}),
+      };
+      sessions.set(req.sessionId, live);
       await deps.audit.append({
         kind: "launch",
         sessionId: req.sessionId,
         event: "started",
         spawnPid: req.pid,
         ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
+      });
+      broadcast?.({
+        kind: "sessions.event",
+        sessionId: req.sessionId,
+        event: "started",
+        ts: now(),
       });
       return { capabilityToken: issued.token, expiresAtMs: issued.expiresAtMs };
     }),
@@ -304,6 +366,12 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         event: "ended",
         spawnPid: info?.pid ?? 0,
         ...(info?.authProfileId !== undefined ? { authProfileId: info.authProfileId } : {}),
+      });
+      broadcast?.({
+        kind: "sessions.event",
+        sessionId: req.sessionId,
+        event: "exited",
+        ts: now(),
       });
       return {};
     }),
@@ -428,7 +496,192 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         errors: report.errors,
       };
     }),
+
+    // ─── Session monitor (Phase 2 milestone 5) ──────────────────────────────
+
+    "sessions.kill": wrap<ReqSessionsKillT>("sessions.kill", async (req) => {
+      const root = sessionsRoot();
+      let record: SessionRecord;
+      try {
+        record = await readSessionRecord({ sessionsRoot: root, sessionId: req.sessionId });
+      } catch {
+        throw new IpcError("NOT_FOUND", `session "${req.sessionId}" was not found`);
+      }
+
+      const live = sessions.get(req.sessionId);
+      const pid = live?.pid ?? 0;
+      const alreadyExited =
+        record.status !== "running" || pid === 0 || !isProcessAlive(pid, killProcess);
+
+      if (alreadyExited) {
+        // Best-effort: update record + revoke + emit even if no signal needed.
+        sessions.delete(req.sessionId);
+        deps.issuer.revokeSession(req.sessionId);
+        if (record.status === "running") {
+          await updateSessionRecord({
+            sessionsRoot: root,
+            sessionId: req.sessionId,
+            patch: { status: "exited", updatedAt: new Date(now()).toISOString() },
+          });
+        }
+        await deps.audit.append({
+          kind: "launch",
+          sessionId: req.sessionId,
+          event: "killed",
+          spawnPid: pid,
+          ...(live?.authProfileId !== undefined ? { authProfileId: live.authProfileId } : {}),
+        });
+        broadcast?.({
+          kind: "sessions.event",
+          sessionId: req.sessionId,
+          event: "killed",
+          ts: now(),
+        });
+        return { killed: false };
+      }
+
+      const signal = req.signal ?? "SIGTERM";
+      try {
+        killProcess(pid, signal);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new IpcError("INTERNAL", `failed to signal pid ${pid}: ${message}`);
+      }
+
+      sessions.delete(req.sessionId);
+      deps.issuer.revokeSession(req.sessionId);
+      await updateSessionRecord({
+        sessionsRoot: root,
+        sessionId: req.sessionId,
+        patch: { status: "exited", updatedAt: new Date(now()).toISOString() },
+      });
+      await deps.audit.append({
+        kind: "launch",
+        sessionId: req.sessionId,
+        event: "killed",
+        spawnPid: pid,
+        ...(live?.authProfileId !== undefined ? { authProfileId: live.authProfileId } : {}),
+      });
+      broadcast?.({
+        kind: "sessions.event",
+        sessionId: req.sessionId,
+        event: "killed",
+        ts: now(),
+      });
+      return { killed: true };
+    }),
+
+    "sessions.relaunch": wrap<ReqSessionsRelaunchT>("sessions.relaunch", async (req) => {
+      const root = sessionsRoot();
+      let oldRecord: SessionRecord;
+      try {
+        oldRecord = await readSessionRecord({ sessionsRoot: root, sessionId: req.sessionId });
+      } catch {
+        throw new IpcError("NOT_FOUND", `session "${req.sessionId}" was not found`);
+      }
+
+      const newSessionId = randomUUID();
+      const newSessionDir = join(root, newSessionId);
+      const nowIso = new Date(now()).toISOString();
+      // Strip terminal-state fields from the clone so the new record looks
+      // like a fresh launch rather than inheriting the parent's exit metadata.
+      const { exitCode: _exitCode, wallMs: _wallMs, endedAt: _endedAt, ...inheritable } = oldRecord;
+      const newRecord: SessionRecord = {
+        ...inheritable,
+        sessionId: newSessionId,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        startedAt: nowIso,
+        status: "running",
+        retained: false,
+        cleaned: false,
+        relaunchedFrom: req.sessionId,
+        runtimePaths: {
+          ...oldRecord.runtimePaths,
+          sessionDir: newSessionDir,
+          claudeConfigDir: join(newSessionDir, ".claude"),
+          mcpConfig: join(newSessionDir, "mcp.json"),
+          settings: join(newSessionDir, "settings.json"),
+        },
+      };
+
+      await writeSessionRecord({ sessionsRoot: root, record: newRecord });
+
+      // Mint a placeholder capability with pid=0; the caller (CLI / Main)
+      // calls `session.start(newSessionId, realPid)` once the process is
+      // spawned, which overwrites the in-memory entry with the real pid.
+      const ttlMs = DEFAULT_SESSION_TTL_MS;
+      const issued = deps.issuer.issue({ sessionId: newSessionId, pid: 0, ttlMs });
+      sessions.set(newSessionId, {
+        authProfileId: oldRecord.authProfileId,
+        pid: 0,
+        expiresAtMs: issued.expiresAtMs,
+        ...(oldRecord.launchHash !== undefined ? { launchHash: oldRecord.launchHash } : {}),
+      });
+
+      await deps.audit.append({
+        kind: "launch",
+        sessionId: newSessionId,
+        event: "started",
+        spawnPid: 0,
+        authProfileId: oldRecord.authProfileId,
+        relaunchedFrom: req.sessionId,
+      });
+      broadcast?.({
+        kind: "sessions.event",
+        sessionId: newSessionId,
+        event: "started",
+        ts: now(),
+      });
+
+      return {
+        sessionId: newSessionId,
+        capabilityToken: issued.token,
+        expiresAtMs: issued.expiresAtMs,
+        relaunchedFrom: req.sessionId,
+      };
+    }),
+
+    "sessions.drift": wrap<ReqSessionsDriftT>("sessions.drift", async (req) => {
+      const root = sessionsRoot();
+      const result = await driftService({
+        sessionsRoot: root,
+        sessionId: req.sessionId,
+        home: deps.myClaudeHome,
+      });
+      if (result.drifted) {
+        broadcast?.({
+          kind: "sessions.event",
+          sessionId: req.sessionId,
+          event: "drifted",
+          ts: now(),
+        });
+      }
+      return {
+        drifted: result.drifted,
+        scopesChanged: result.scopesChanged,
+        oldHash: result.oldHash,
+        newHash: result.newHash,
+      };
+    }),
   };
+}
+
+/**
+ * Liveness probe via signal 0 (POSIX) — `process.kill(pid, 0)` returns true
+ * (no throw) when the process exists, throws ESRCH otherwise.
+ */
+function isProcessAlive(
+  pid: number,
+  killProcess: (pid: number, signal?: number | NodeJS.Signals) => boolean
+): boolean {
+  if (pid <= 0) return false;
+  try {
+    killProcess(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

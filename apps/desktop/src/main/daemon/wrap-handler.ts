@@ -17,12 +17,8 @@
  *    the request kind for operator forensics.
  */
 
-import {
-  type Handler,
-  IpcError,
-  type ReqT,
-} from "@agent-profile/ipc-protocol";
 import { ServiceError } from "@agent-profile/cli-services";
+import { type Handler, IpcError, type ReqT } from "@agent-profile/ipc-protocol";
 
 /**
  * Wrap a typed handler so any thrown error is mapped to a corresponding

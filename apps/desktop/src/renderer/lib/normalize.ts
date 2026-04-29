@@ -166,7 +166,7 @@ export function normalizeMaybeScopeDoc(input: unknown): ScopeDoc | null {
 export function normalizeScopeDoc(input: unknown): ScopeDoc {
   const record = isRecord(input) ? input : {};
   // ScopeDoc schema requires version: 1 (literal); normalize unknown shapes to 1.
-  const version: 1 = 1;
+  const version = 1 as const;
   const persona = normalizePersona(record.persona);
   return {
     version,

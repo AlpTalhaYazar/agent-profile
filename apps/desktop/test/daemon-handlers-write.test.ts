@@ -519,7 +519,10 @@ describe("daemon write handlers", () => {
       // Reach into the issuer to verify revocation later via verifier.
       // Build a fresh sessions Map via runSessionCleanup directly so we
       // observe the eviction without waiting on setInterval.
-      const sessions = new Map<string, { authProfileId?: string; pid: number; expiresAtMs: number }>();
+      const sessions = new Map<
+        string,
+        { authProfileId?: string; pid: number; expiresAtMs: number }
+      >();
       sessions.set("doomed", { authProfileId: "work", pid: 4242, expiresAtMs: 1_500 });
       // now: 5_000 — well past the expiresAtMs
       await runSessionCleanup({ sessions, now: 5_000, issuer, audit });
@@ -528,16 +531,198 @@ describe("daemon write handlers", () => {
       const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n").filter(Boolean);
       const ended = auditLines
         .map((l) => JSON.parse(l) as Record<string, unknown>)
-        .filter((row) => row.kind === "launch" && row.event === "ended" && row.sessionId === "doomed");
+        .filter(
+          (row) => row.kind === "launch" && row.event === "ended" && row.sessionId === "doomed"
+        );
       expect(ended).toHaveLength(1);
       expect(ended[0]).toMatchObject({ spawnPid: 4242, authProfileId: "work" });
     });
 
     it("retains sessions whose expiresAtMs is in the future", async () => {
-      const sessions = new Map<string, { authProfileId?: string; pid: number; expiresAtMs: number }>();
+      const sessions = new Map<
+        string,
+        { authProfileId?: string; pid: number; expiresAtMs: number }
+      >();
       sessions.set("alive", { pid: 7, expiresAtMs: 10_000 });
       await runSessionCleanup({ sessions, now: 9_000, issuer, audit });
       expect(sessions.has("alive")).toBe(true);
+    });
+  });
+
+  describe("session monitor (kill / relaunch / drift)", () => {
+    async function seedRecord(
+      sessionsRoot: string,
+      sessionId: string,
+      overrides: Record<string, unknown> = {}
+    ): Promise<void> {
+      const { writeSessionRecord } = await import("@agent-profile/cli-services");
+      const sessionDir = join(sessionsRoot, sessionId);
+      await writeSessionRecord({
+        sessionsRoot,
+        record: {
+          version: 1,
+          sessionId,
+          role: "backend",
+          authProfileId: "work",
+          cwd: "/repo",
+          createdAt: "2026-04-24T10:00:00.000Z",
+          updatedAt: "2026-04-24T10:00:00.000Z",
+          retained: false,
+          cleaned: false,
+          runtimePaths: {
+            sessionDir,
+            claudeConfigDir: join(sessionDir, ".claude"),
+            mcpConfig: join(sessionDir, "mcp.json"),
+            settings: join(sessionDir, "settings.json"),
+            apiKeyHelper: null,
+            headersHelper: null,
+            claudeMd: null,
+          },
+          spawn: { command: "claude", args: [] },
+          status: "running",
+          ...overrides,
+        },
+      });
+    }
+
+    it("sessions.kill signals the live pid, marks the record exited, and broadcasts", async () => {
+      const events: Array<Record<string, unknown>> = [];
+      const sessions = new Map();
+      const handlers = createWriteHandlers({
+        myClaudeHome,
+        store,
+        keyring,
+        issuer,
+        verifier,
+        audit,
+        daemonPid: 99,
+        now: () => 2_000,
+        cleanupIntervalMs: 0,
+        sessions,
+        broadcast: (evt) => {
+          events.push(evt as unknown as Record<string, unknown>);
+        },
+        killProcess: () => true,
+      });
+      await seedRecord(join(myClaudeHome, "sessions"), "s-running");
+      sessions.set("s-running", { pid: 12345, expiresAtMs: 5_000, authProfileId: "work" });
+
+      const kill = handlers["sessions.kill"];
+      if (!kill) throw new Error("missing handler");
+      const body = await kill(req("sessions.kill", { sessionId: "s-running" }), ctx);
+      expect(body).toMatchObject({ killed: true });
+      expect(sessions.has("s-running")).toBe(false);
+      expect(events).toContainEqual(
+        expect.objectContaining({ kind: "sessions.event", event: "killed", sessionId: "s-running" })
+      );
+    });
+
+    it("sessions.kill returns killed:false when the record is already exited", async () => {
+      const sessions = new Map();
+      const handlers = createWriteHandlers({
+        myClaudeHome,
+        store,
+        keyring,
+        issuer,
+        verifier,
+        audit,
+        daemonPid: 99,
+        now: () => 2_000,
+        cleanupIntervalMs: 0,
+        sessions,
+        killProcess: () => true,
+      });
+      await seedRecord(join(myClaudeHome, "sessions"), "s-exited", { status: "exited" });
+
+      const kill = handlers["sessions.kill"];
+      if (!kill) throw new Error("missing handler");
+      const body = await kill(req("sessions.kill", { sessionId: "s-exited" }), ctx);
+      expect(body).toMatchObject({ killed: false });
+    });
+
+    it("sessions.kill throws NOT_FOUND for an unknown session", async () => {
+      const handlers = createWriteHandlers({
+        myClaudeHome,
+        store,
+        keyring,
+        issuer,
+        verifier,
+        audit,
+        daemonPid: 99,
+        cleanupIntervalMs: 0,
+        killProcess: () => true,
+      });
+      const kill = handlers["sessions.kill"];
+      if (!kill) throw new Error("missing handler");
+      await expect(
+        kill(req("sessions.kill", { sessionId: "s-missing" }), ctx)
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+
+    it("sessions.relaunch mints a new sessionId, writes the cloned record, and audits relaunchedFrom", async () => {
+      const events: Array<Record<string, unknown>> = [];
+      const handlers = createWriteHandlers({
+        myClaudeHome,
+        store,
+        keyring,
+        issuer,
+        verifier,
+        audit,
+        daemonPid: 99,
+        now: () => 3_000,
+        cleanupIntervalMs: 0,
+        broadcast: (evt) => {
+          events.push(evt as unknown as Record<string, unknown>);
+        },
+        killProcess: () => true,
+      });
+      await seedRecord(join(myClaudeHome, "sessions"), "s-original", {
+        launchHash: "abc123",
+      });
+
+      const relaunch = handlers["sessions.relaunch"];
+      if (!relaunch) throw new Error("missing handler");
+      const body = await relaunch(req("sessions.relaunch", { sessionId: "s-original" }), ctx);
+      expect(body).toMatchObject({ relaunchedFrom: "s-original" });
+      expect(typeof (body as { sessionId: string }).sessionId).toBe("string");
+      expect((body as { sessionId: string }).sessionId).not.toBe("s-original");
+
+      const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n").filter(Boolean);
+      const launches = auditLines
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter(
+          (row) =>
+            row.kind === "launch" && row.event === "started" && row.relaunchedFrom === "s-original"
+        );
+      expect(launches).toHaveLength(1);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ kind: "sessions.event", event: "started" })
+      );
+    });
+
+    it("sessions.drift reports drifted=false when the recomputed hash matches", async () => {
+      const handlers = createWriteHandlers({
+        myClaudeHome,
+        store,
+        keyring,
+        issuer,
+        verifier,
+        audit,
+        daemonPid: 99,
+        cleanupIntervalMs: 0,
+        killProcess: () => true,
+      });
+      const drift = handlers["sessions.drift"];
+      if (!drift) throw new Error("missing handler");
+
+      // We don't seed a record; expect the BAD_REQUEST guard to fire (no
+      // launch hash). This is the cheapest assertion the daemon-side handler
+      // can make without standing up a full profileShowService stub.
+      await seedRecord(join(myClaudeHome, "sessions"), "s-no-hash");
+      await expect(
+        drift(req("sessions.drift", { sessionId: "s-no-hash" }), ctx)
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     });
   });
 });

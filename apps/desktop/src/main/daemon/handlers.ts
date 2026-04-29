@@ -46,18 +46,23 @@ import {
   profileValidateService,
   sessionsListService,
 } from "@agent-profile/cli-services";
-import {
-  type HandlerMap,
-  type ReqAuthGetSecretRefT,
-  type ReqAuthListT,
-  type ReqDaemonStatusT,
-  type ReqProfileListT,
-  type ReqProfilePreviewT,
-  type ReqProfileShowT,
-  type ReqProfileValidateT,
-  type ReqSessionsListT,
+import type {
+  HandlerMap,
+  ReqAuthGetSecretRefT,
+  ReqAuthListT,
+  ReqDaemonStatusT,
+  ReqProfileListT,
+  ReqProfilePreviewT,
+  ReqProfileShowT,
+  ReqProfileValidateT,
+  ReqSessionsListT,
 } from "@agent-profile/ipc-protocol";
-import { type WriteHandlerDeps, createWriteHandlers } from "./handlers-write.js";
+import {
+  type LiveSession,
+  type LiveSessionsMap,
+  type WriteHandlerDeps,
+  createWriteHandlers,
+} from "./handlers-write.js";
 import { wrap } from "./wrap-handler.js";
 
 /**
@@ -116,6 +121,14 @@ export function createHandlers(
   writeDeps?: WriteHandlerDeps
 ): HandlerMap {
   const myClaudeHome = writeDeps?.myClaudeHome ?? myClaudeHomeFor(userHome);
+
+  // Share the live-sessions Map across read and write handlers. The read-side
+  // `sessions.list` handler uses it to enrich each record with capability
+  // liveness; the write-side handlers in `createWriteHandlers` mutate it.
+  const sharedSessions: LiveSessionsMap | undefined = writeDeps
+    ? (writeDeps.sessions ?? new Map<string, LiveSession>())
+    : undefined;
+  const nowFn = writeDeps?.now ?? ((): number => Date.now());
 
   const readHandlers: HandlerMap = {
     "auth.list": wrap<ReqAuthListT>("auth.list", async (req) => {
@@ -197,7 +210,10 @@ export function createHandlers(
         sessionsRoot: sessionsRootForMyClaude(myClaudeHome),
         activeOnly: req.activeOnly ?? false,
       });
-      return { sessions };
+      const enriched = sharedSessions
+        ? sessions.map((record) => enrichSessionRecord(record, sharedSessions, nowFn()))
+        : sessions;
+      return { sessions: enriched };
     }),
 
     "daemon.status": wrap<ReqDaemonStatusT>("daemon.status", async () => {
@@ -222,6 +238,46 @@ export function createHandlers(
   };
 
   if (!writeDeps) return readHandlers;
-  return { ...readHandlers, ...createWriteHandlers(writeDeps) };
+  // Inject the shared sessions map so `createWriteHandlers` mutates the same
+  // Map the read-side enricher reads from.
+  const writeDepsWithShared: WriteHandlerDeps = {
+    ...writeDeps,
+    ...(sharedSessions ? { sessions: sharedSessions } : {}),
+  };
+  return { ...readHandlers, ...createWriteHandlers(writeDepsWithShared) };
 }
 
+/**
+ * Enrich a `SessionRecord` (z.unknown() on the wire) with capability +
+ * process liveness fields when the daemon has them. Returned object is the
+ * record plus a few optional keys; older readers ignore the extras.
+ */
+function enrichSessionRecord(
+  record: SessionRecord,
+  sessions: LiveSessionsMap,
+  nowMs: number
+): SessionRecord & {
+  liveCapability: boolean;
+  capabilityExpiresAtMs?: number;
+  processAlive: boolean;
+} {
+  const live = sessions.get(record.sessionId);
+  const liveCapability = Boolean(live && live.expiresAtMs > nowMs);
+  const pid = record.spawn?.args ? (live?.pid ?? 0) : 0;
+  const processAlive = pid > 0 && checkProcessAlive(pid);
+  return {
+    ...record,
+    liveCapability,
+    ...(live ? { capabilityExpiresAtMs: live.expiresAtMs } : {}),
+    processAlive,
+  };
+}
+
+function checkProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -123,6 +123,4 @@ export interface PreviewState {
   errorMessage: string | null;
 }
 
-export type JsonState =
-  | { text: string; parseError: null }
-  | { text: string; parseError: string };
+export type JsonState = { text: string; parseError: null } | { text: string; parseError: string };
