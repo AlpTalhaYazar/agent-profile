@@ -123,9 +123,11 @@ Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the
    See [`impl/phase-2-sprint-5-auth-vault-session-monitor.md`](impl/phase-2-sprint-5-auth-vault-session-monitor.md)
    and [`adr/004-session-event-subscription.md`](adr/004-session-event-subscription.md).
 
-6. **Provenance Inspector + Persona Composer (week 7–8)**
-   - Per-field provenance chain view
-   - Persona preview (rendered CLAUDE.md, file origins)
+6. **Provenance Inspector + Persona Composer (week 7–8)** — *Status: shipped on `feat/phase-2-foundation` (2026-04-29)*
+   - [x] Per-field provenance chain view (mcpServers / env / settings / persona; chain table, suppressedBy + overriddenFields surfaces, redactText on values)
+   - [x] Persona preview (rendered CLAUDE.md combined + per-section breakdown, agents/skills/slashCmds/memory catalog, in-memory render via new `persona.render` IPC kind, no disk write)
+   See [`impl/phase-2-sprint-6-provenance-persona.md`](impl/phase-2-sprint-6-provenance-persona.md)
+   and [`adr/005-persona-render-in-memory.md`](adr/005-persona-render-in-memory.md).
 
 7. **Polish + first-run flow (week 9–10)**
    - Keyboard navigation (Radix)
