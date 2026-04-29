@@ -91,6 +91,13 @@ interface MyClaudeBridge {
     drift: (input: { sessionId: string }) => Promise<unknown>;
     onUpdate: (cb: (payload: SessionUpdatePayload) => void) => () => void;
   };
+  persona?: {
+    render: (input: {
+      role: string;
+      authProfileId: string;
+      cwd: string;
+    }) => Promise<unknown>;
+  };
 }
 
 declare global {

@@ -89,6 +89,16 @@ contextBridge.exposeInMainWorld("myclaude", {
     save: (opts: { path: string; content: unknown }): Promise<unknown> =>
       ipcRenderer.invoke("profile.save", opts),
   },
+  persona: {
+    /**
+     * Render the persona section (CLAUDE.md + agents/skills/slashCmds/memory)
+     * in memory for a `(role, auth, cwd)` triple. Disk is never written —
+     * the bridge returns the same shape Renderer would otherwise have to
+     * reconstruct from the launch path.
+     */
+    render: (opts: { role: string; authProfileId: string; cwd: string }): Promise<unknown> =>
+      ipcRenderer.invoke("persona.render", opts),
+  },
   sessions: {
     list: (): Promise<unknown> => ipcRenderer.invoke("sessions.list"),
     kill: (opts: { sessionId: string; signal?: "SIGTERM" | "SIGKILL" }): Promise<unknown> =>

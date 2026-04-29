@@ -113,6 +113,94 @@ describe("main renderer IPC bridge", () => {
     expect(close).toHaveBeenCalledTimes(2);
   });
 
+  it("delegates persona.render to the daemon and forwards the projected wire shape", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({
+      id: "c-1",
+      kind: "persona.render.ok",
+      claudeMd: {
+        combinedContent: "<!-- source: global-role -->\nbackend\n",
+        sections: [
+          {
+            sourcePath: "/p/persona/backend.md",
+            originScope: "global-role",
+            content: "backend\n",
+          },
+        ],
+      },
+      files: [
+        {
+          category: "agents",
+          basename: "api-designer.md",
+          sourcePath: "/p/agents/api-designer.md",
+          originScope: "global-role",
+          content: "agent body",
+        },
+      ],
+      collisions: [],
+      missingSources: [],
+    });
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+
+    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      startupCwd: "/repo",
+    });
+
+    const personaRender = handlerMap.get("persona.render");
+    if (!personaRender) throw new Error("missing persona.render handler");
+
+    const event = {
+      senderFrame: { url: "file:///trusted/index.html" },
+      sender: {},
+    };
+
+    const result = (await personaRender(event, {
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+    })) as {
+      claudeMd: { combinedContent: string; sections: unknown[] } | null;
+      files: unknown[];
+      collisions: unknown[];
+      missingSources: unknown[];
+    };
+
+    expect(result.claudeMd).not.toBeNull();
+    expect(result.claudeMd?.sections).toHaveLength(1);
+    expect(result.files).toHaveLength(1);
+    expect(result.collisions).toEqual([]);
+    expect(result.missingSources).toEqual([]);
+    expect(request).toHaveBeenCalledWith("persona.render", {
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an invalid persona.render payload before opening a daemon connection", async () => {
+    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+    });
+
+    const personaRender = handlerMap.get("persona.render");
+    if (!personaRender) throw new Error("missing persona.render handler");
+
+    await expect(
+      personaRender(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { role: "" } // missing authProfileId + cwd
+      )
+    ).rejects.toThrow(/invalid payload/);
+    expect(connectToSocket).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid renderer payloads before they reach the daemon", async () => {
     const { registerRendererIpcHandlers } = await import("../src/main/index.js");
     registerRendererIpcHandlers({

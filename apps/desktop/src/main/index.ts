@@ -25,6 +25,7 @@ import {
   type EvtSessionsEventT,
   type RespAuthListOkT,
   type RespAuthRemoveOkT,
+  type RespPersonaRenderOkT,
   type RespProfileListOkT,
   type RespProfilePreviewOkT,
   type RespProfileSaveOkT,
@@ -90,6 +91,16 @@ const ProfileSavePayload = z
   .object({
     path: z.string().min(1),
     content: z.unknown(),
+  })
+  .strict();
+
+// ─── Persona Composer payload (Phase 2 milestone 6) ──────────────────────────
+
+const PersonaRenderPayload = z
+  .object({
+    role: z.string().min(1),
+    authProfileId: z.string().min(1),
+    cwd: z.string().min(1),
   })
   .strict();
 
@@ -309,6 +320,22 @@ export function registerRendererIpcHandlers(opts: {
     return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
       const resp = await client.request<RespProfileSaveOkT>("profile.save", parsed);
       return { saved: resp.saved, path: resp.path };
+    });
+  });
+
+  // ─── Persona Composer (Phase 2 milestone 6) ────────────────────────────────
+
+  ipcMain.handle("persona.render", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "persona.render");
+    const parsed = parseRendererPayload(PersonaRenderPayload, payload, "persona.render");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const resp = await client.request<RespPersonaRenderOkT>("persona.render", parsed);
+      return {
+        claudeMd: resp.claudeMd,
+        files: resp.files,
+        collisions: resp.collisions,
+        missingSources: resp.missingSources,
+      };
     });
   });
 
