@@ -236,13 +236,11 @@ Current canonical fields:
 
 ---
 
-### 19. Unsolicited event channel (`sessions.event`) schematization (raised by Sprint 2)
+### 19. Unsolicited event channel (`sessions.event`) schematization (raised by Sprint 2) — *resolved Phase 2 milestone 5*
 
 **The question:** [`docs/05-gui-spec.md` § "Unsolicited events"](05-gui-spec.md) describes `session.event` pushes from Main to subscribed clients (`sessions list --follow`, Renderer `sessions.onUpdate`). The Sprint 2 wire schema in [`packages/ipc-protocol/src/messages.ts`](../packages/ipc-protocol/src/messages.ts) does not include this kind — only request/response pairs.
 
-**Working assumption (Phase 2 milestone 2):** Don't ship the event channel yet. The read-mostly command surface this round can poll `sessions.list` cheaply. Live session monitoring lands with milestone 5 (Session Monitor) and the schematization happens then.
-
-**Revisit signal:** When the Session Monitor UI is designed (milestone 5) or `myclaude sessions list --follow` is implemented, add a `Event` discriminated union to `messages.ts`, give `DaemonClient` an `event` emitter, and introduce per-connection subscription state on the server.
+**Resolution (2026-04-29, milestone 5):** Shipped the third envelope. `messages.ts` now exports an `Evt` discriminated union with `EvtSessionsEvent` (kinds: `started | idle | exited | killed | drifted`); `DaemonServer.broadcast(evt, predicate?)` walks per-connection subscriber sets; `DaemonClient` extends `EventEmitter` with a typed event map and a `subscribe("sessions")` helper that exchanges a `sessions.subscribe` request. CLI consumes the channel via `sessions list --follow`; Main consumes it through a long-lived event client and forwards each frame to every BrowserWindow as `myclaude.sessions.event`. Renderer falls back to a 5-second polling loop on `connection: down` notice. See [`adr/004-session-event-subscription.md`](adr/004-session-event-subscription.md).
 
 ---
 
@@ -328,7 +326,7 @@ client. See [ADR 003](adr/003-renderer-main-daemon-path.md).
 
 ---
 
-### 28. Renderer auth model before Auth Vault (raised by Sprint 4)
+### 28. Renderer auth model before Auth Vault (raised by Sprint 4) — *resolved Phase 2 milestone 5*
 
 **The question:** Profile Editor needs an auth selector to resolve effective
 config, but Auth Vault is a later milestone. What can the Renderer know now?
@@ -339,9 +337,21 @@ only: id, display name, mode, and secret counts. Main always calls
 refs or values. Secret creation/editing stays out of M4 and lands with Auth
 Vault.
 
-**Revisit signal:** When Auth Vault ships, define a separate write surface for
-secret entry where plaintext travels Renderer → Main only long enough for Main
-to encrypt and zero buffers. Do not expand `auth.list` to include refs.
+**Resolution (2026-04-29, milestone 5):** The metadata-only invariant holds.
+Auth Vault uses a hybrid plaintext flow:
+- `auth.add` — Renderer payload carries no secret value. Main opens a
+  modal child `BrowserWindow` (data-URL HTML, dedicated preload exposing
+  only `secretDialog.submit`/`cancel`) that collects the Anthropic API
+  key locally. Plaintext lives in Main process memory only for the
+  Promise's lifetime; it is base64-encoded and forwarded to the daemon.
+- `auth.setSecret` / `auth.rotate` — Renderer modal with a
+  `PasswordInput` (Show/Hide toggle, value held in component-local
+  `useState`, cleared on close). The plaintext crosses the IPC bridge
+  once, base64-encoded by Main, and never enters Jotai or any persistent
+  store.
+`auth.list` was **not** expanded with refs. See
+[`apps/desktop/src/main/native-secret-dialog.ts`](../apps/desktop/src/main/native-secret-dialog.ts)
+and [`apps/desktop/src/renderer/screens/auth-vault.tsx`](../apps/desktop/src/renderer/screens/auth-vault.tsx).
 
 ---
 

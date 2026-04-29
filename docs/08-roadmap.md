@@ -116,10 +116,12 @@ Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the
    See [`impl/phase-2-sprint-4-profile-editor.md`](impl/phase-2-sprint-4-profile-editor.md)
    and [`adr/003-renderer-main-daemon-path.md`](adr/003-renderer-main-daemon-path.md).
 
-5. **Auth Vault + Session Monitor (week 6–7)**
-   - Auth CRUD with masked inputs
-   - Session list with live updates (from daemon events)
-   - Kill, relaunch, drift detection
+5. **Auth Vault + Session Monitor (week 6–7)** — *Status: shipped on `feat/phase-2-foundation` (2026-04-29)*
+   - [x] Auth CRUD with masked inputs (Renderer modal for set/rotate; Main native child window for `auth.add` plaintext)
+   - [x] Session list with live updates (daemon `sessions.event` push channel; Renderer falls back to polling on disconnect)
+   - [x] Kill, relaunch, drift detection (daemon handlers + CLI subcommands + Renderer Session Monitor actions)
+   See [`impl/phase-2-sprint-5-auth-vault-session-monitor.md`](impl/phase-2-sprint-5-auth-vault-session-monitor.md)
+   and [`adr/004-session-event-subscription.md`](adr/004-session-event-subscription.md).
 
 6. **Provenance Inspector + Persona Composer (week 7–8)**
    - Per-field provenance chain view
