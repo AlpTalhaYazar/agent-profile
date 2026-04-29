@@ -1,12 +1,26 @@
-import { Button, CodeEditor, Field, Input, Select, Switch, cn } from "@agent-profile/ui";
+import {
+  Button,
+  CodeEditor,
+  Field,
+  Input,
+  Select,
+  Switch,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  cn,
+} from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import "./global.css";
 import {
+  type AppScreen,
   appErrorAtom,
   authProfilesAtom,
   availableRolesAtom,
+  currentScreenAtom,
   cwdAtom,
   draftDocAtom,
   editorModeAtom,
@@ -67,6 +81,8 @@ import type {
   ScopeListEntry,
   TransportType,
 } from "./lib/types.js";
+import { AuthVaultScreen } from "./screens/auth-vault.js";
+import { SessionMonitorScreen } from "./screens/session-monitor.js";
 
 function App(): React.ReactElement {
   const [version, setVersion] = useAtom(versionAtom);
@@ -94,6 +110,7 @@ function App(): React.ReactElement {
   const selectedScopeLabel = useAtomValue(selectedScopeLabelAtom);
   const hasUnsavedChanges = useAtomValue(hasUnsavedChangesAtom);
   const issuesByPath = useAtomValue(issuesByPathAtom);
+  const currentScreen = useAtomValue(currentScreenAtom);
   const previewScrollTargets = React.useRef<Record<string, HTMLElement | null>>({});
   const previewPaneRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -500,7 +517,18 @@ function App(): React.ReactElement {
         ) : null}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <ScreenTabs />
+
+      {currentScreen !== "editor" ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {currentScreen === "auth-vault" ? <AuthVaultScreen /> : <SessionMonitorScreen />}
+        </div>
+      ) : null}
+
+      <div
+        className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)]"
+        style={{ display: currentScreen === "editor" ? undefined : "none" }}
+      >
         <aside className="app-scrollbar min-h-0 overflow-auto border-r border-neutral-200 bg-white">
           <div className="border-b border-neutral-200 px-4 py-3">
             <h1 className="text-base font-semibold">Profile Explorer</h1>
@@ -1808,6 +1836,28 @@ function uniqueServerName(servers: Record<string, ScopeDocServerEntry | null>): 
     candidate = `server-${index}`;
   }
   return candidate;
+}
+
+function ScreenTabs(): React.ReactElement {
+  const [currentScreen, setCurrentScreen] = useAtom(currentScreenAtom);
+  return (
+    <Tabs
+      value={currentScreen}
+      onValueChange={(v) => setCurrentScreen(v as AppScreen)}
+      className="border-b border-neutral-200 bg-white px-4 py-2"
+    >
+      <TabsList>
+        <TabsTrigger value="editor">Profile Editor</TabsTrigger>
+        <TabsTrigger value="auth-vault">Auth Vault</TabsTrigger>
+        <TabsTrigger value="sessions">Session Monitor</TabsTrigger>
+      </TabsList>
+      {/* Tab content panels are rendered inside App rather than here so the
+          Profile Editor's existing layout doesn't have to nest under TabsContent. */}
+      <TabsContent value="editor" />
+      <TabsContent value="auth-vault" />
+      <TabsContent value="sessions" />
+    </Tabs>
+  );
 }
 
 const root = document.getElementById("root");

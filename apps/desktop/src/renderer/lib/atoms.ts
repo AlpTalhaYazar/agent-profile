@@ -74,3 +74,9 @@ export const issuesByPathAtom = atom((get) => {
   const issues = get(validationStateAtom).issues;
   return new Map(issues.map((issue) => [issue.path, issue.message]));
 });
+
+// ─── App-level navigation (Phase 2 milestone 5) ──────────────────────────────
+
+export type AppScreen = "editor" | "auth-vault" | "sessions";
+
+export const currentScreenAtom = atom<AppScreen>("editor");
