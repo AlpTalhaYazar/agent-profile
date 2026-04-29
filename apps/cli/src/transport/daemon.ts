@@ -12,6 +12,7 @@
 import type { SessionRecord } from "@agent-profile/cli-services";
 import type {
   DaemonClient,
+  EvtSessionsEventT,
   ReqT,
   RespAuthGetSecretRefOkT,
   RespAuthListOkT,
@@ -20,13 +21,17 @@ import type {
   RespProfileShowOkT,
   RespSessionEndOkT,
   RespSessionStartOkT,
+  RespSessionsDriftOkT,
+  RespSessionsKillOkT,
   RespSessionsListOkT,
+  RespSessionsRelaunchOkT,
   RespT,
 } from "@agent-profile/ipc-protocol";
 import { IpcError } from "@agent-profile/ipc-protocol";
 import { CliError, EXIT_AUTH_FAILURE, EXIT_DAEMON_UNREACHABLE, EXIT_GENERIC } from "../errors.js";
 import type {
   CliTransport,
+  SessionsSubscribeHandle,
   TransportAuthAddInput,
   TransportAuthGetSecretRefInput,
   TransportAuthGetSecretRefResult,
@@ -45,7 +50,14 @@ import type {
   TransportSessionEndInput,
   TransportSessionStartInput,
   TransportSessionStartResult,
+  TransportSessionsDriftInput,
+  TransportSessionsDriftResult,
+  TransportSessionsKillInput,
+  TransportSessionsKillResult,
   TransportSessionsListInput,
+  TransportSessionsRelaunchInput,
+  TransportSessionsRelaunchResult,
+  TransportSessionsSubscribeInput,
 } from "./types.js";
 
 /**
@@ -230,6 +242,63 @@ export class DaemonTransport implements CliTransport {
     await this.requestSafe<RespSessionEndOkT>("session.end", {
       sessionId: input.sessionId,
     });
+  }
+
+  async sessionsKill(input: TransportSessionsKillInput): Promise<TransportSessionsKillResult> {
+    const body: Record<string, unknown> = { sessionId: input.sessionId };
+    if (input.signal !== undefined) body.signal = input.signal;
+    const resp = await this.requestSafe<RespSessionsKillOkT>("sessions.kill", body);
+    const result: TransportSessionsKillResult = { killed: resp.killed };
+    if (resp.exitCode !== undefined) result.exitCode = resp.exitCode;
+    return result;
+  }
+
+  async sessionsRelaunch(
+    input: TransportSessionsRelaunchInput
+  ): Promise<TransportSessionsRelaunchResult> {
+    const resp = await this.requestSafe<RespSessionsRelaunchOkT>("sessions.relaunch", {
+      sessionId: input.sessionId,
+    });
+    return {
+      sessionId: resp.sessionId,
+      capabilityToken: resp.capabilityToken,
+      expiresAtMs: resp.expiresAtMs,
+      relaunchedFrom: resp.relaunchedFrom,
+    };
+  }
+
+  async sessionsDrift(input: TransportSessionsDriftInput): Promise<TransportSessionsDriftResult> {
+    const resp = await this.requestSafe<RespSessionsDriftOkT>("sessions.drift", {
+      sessionId: input.sessionId,
+    });
+    return {
+      drifted: resp.drifted,
+      scopesChanged: resp.scopesChanged,
+      oldHash: resp.oldHash,
+      newHash: resp.newHash,
+    };
+  }
+
+  async sessionsSubscribe(
+    input: TransportSessionsSubscribeInput
+  ): Promise<SessionsSubscribeHandle> {
+    try {
+      await this.client.subscribe("sessions");
+    } catch (err) {
+      throw mapIpcError(err);
+    }
+    const listener = (event: EvtSessionsEventT): void => {
+      input.onEvent(event);
+    };
+    this.client.on("sessions.event", listener);
+    let detached = false;
+    return {
+      unsubscribe: () => {
+        if (detached) return;
+        detached = true;
+        this.client.off("sessions.event", listener);
+      },
+    };
   }
 
   async close(): Promise<void> {

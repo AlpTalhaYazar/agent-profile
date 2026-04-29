@@ -14,13 +14,17 @@ import {
   authGetSecretRefService,
   authListService,
   daemonStatusService,
+  driftService,
   profileShowService,
+  sessionsKillService,
   sessionsListService,
+  sessionsRelaunchService,
 } from "@agent-profile/cli-services";
 import { CliError, EXIT_DAEMON_UNREACHABLE } from "../errors.js";
 import { generateCapabilityToken } from "../session/manifest.js";
 import type {
   CliTransport,
+  SessionsSubscribeHandle,
   TransportAuthAddInput,
   TransportAuthGetSecretRefInput,
   TransportAuthGetSecretRefResult,
@@ -40,7 +44,14 @@ import type {
   TransportSessionEndInput,
   TransportSessionStartInput,
   TransportSessionStartResult,
+  TransportSessionsDriftInput,
+  TransportSessionsDriftResult,
+  TransportSessionsKillInput,
+  TransportSessionsKillResult,
   TransportSessionsListInput,
+  TransportSessionsRelaunchInput,
+  TransportSessionsRelaunchResult,
+  TransportSessionsSubscribeInput,
 } from "./types.js";
 
 /**
@@ -163,6 +174,41 @@ export class InProcTransport implements CliTransport {
 
   async sessionEnd(_input: TransportSessionEndInput): Promise<void> {
     // Standalone sessions are cleaned up locally; there is no daemon state to revoke.
+  }
+
+  // ─── Session monitor (Phase 2 milestone 5) ─────────────────────────────────
+
+  async sessionsKill(input: TransportSessionsKillInput): Promise<TransportSessionsKillResult> {
+    // Validate input via the service so malformed sessionIds are rejected
+    // consistently with the daemon path. The actual signal is daemon-only.
+    const validationInput: Parameters<typeof sessionsKillService>[0] = {
+      sessionsRoot: "",
+      sessionId: input.sessionId,
+    };
+    if (input.signal !== undefined) validationInput.signal = input.signal;
+    sessionsKillService(validationInput);
+    throw daemonRequired("sessions.kill");
+  }
+
+  async sessionsRelaunch(
+    input: TransportSessionsRelaunchInput
+  ): Promise<TransportSessionsRelaunchResult> {
+    sessionsRelaunchService({ sessionsRoot: "", sessionId: input.sessionId });
+    throw daemonRequired("sessions.relaunch");
+  }
+
+  async sessionsDrift(input: TransportSessionsDriftInput): Promise<TransportSessionsDriftResult> {
+    return driftService({
+      sessionsRoot: input.sessionsRoot,
+      sessionId: input.sessionId,
+      home: input.home,
+    });
+  }
+
+  async sessionsSubscribe(
+    _input: TransportSessionsSubscribeInput
+  ): Promise<SessionsSubscribeHandle> {
+    throw daemonRequired("sessions.subscribe");
   }
 
   async close(): Promise<void> {

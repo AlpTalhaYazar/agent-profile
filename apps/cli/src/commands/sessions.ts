@@ -1,9 +1,12 @@
 /**
  * @module commands/sessions
  *
- * File-backed `myclaude sessions` commands for Phase 1 CLI-only workflows.
+ * File-backed `myclaude sessions` commands. Phase 2 milestone 5 added the
+ * daemon-routed kill/relaunch/drift subcommands plus `list --follow` for the
+ * unsolicited push-event channel.
  */
 import { stat } from "node:fs/promises";
+import type { EvtSessionsEventT } from "@agent-profile/ipc-protocol";
 import {
   cleanupSession,
   listOrphanedSessions,
@@ -20,6 +23,7 @@ import {
   updateSessionRecord,
 } from "../session/registry.js";
 import { getTransport } from "../transport/index.js";
+import { myClaudeHome } from "../utils/paths.js";
 
 export interface SessionsBaseOptions {
   sessionsRoot?: string;
@@ -38,6 +42,31 @@ export interface SessionsListOptions extends SessionsBaseOptions {
   requireDaemon?: boolean;
   /** Force standalone path; skip the daemon attempt entirely. */
   standalone?: boolean;
+  /**
+   * When true, after the initial snapshot the command keeps a daemon
+   * subscription open and prints every `sessions.event` push frame. SIGINT
+   * disposes the subscription cleanly. Daemon-only.
+   */
+  follow?: boolean;
+}
+
+export interface SessionsKillOptions extends SessionsBaseOptions {
+  sessionId: string;
+  signal?: "SIGTERM" | "SIGKILL";
+  yes?: boolean;
+  isInteractive?: boolean;
+  confirm?: (message: string) => Promise<boolean>;
+}
+
+export interface SessionsRelaunchOptions extends SessionsBaseOptions {
+  sessionId: string;
+}
+
+export interface SessionsDriftOptions extends SessionsBaseOptions {
+  sessionId: string;
+  home?: string;
+  standalone?: boolean;
+  requireDaemon?: boolean;
 }
 
 export interface SessionsShowOptions extends SessionsBaseOptions {
@@ -76,10 +105,17 @@ export interface SessionsGcResult {
 /** List active and recent sessions from the registry. */
 export async function runSessionsList(opts: SessionsListOptions = {}): Promise<SessionRecord[]> {
   const sessionsRoot = resolveSessionsRoot(opts);
+  const followMode = Boolean(opts.follow);
 
   const transportOpts: Parameters<typeof getTransport>[0] = {};
   if (opts.home !== undefined) transportOpts.home = opts.home;
-  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (followMode) {
+    // --follow only makes sense over the daemon; force-require it so we
+    // don't silently degrade to a one-shot in-process snapshot.
+    transportOpts.requireDaemon = true;
+  } else if (opts.requireDaemon !== undefined) {
+    transportOpts.requireDaemon = opts.requireDaemon;
+  }
   if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
   const transport = await getTransport(transportOpts);
 
@@ -89,18 +125,191 @@ export async function runSessionsList(opts: SessionsListOptions = {}): Promise<S
       sessionsRoot,
       activeOnly: Boolean(opts.active),
     });
+
+    const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
+    if (jsonMode) {
+      writeJson({ sessions: records }, Boolean(opts.pretty));
+    } else {
+      process.stdout.write(`${formatSessionList(records, opts.nowMs ?? Date.now())}\n`);
+    }
+
+    if (followMode) {
+      await streamSessionsEvents(transport, jsonMode);
+    }
   } finally {
     await transport.close();
   }
 
+  return records;
+}
+
+/** Long-poll-style session event stream (used by `sessions list --follow`). */
+async function streamSessionsEvents(
+  transport: Awaited<ReturnType<typeof getTransport>>,
+  jsonMode: boolean
+): Promise<void> {
+  const events: EvtSessionsEventT[] = [];
+  let pendingResolve: ((value: undefined) => void) | null = null;
+  let stopped = false;
+
+  const handle = await transport.sessionsSubscribe({
+    onEvent: (event) => {
+      events.push(event);
+      pendingResolve?.(undefined);
+      pendingResolve = null;
+    },
+  });
+
+  const onSigint = (): void => {
+    stopped = true;
+    pendingResolve?.(undefined);
+    pendingResolve = null;
+  };
+  process.once("SIGINT", onSigint);
+
+  try {
+    while (!stopped) {
+      while (events.length > 0) {
+        const event = events.shift();
+        if (!event) break;
+        if (jsonMode) {
+          writeJson(event, false);
+        } else {
+          process.stdout.write(`${formatSessionEvent(event)}\n`);
+        }
+      }
+      if (stopped) break;
+      await new Promise<undefined>((resolve) => {
+        pendingResolve = resolve;
+      });
+    }
+  } finally {
+    handle.unsubscribe();
+    process.removeListener("SIGINT", onSigint);
+  }
+}
+
+function formatSessionEvent(event: EvtSessionsEventT): string {
+  const ts = new Date(event.ts).toISOString();
+  const exitCode = event.exitCode !== undefined ? ` exitCode=${event.exitCode}` : "";
+  return `[${ts}] ${event.sessionId} ${event.event}${exitCode}`;
+}
+
+/** Forcefully stop a running session via the daemon. */
+export async function runSessionsKill(opts: SessionsKillOptions): Promise<{
+  killed: boolean;
+  exitCode?: number;
+}> {
+  if (!opts.sessionId) {
+    throw new CliError("Session id is required.", EXIT_GENERIC);
+  }
   const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
-  if (jsonMode) {
-    writeJson({ sessions: records }, Boolean(opts.pretty));
-  } else {
-    process.stdout.write(`${formatSessionList(records, opts.nowMs ?? Date.now())}\n`);
+  const interactive = opts.isInteractive ?? isTTY();
+  if (!opts.yes && (jsonMode || !interactive)) {
+    throw new CliError(
+      `Refusing to kill ${opts.sessionId} without --yes.`,
+      EXIT_USER_CANCELLED,
+      "Re-run with `--yes` to confirm non-interactively."
+    );
+  }
+  if (!opts.yes && interactive) {
+    const prompt = opts.confirm ?? ((message: string) => promptConfirm(message));
+    const ok = await prompt(`Kill session ${opts.sessionId}?`);
+    if (!ok) {
+      throw new CliError("Kill cancelled.", EXIT_USER_CANCELLED);
+    }
   }
 
-  return records;
+  const transport = await getTransport({ requireDaemon: true });
+  try {
+    const killInput: Parameters<typeof transport.sessionsKill>[0] = {
+      sessionId: opts.sessionId,
+    };
+    if (opts.signal !== undefined) killInput.signal = opts.signal;
+    const result = await transport.sessionsKill(killInput);
+    if (jsonMode) {
+      writeJson(result, Boolean(opts.pretty));
+    } else if (result.killed) {
+      const exitCode = result.exitCode !== undefined ? ` (exitCode=${result.exitCode})` : "";
+      process.stdout.write(`Killed session ${opts.sessionId}${exitCode}.\n`);
+    } else {
+      process.stdout.write(`Session ${opts.sessionId} was already exited.\n`);
+    }
+    return result;
+  } finally {
+    await transport.close();
+  }
+}
+
+/** Spawn a fresh session with the same role/auth/cwd as an existing one. */
+export async function runSessionsRelaunch(opts: SessionsRelaunchOptions): Promise<{
+  sessionId: string;
+  relaunchedFrom: string;
+}> {
+  if (!opts.sessionId) {
+    throw new CliError("Session id is required.", EXIT_GENERIC);
+  }
+  const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
+  const transport = await getTransport({ requireDaemon: true });
+  try {
+    const result = await transport.sessionsRelaunch({ sessionId: opts.sessionId });
+    if (jsonMode) {
+      writeJson(
+        { sessionId: result.sessionId, relaunchedFrom: result.relaunchedFrom },
+        Boolean(opts.pretty)
+      );
+    } else {
+      process.stdout.write(`Relaunched ${result.relaunchedFrom} as ${result.sessionId}.\n`);
+    }
+    return { sessionId: result.sessionId, relaunchedFrom: result.relaunchedFrom };
+  } finally {
+    await transport.close();
+  }
+}
+
+/** Recompute and compare the launch hash for a session. */
+export async function runSessionsDrift(opts: SessionsDriftOptions): Promise<{
+  drifted: boolean;
+  scopesChanged: string[];
+  oldHash: string;
+  newHash: string;
+}> {
+  if (!opts.sessionId) {
+    throw new CliError("Session id is required.", EXIT_GENERIC);
+  }
+  const sessionsRoot = resolveSessionsRoot(opts);
+  const home = opts.home ?? myClaudeHome();
+  const jsonMode = Boolean(opts.json) || Boolean(opts.pretty);
+
+  const transportOpts: Parameters<typeof getTransport>[0] = {};
+  if (opts.requireDaemon !== undefined) transportOpts.requireDaemon = opts.requireDaemon;
+  if (opts.standalone !== undefined) transportOpts.standalone = opts.standalone;
+  const transport = await getTransport(transportOpts);
+
+  try {
+    const result = await transport.sessionsDrift({
+      sessionsRoot,
+      sessionId: opts.sessionId,
+      home,
+    });
+    if (jsonMode) {
+      writeJson(result, Boolean(opts.pretty));
+    } else {
+      const flag = result.drifted ? "DRIFTED" : "in sync";
+      process.stdout.write(`Session ${opts.sessionId}: ${flag}\n`);
+      process.stdout.write(`  oldHash:  ${result.oldHash}\n`);
+      process.stdout.write(`  newHash:  ${result.newHash}\n`);
+      if (result.scopesChanged.length > 0) {
+        process.stdout.write("  scopes changed:\n");
+        for (const scope of result.scopesChanged) {
+          process.stdout.write(`    ${scope}\n`);
+        }
+      }
+    }
+    return result;
+  } finally {
+    await transport.close();
+  }
 }
 
 /** Show one session record in detail. */
@@ -289,6 +498,12 @@ export const sessionsCommand = defineCommand({
           description: "Pretty-print JSON output (implies --json)",
           default: false,
         },
+        follow: {
+          type: "boolean",
+          description: "Stream session events from the daemon until SIGINT",
+          alias: "f",
+          default: false,
+        },
         "require-daemon": {
           type: "boolean",
           description: "Exit 4 if the daemon is unreachable",
@@ -306,7 +521,131 @@ export const sessionsCommand = defineCommand({
           all: Boolean(args.all),
           json: Boolean(args.json),
           pretty: Boolean(args.pretty),
+          follow: Boolean(args.follow),
           requireDaemon: Boolean(args["require-daemon"]),
+          standalone: Boolean(args.standalone),
+        });
+      },
+    }),
+    kill: defineCommand({
+      meta: {
+        name: "kill",
+        description: "Kill a running session via the daemon",
+      },
+      args: {
+        sessionId: {
+          type: "positional",
+          description: "Session ID",
+          required: true,
+        },
+        signal: {
+          type: "string",
+          description: "Signal to send (SIGTERM | SIGKILL). Default: SIGTERM",
+        },
+        yes: {
+          type: "boolean",
+          description: "Skip the confirmation prompt (required in non-TTY / --json mode)",
+          alias: "y",
+          default: false,
+        },
+        json: {
+          type: "boolean",
+          description: "Emit structured JSON to stdout",
+          alias: "j",
+          default: false,
+        },
+        pretty: {
+          type: "boolean",
+          description: "Pretty-print JSON output (implies --json)",
+          default: false,
+        },
+      },
+      async run({ args }) {
+        if (!args.sessionId) {
+          throw new CliError("Session id is required.", EXIT_GENERIC);
+        }
+        const signal =
+          args.signal === "SIGKILL" ? "SIGKILL" : args.signal === "SIGTERM" ? "SIGTERM" : undefined;
+        const opts: SessionsKillOptions = {
+          sessionId: String(args.sessionId),
+          yes: Boolean(args.yes),
+          json: Boolean(args.json),
+          pretty: Boolean(args.pretty),
+        };
+        if (signal !== undefined) opts.signal = signal;
+        await runSessionsKill(opts);
+      },
+    }),
+    relaunch: defineCommand({
+      meta: {
+        name: "relaunch",
+        description: "Spawn a fresh session with the same role/auth/cwd",
+      },
+      args: {
+        sessionId: {
+          type: "positional",
+          description: "Session ID",
+          required: true,
+        },
+        json: {
+          type: "boolean",
+          description: "Emit structured JSON to stdout",
+          alias: "j",
+          default: false,
+        },
+        pretty: {
+          type: "boolean",
+          description: "Pretty-print JSON output (implies --json)",
+          default: false,
+        },
+      },
+      async run({ args }) {
+        if (!args.sessionId) {
+          throw new CliError("Session id is required.", EXIT_GENERIC);
+        }
+        await runSessionsRelaunch({
+          sessionId: String(args.sessionId),
+          json: Boolean(args.json),
+          pretty: Boolean(args.pretty),
+        });
+      },
+    }),
+    drift: defineCommand({
+      meta: {
+        name: "drift",
+        description: "Recompute the launch hash and report drift",
+      },
+      args: {
+        sessionId: {
+          type: "positional",
+          description: "Session ID",
+          required: true,
+        },
+        json: {
+          type: "boolean",
+          description: "Emit structured JSON to stdout",
+          alias: "j",
+          default: false,
+        },
+        pretty: {
+          type: "boolean",
+          description: "Pretty-print JSON output (implies --json)",
+          default: false,
+        },
+        standalone: {
+          type: "boolean",
+          description: "Skip the daemon attempt; always run in-process",
+          default: false,
+        },
+      },
+      async run({ args }) {
+        if (!args.sessionId) {
+          throw new CliError("Session id is required.", EXIT_GENERIC);
+        }
+        await runSessionsDrift({
+          sessionId: String(args.sessionId),
+          json: Boolean(args.json),
+          pretty: Boolean(args.pretty),
           standalone: Boolean(args.standalone),
         });
       },

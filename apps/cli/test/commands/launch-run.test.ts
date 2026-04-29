@@ -189,6 +189,18 @@ function createTransportStub(overrides: Partial<CliTransport>): CliTransport {
     sessionEnd: async () => {
       throw new Error("Unexpected transport.sessionEnd call");
     },
+    sessionsKill: async () => {
+      throw new Error("Unexpected transport.sessionsKill call");
+    },
+    sessionsRelaunch: async () => {
+      throw new Error("Unexpected transport.sessionsRelaunch call");
+    },
+    sessionsDrift: async () => {
+      throw new Error("Unexpected transport.sessionsDrift call");
+    },
+    sessionsSubscribe: async () => {
+      throw new Error("Unexpected transport.sessionsSubscribe call");
+    },
     close: async () => {},
     ...overrides,
   };

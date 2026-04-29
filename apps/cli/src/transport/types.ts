@@ -19,6 +19,7 @@
  */
 
 import type { SessionRecord } from "@agent-profile/cli-services";
+import type { EvtSessionsEventT } from "@agent-profile/ipc-protocol";
 
 /**
  * Input options for `transport.authList`.
@@ -187,6 +188,64 @@ export interface TransportDaemonStatusResult {
   };
 }
 
+// ─── Session monitor I/O (Phase 2 milestone 5) ───────────────────────────────
+
+/** Input for `transport.sessionsKill`. */
+export interface TransportSessionsKillInput {
+  sessionId: string;
+  signal?: "SIGTERM" | "SIGKILL";
+}
+
+/** Result of `transport.sessionsKill`. */
+export interface TransportSessionsKillResult {
+  killed: boolean;
+  exitCode?: number;
+}
+
+/** Input for `transport.sessionsRelaunch`. */
+export interface TransportSessionsRelaunchInput {
+  sessionId: string;
+}
+
+/** Result of `transport.sessionsRelaunch`. */
+export interface TransportSessionsRelaunchResult {
+  sessionId: string;
+  capabilityToken: string;
+  expiresAtMs: number;
+  relaunchedFrom: string;
+}
+
+/** Input for `transport.sessionsDrift`. */
+export interface TransportSessionsDriftInput {
+  sessionsRoot: string;
+  sessionId: string;
+  home: string;
+}
+
+/** Result of `transport.sessionsDrift`. */
+export interface TransportSessionsDriftResult {
+  drifted: boolean;
+  scopesChanged: string[];
+  oldHash: string;
+  newHash: string;
+}
+
+/**
+ * Input for `transport.sessionsSubscribe`.
+ *
+ * The `onEvent` callback fires every time the daemon pushes a `sessions.event`
+ * frame. The promise resolves once the subscription has been acknowledged.
+ */
+export interface TransportSessionsSubscribeInput {
+  onEvent: (event: EvtSessionsEventT) => void;
+}
+
+/** Disposable handle returned by `transport.sessionsSubscribe`. */
+export interface SessionsSubscribeHandle {
+  /** Detach the listener; idempotent. */
+  unsubscribe(): void;
+}
+
 /**
  * The transport contract every CLI data-access call goes through.
  *
@@ -223,6 +282,23 @@ export interface CliTransport {
   sessionStart(input: TransportSessionStartInput): Promise<TransportSessionStartResult>;
 
   sessionEnd(input: TransportSessionEndInput): Promise<void>;
+
+  // ─── Session monitor (Phase 2 milestone 5) ────────────────────────────────
+
+  /** Kill a running session by signalling its PID via the daemon. */
+  sessionsKill(input: TransportSessionsKillInput): Promise<TransportSessionsKillResult>;
+
+  /** Re-spawn a session under a freshly minted sessionId. Daemon-only. */
+  sessionsRelaunch(input: TransportSessionsRelaunchInput): Promise<TransportSessionsRelaunchResult>;
+
+  /** Recompute the launch hash for a session and diff against its captured hash. */
+  sessionsDrift(input: TransportSessionsDriftInput): Promise<TransportSessionsDriftResult>;
+
+  /**
+   * Subscribe to push events from the daemon. Daemon-only — the in-process
+   * transport raises daemonRequired().
+   */
+  sessionsSubscribe(input: TransportSessionsSubscribeInput): Promise<SessionsSubscribeHandle>;
 
   /** Release any underlying connection. Idempotent and safe to call on either transport. */
   close(): Promise<void>;
