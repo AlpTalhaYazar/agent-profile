@@ -13,9 +13,12 @@ import type {
   EditorMode,
   EffectiveState,
   JsonState,
+  PersonaState,
   PreviewState,
   ScopeDoc,
   ScopeListEntry,
+  SelectedPersonaFile,
+  SelectedProvenanceField,
   ValidationState,
 } from "./types.js";
 
@@ -75,8 +78,22 @@ export const issuesByPathAtom = atom((get) => {
   return new Map(issues.map((issue) => [issue.path, issue.message]));
 });
 
-// ─── App-level navigation (Phase 2 milestone 5) ──────────────────────────────
+// ─── App-level navigation (Phase 2 milestone 5 + 6) ──────────────────────────
 
-export type AppScreen = "editor" | "auth-vault" | "sessions";
+export type AppScreen = "editor" | "auth-vault" | "sessions" | "provenance" | "persona";
 
 export const currentScreenAtom = atom<AppScreen>("editor");
+
+// ─── Provenance Inspector (Phase 2 milestone 6) ──────────────────────────────
+
+export const selectedProvenanceFieldAtom = atom<SelectedProvenanceField | null>(null);
+
+// ─── Persona Composer (Phase 2 milestone 6) ──────────────────────────────────
+
+export const personaStateAtom = atom<PersonaState>({
+  status: "idle",
+  result: null,
+  errorMessage: null,
+});
+
+export const selectedPersonaFileAtom = atom<SelectedPersonaFile | null>(null);

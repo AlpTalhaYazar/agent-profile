@@ -82,6 +82,8 @@ import type {
   TransportType,
 } from "./lib/types.js";
 import { AuthVaultScreen } from "./screens/auth-vault.js";
+import { PersonaComposerScreen } from "./screens/persona-composer.js";
+import { ProvenanceInspectorScreen } from "./screens/provenance-inspector.js";
 import { SessionMonitorScreen } from "./screens/session-monitor.js";
 
 function App(): React.ReactElement {
@@ -521,7 +523,15 @@ function App(): React.ReactElement {
 
       {currentScreen !== "editor" ? (
         <div className="min-h-0 flex-1 overflow-hidden">
-          {currentScreen === "auth-vault" ? <AuthVaultScreen /> : <SessionMonitorScreen />}
+          {currentScreen === "auth-vault" ? (
+            <AuthVaultScreen />
+          ) : currentScreen === "sessions" ? (
+            <SessionMonitorScreen />
+          ) : currentScreen === "provenance" ? (
+            <ProvenanceInspectorScreen />
+          ) : currentScreen === "persona" ? (
+            <PersonaComposerScreen />
+          ) : null}
         </div>
       ) : null}
 
@@ -1850,12 +1860,16 @@ function ScreenTabs(): React.ReactElement {
         <TabsTrigger value="editor">Profile Editor</TabsTrigger>
         <TabsTrigger value="auth-vault">Auth Vault</TabsTrigger>
         <TabsTrigger value="sessions">Session Monitor</TabsTrigger>
+        <TabsTrigger value="provenance">Provenance</TabsTrigger>
+        <TabsTrigger value="persona">Persona</TabsTrigger>
       </TabsList>
       {/* Tab content panels are rendered inside App rather than here so the
           Profile Editor's existing layout doesn't have to nest under TabsContent. */}
       <TabsContent value="editor" />
       <TabsContent value="auth-vault" />
       <TabsContent value="sessions" />
+      <TabsContent value="provenance" />
+      <TabsContent value="persona" />
     </Tabs>
   );
 }

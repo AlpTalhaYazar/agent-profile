@@ -124,3 +124,64 @@ export interface PreviewState {
 }
 
 export type JsonState = { text: string; parseError: null } | { text: string; parseError: string };
+
+// ─── Persona Composer (Phase 2 milestone 6) ──────────────────────────────────
+
+export type PersonaRenderCategory = "agents" | "skills" | "slashCmds" | "memory";
+
+export interface PersonaRenderFile {
+  category: PersonaRenderCategory;
+  basename: string;
+  sourcePath: string;
+  originScope: string;
+  content: string;
+}
+
+export interface PersonaRenderClaudeMdSection {
+  sourcePath: string;
+  originScope: string;
+  content: string;
+}
+
+export interface PersonaRenderClaudeMd {
+  combinedContent: string;
+  sections: PersonaRenderClaudeMdSection[];
+}
+
+export interface PersonaRenderCollision {
+  category: PersonaRenderCategory;
+  basename: string;
+  winningSource: string;
+  overriddenSources: string[];
+}
+
+export interface PersonaRenderMissingSource {
+  category: PersonaRenderCategory | "claudeMd";
+  sourcePath: string;
+}
+
+export interface PersonaRenderResult {
+  claudeMd: PersonaRenderClaudeMd | null;
+  files: PersonaRenderFile[];
+  collisions: PersonaRenderCollision[];
+  missingSources: PersonaRenderMissingSource[];
+}
+
+export type SelectedPersonaFile =
+  | { kind: "combined-claudeMd" }
+  | { kind: "file"; category: PersonaRenderCategory; basename: string };
+
+export interface PersonaState {
+  status: "idle" | "loading" | "ready" | "error";
+  result: PersonaRenderResult | null;
+  errorMessage: string | null;
+}
+
+// ─── Provenance Inspector (Phase 2 milestone 6) ──────────────────────────────
+
+export type ProvenanceSection = "mcpServers" | "env" | "settings" | "persona";
+
+export interface SelectedProvenanceField {
+  section: ProvenanceSection;
+  key: string;
+}
