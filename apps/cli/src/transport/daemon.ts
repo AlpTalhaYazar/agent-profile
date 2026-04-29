@@ -18,6 +18,7 @@ import type {
   RespAuthListOkT,
   RespDaemonStatusOkT,
   RespDaemonStopOkT,
+  RespPersonaRenderOkT,
   RespProfileShowOkT,
   RespSessionEndOkT,
   RespSessionStartOkT,
@@ -43,6 +44,8 @@ import type {
   TransportAuthSetSecretInput,
   TransportDaemonStatusResult,
   TransportDaemonStopInput,
+  TransportPersonaRenderInput,
+  TransportPersonaRenderResult,
   TransportProfileShowInput,
   TransportProfileShowResult,
   TransportSecretsMigrateInput,
@@ -276,6 +279,58 @@ export class DaemonTransport implements CliTransport {
       scopesChanged: resp.scopesChanged,
       oldHash: resp.oldHash,
       newHash: resp.newHash,
+    };
+  }
+
+  async personaRender(input: TransportPersonaRenderInput): Promise<TransportPersonaRenderResult> {
+    // The wire schema does not carry `home` — the daemon derives it from its
+    // own `myClaudeHome`. We deliberately drop the field on the way in and
+    // reconstruct the cli-services `PersonaRenderResult` shape on the way out
+    // (see notes on each block below).
+    const resp = await this.requestSafe<RespPersonaRenderOkT>("persona.render", {
+      role: input.role,
+      authProfileId: input.authProfileId,
+      cwd: input.cwd,
+    });
+    return {
+      claudeMd: resp.claudeMd
+        ? {
+            combinedContent: resp.claudeMd.combinedContent,
+            sections: resp.claudeMd.sections.map((sec) => ({
+              sourcePath: sec.sourcePath,
+              originScope: sec.originScope,
+              content: sec.content,
+            })),
+          }
+        : null,
+      files: resp.files.map((file) => ({
+        category: file.category,
+        basename: file.basename,
+        sourcePath: file.sourcePath,
+        originScope: file.originScope,
+        content: file.content,
+      })),
+      // Wire emits one entry per `(category, basename)` group; the daemon
+      // handler emits step-by-step (one wire entry per `overriddenSources`
+      // element). We flatten the wire's `overriddenSources` array back into
+      // per-step `CollisionLogEntry` objects so the result shape matches the
+      // in-proc transport exactly.
+      collisions: resp.collisions.flatMap((collision) =>
+        collision.overriddenSources.map((overriddenSource) => ({
+          target: collision.basename,
+          category: collision.category,
+          overriddenSource,
+          winningSource: collision.winningSource,
+        }))
+      ),
+      // Wire drops `targetPath`; reconstruct as empty string so consumers see
+      // a stable shape. The CLI command's text + JSON output never reads this
+      // field and the GUI Persona Composer surfaces `sourcePath` only.
+      missingSources: resp.missingSources.map((entry) => ({
+        category: entry.category,
+        sourcePath: entry.sourcePath,
+        targetPath: "",
+      })),
     };
   }
 

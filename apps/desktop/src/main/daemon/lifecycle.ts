@@ -162,6 +162,7 @@ export class DaemonLifecycle {
       "profile.validate",
       "profile.preview",
       "sessions.list",
+      "persona.render",
       "daemon.status",
       "daemon.stop",
     ];

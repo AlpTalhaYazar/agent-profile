@@ -39,6 +39,7 @@ function createTransportStub(overrides: Partial<CliTransport>): CliTransport {
     sessionsRelaunch: fail("sessionsRelaunch"),
     sessionsDrift: fail("sessionsDrift"),
     sessionsSubscribe: fail("sessionsSubscribe"),
+    personaRender: fail("personaRender"),
     close: async () => {},
     ...overrides,
   };

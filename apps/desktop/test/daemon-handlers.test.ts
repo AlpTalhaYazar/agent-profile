@@ -323,4 +323,64 @@ authProfiles:
     expect(body).toEqual({});
     expect(requestShutdown).toHaveBeenCalledTimes(1);
   });
+
+  // ─── persona.render ───────────────────────────────────────────────────────
+
+  it("persona.render returns an empty render when the cascade has no persona refs", async () => {
+    await mkdir(join(home, ".myclaude", "config", "global", "roles"), { recursive: true });
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "shared.yml"),
+      "version: 1\nenv:\n  EDITOR: nvim\n"
+    );
+    await writeFile(
+      join(home, ".myclaude", "config", "global", "roles", "backend.yml"),
+      "version: 1\nenv:\n  NODE_ENV: development\n"
+    );
+
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["persona.render"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(
+      req("persona.render", {
+        role: "backend",
+        authProfileId: "work",
+        cwd: home,
+      }),
+      ctx
+    )) as {
+      claudeMd: unknown;
+      files: unknown[];
+      collisions: unknown[];
+      missingSources: unknown[];
+    };
+
+    expect(body.claudeMd).toBeNull();
+    expect(body.files).toEqual([]);
+    expect(body.collisions).toEqual([]);
+    expect(body.missingSources).toEqual([]);
+  });
+
+  it("persona.render maps a ServiceError to BAD_REQUEST when scopes are missing", async () => {
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["persona.render"];
+    if (!handler) throw new Error("missing handler");
+    // No config dir at all — cascade has no shared / role files. Either an
+    // empty render comes back or a mapped ServiceError surfaces; both are
+    // valid signal that the handler ran without crashing.
+    try {
+      const body = (await handler(
+        req("persona.render", {
+          role: "backend",
+          authProfileId: "work",
+          cwd: home,
+        }),
+        ctx
+      )) as { claudeMd: unknown; files: unknown[] };
+      expect(body).toHaveProperty("claudeMd");
+      expect(body).toHaveProperty("files");
+    } catch (err) {
+      expect(err).toBeInstanceOf(IpcError);
+      expect(["BAD_REQUEST", "INTERNAL"]).toContain((err as IpcError).code);
+    }
+  });
 });

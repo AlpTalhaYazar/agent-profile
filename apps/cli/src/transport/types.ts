@@ -18,7 +18,7 @@
  * the YAML shape (`AuthProfilesDocT`).
  */
 
-import type { SessionRecord } from "@agent-profile/cli-services";
+import type { PersonaRenderResult, SessionRecord } from "@agent-profile/cli-services";
 import type { EvtSessionsEventT } from "@agent-profile/ipc-protocol";
 
 /**
@@ -240,6 +240,41 @@ export interface TransportSessionsSubscribeInput {
   onEvent: (event: EvtSessionsEventT) => void;
 }
 
+// ─── Persona render I/O (Phase 2 milestone 6) ────────────────────────────────
+
+/**
+ * Input for `transport.personaRender`.
+ *
+ * Mirrors the cli-services `personaRenderService` signature. Note that `home`
+ * is part of the input only on the in-process path; the daemon transport
+ * derives it from the daemon's `myClaudeHome` and never sends it over the
+ * wire. The CLI command always passes a value so the in-proc path has it,
+ * even when the call is later routed through the daemon.
+ */
+export interface TransportPersonaRenderInput {
+  /** Role name (e.g. `"backend"`). */
+  role: string;
+  /** Auth profile id bound into the cascade. */
+  authProfileId: string;
+  /** Working directory for project-chain resolution. */
+  cwd: string;
+  /**
+   * Absolute path to the myclaude home. Used only by the in-proc transport;
+   * the daemon transport ignores it (the daemon derives `home` from its own
+   * `myClaudeHome`).
+   */
+  home: string;
+}
+
+/**
+ * Result of `transport.personaRender`.
+ *
+ * Re-exports the cli-services `PersonaRenderResult` so the CLI command layer
+ * can format the output without re-declaring the shape. The daemon transport
+ * reconstructs this shape from the wire response (see `daemon.ts`).
+ */
+export type TransportPersonaRenderResult = PersonaRenderResult;
+
 /** Disposable handle returned by `transport.sessionsSubscribe`. */
 export interface SessionsSubscribeHandle {
   /** Detach the listener; idempotent. */
@@ -299,6 +334,17 @@ export interface CliTransport {
    * transport raises daemonRequired().
    */
   sessionsSubscribe(input: TransportSessionsSubscribeInput): Promise<SessionsSubscribeHandle>;
+
+  // ─── Persona render (Phase 2 milestone 6) ────────────────────────────────
+
+  /**
+   * Render the persona section in memory for the given identity tuple. Both
+   * transports return the cli-services `PersonaRenderResult` shape; the
+   * daemon transport reconstructs `targetPath` on missing-source entries as
+   * an empty string (the daemon wire shape drops it — see ADR notes in the
+   * milestone 6 plan).
+   */
+  personaRender(input: TransportPersonaRenderInput): Promise<TransportPersonaRenderResult>;
 
   /** Release any underlying connection. Idempotent and safe to call on either transport. */
   close(): Promise<void>;

@@ -13,14 +13,23 @@ import { defineCommand } from "citty";
 import { NO_ROLE_HELP, resolveActivation } from "../activation/resolve.js";
 import { CliError, EXIT_GENERIC } from "../errors.js";
 import { runShow } from "./profile/show.js";
+import { renderPersonaCommand } from "./render-persona.js";
 
 /**
  * `myclaude render` command definition.
+ *
+ * Default behavior (no subcommand) is the cascade dump alias of
+ * `profile show`. The `persona` subcommand renders the persona section
+ * (CLAUDE.md + agents/skills/slashCmds/memory) in memory using the
+ * milestone 6 `persona.render` IPC kind.
  */
 export const renderCommand = defineCommand({
   meta: {
     name: "render",
     description: "Dump effective config for a role (alias of profile show)",
+  },
+  subCommands: {
+    persona: renderPersonaCommand,
   },
   args: {
     role: {

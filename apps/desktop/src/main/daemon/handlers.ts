@@ -33,6 +33,7 @@ import {
   type AuthGetSecretRefResult,
   type AuthListResult,
   type DaemonStatus,
+  type PersonaRenderResult,
   type ProfileListResult,
   type ProfilePreviewResult,
   type ProfileValidateResult,
@@ -40,6 +41,7 @@ import {
   authGetSecretRefService,
   authListService,
   daemonStatusService,
+  personaRenderService,
   profileListService,
   profilePreviewService,
   profileShowService,
@@ -51,6 +53,7 @@ import type {
   ReqAuthGetSecretRefT,
   ReqAuthListT,
   ReqDaemonStatusT,
+  ReqPersonaRenderT,
   ReqProfileListT,
   ReqProfilePreviewT,
   ReqProfileShowT,
@@ -205,6 +208,16 @@ export function createHandlers(
       };
     }),
 
+    "persona.render": wrap<ReqPersonaRenderT>("persona.render", async (req) => {
+      const result: PersonaRenderResult = await personaRenderService({
+        role: req.role,
+        authProfileId: req.authProfileId,
+        cwd: req.cwd,
+        home: myClaudeHome,
+      });
+      return projectPersonaRender(result);
+    }),
+
     "sessions.list": wrap<ReqSessionsListT>("sessions.list", async (req) => {
       const sessions: SessionRecord[] = await sessionsListService({
         sessionsRoot: sessionsRootForMyClaude(myClaudeHome),
@@ -280,4 +293,68 @@ function checkProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Project a `PersonaRenderResult` (cli-services shape) into the wire body shape
+ * matching `RespPersonaRenderOk`.
+ *
+ * The two shapes are very close but differ in two places:
+ *
+ *  - **Collisions.** cli-services emits one `CollisionLogEntry` per overwrite
+ *    step (`{ target, category, overriddenSource, winningSource }`). The wire
+ *    schema groups by `(category, basename)` with `overriddenSources` as an
+ *    array. We honour the per-step granularity by emitting one wire entry per
+ *    cli-services entry (`overriddenSources.length === 1`) — no information
+ *    is lost and the schema accepts the shape verbatim.
+ *
+ *  - **Missing sources.** cli-services carries a `targetPath` for each missing
+ *    file (the location it would have been deployed to). The wire schema drops
+ *    `targetPath` because preview surfaces only need `(category, sourcePath)`
+ *    to flag the missing entry; the deploy path keeps the richer shape.
+ *
+ *  The CLAUDE.md and persona-files projections are 1:1.
+ */
+function projectPersonaRender(result: PersonaRenderResult): Record<string, unknown> {
+  return {
+    claudeMd: result.claudeMd
+      ? {
+          combinedContent: result.claudeMd.combinedContent,
+          sections: result.claudeMd.sections.map((sec) => ({
+            sourcePath: sec.sourcePath,
+            originScope: sec.originScope,
+            content: sec.content,
+          })),
+        }
+      : null,
+    files: result.files.map((file) => ({
+      category: file.category,
+      basename: file.basename,
+      sourcePath: file.sourcePath,
+      originScope: file.originScope,
+      content: file.content,
+    })),
+    collisions: result.collisions
+      // The wire schema does not include a `claudeMd` collision category. The
+      // in-memory render path does not produce CLAUDE.md collisions today, so
+      // this filter is purely defensive — it lets the type system accept the
+      // mapped category narrowing below.
+      .filter(
+        (
+          collision
+        ): collision is typeof collision & {
+          category: "agents" | "skills" | "slashCmds" | "memory";
+        } => collision.category !== "commands"
+      )
+      .map((collision) => ({
+        category: collision.category,
+        basename: collision.target,
+        winningSource: collision.winningSource,
+        overriddenSources: [collision.overriddenSource],
+      })),
+    missingSources: result.missingSources.map((entry) => ({
+      category: entry.category === "commands" ? "slashCmds" : entry.category,
+      sourcePath: entry.sourcePath,
+    })),
+  };
 }

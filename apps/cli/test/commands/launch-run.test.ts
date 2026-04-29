@@ -177,6 +177,9 @@ function createTransportStub(overrides: Partial<CliTransport>): CliTransport {
     authRotate: async () => {
       throw new Error("Unexpected transport.authRotate call");
     },
+    personaRender: async () => {
+      throw new Error("Unexpected transport.personaRender call");
+    },
     authRemove: async () => {
       throw new Error("Unexpected transport.authRemove call");
     },

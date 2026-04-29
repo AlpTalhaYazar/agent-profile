@@ -15,6 +15,7 @@ import {
   authListService,
   daemonStatusService,
   driftService,
+  personaRenderService,
   profileShowService,
   sessionsKillService,
   sessionsListService,
@@ -37,6 +38,8 @@ import type {
   TransportAuthSetSecretInput,
   TransportDaemonStatusResult,
   TransportDaemonStopInput,
+  TransportPersonaRenderInput,
+  TransportPersonaRenderResult,
   TransportProfileShowInput,
   TransportProfileShowResult,
   TransportSecretsMigrateInput,
@@ -209,6 +212,15 @@ export class InProcTransport implements CliTransport {
     _input: TransportSessionsSubscribeInput
   ): Promise<SessionsSubscribeHandle> {
     throw daemonRequired("sessions.subscribe");
+  }
+
+  async personaRender(input: TransportPersonaRenderInput): Promise<TransportPersonaRenderResult> {
+    return personaRenderService({
+      role: input.role,
+      authProfileId: input.authProfileId,
+      cwd: input.cwd,
+      home: input.home,
+    });
   }
 
   async close(): Promise<void> {
