@@ -1,10 +1,9 @@
 /**
  * @module sessions/registry
  *
- * Read-only access to the file-backed session registry.
+ * File-backed session registry shared between the CLI and the daemon.
  *
- * Layout (kept identical to the previous CLI-only implementation so writes
- * from `apps/cli` and reads from this package interoperate):
+ * Layout:
  *
  * ```
  * <sessionsRoot>/                       — created by persona-deployer
@@ -12,16 +11,29 @@
  * ```
  *
  * Records are JSON, validated by a hand-rolled type-guard rather than Zod so
- * the helper binary keeps zero schema dependencies. Writes (the
- * `writeSessionRecord` / `updateSessionRecord` helpers) stay in `apps/cli` for
- * this sprint — only reads are needed by the daemon's `sessions/list` IPC
- * handler — but the parser, the `SessionRecord` type, and the path helpers
- * live here so both reads and writes share one source of truth.
+ * the helper binary keeps zero schema dependencies. The parser, the
+ * `SessionRecord` type, and the path helpers (plus the atomic writers used by
+ * the daemon's `sessions.kill` / `sessions.relaunch` handlers) all live here
+ * so both readers and writers share one source of truth.
+ *
+ * Phase 2 milestone 5 added two optional fields — `launchHash` (set at
+ * `session.start` for drift detection) and `relaunchedFrom` (set at
+ * `sessions.relaunch` to keep audit/lineage). Both fields are forward-
+ * compatible: the schema version stays `1`, and older readers ignore the
+ * extra keys.
  */
-import { readFile, readdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type { SessionRuntimePaths } from "@agent-profile/session-artifacts";
 import { ServiceError } from "../errors.js";
+
+/** File mode applied to every record (records may carry secret-shaped paths). */
+const RECORD_MODE = 0o600;
+/** Mode applied to the registry directory. */
+const REGISTRY_DIR_MODE = 0o700;
+/** JSON pretty-print indent — matches the CLI writer. */
+const JSON_INDENT = 2;
 
 /** Recognized session lifecycle states. */
 export type SessionStatus = "running" | "exited" | "failed" | "dry-run";
@@ -37,6 +49,11 @@ export interface SessionSpawnMetadata {
  *
  * Field meanings track `apps/cli/src/session/registry.ts` exactly so that both
  * packages can write, update, and read records interchangeably.
+ *
+ * `launchHash` and `relaunchedFrom` were added in Phase 2 milestone 5 and are
+ * optional — older records simply omit them. The schema `version` is
+ * deliberately kept at `1` because both fields are additive metadata; readers
+ * that predate them ignore the extra keys.
  */
 export interface SessionRecord {
   version: 1;
@@ -56,6 +73,18 @@ export interface SessionRecord {
   wallMs?: number;
   startedAt?: string;
   endedAt?: string;
+  /**
+   * Launch-time hash of `(effective, provenance, scopeFiles)`. Captured by
+   * the daemon at `session.start` and consumed by `sessions.drift` to detect
+   * cascade drift since the session began. Optional for back-compat.
+   */
+  launchHash?: string;
+  /**
+   * When this record was minted by `sessions.relaunch`, the original
+   * sessionId it was cloned from. Lets audit/lineage tooling reconstruct the
+   * relaunch chain. Optional; absent on first-spawn records.
+   */
+  relaunchedFrom?: string;
 }
 
 /**
@@ -227,4 +256,76 @@ function isNullableString(value: unknown): value is string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ─── Atomic writers (Phase 2 milestone 5) ────────────────────────────────────
+//
+// The CLI used to own these helpers privately because only `myclaude launch`
+// wrote records. Phase 2 milestone 5 adds daemon-side `sessions.kill` and
+// `sessions.relaunch` handlers that need the same atomic-write semantics, so
+// the helpers move here and the CLI re-exports them as a thin shim.
+
+/** Input for `writeSessionRecord`. */
+export interface WriteSessionRecordInput {
+  sessionsRoot: string;
+  record: SessionRecord;
+}
+
+/** Input for `updateSessionRecord`. */
+export interface UpdateSessionRecordInput {
+  sessionsRoot: string;
+  sessionId: string;
+  patch: Partial<Omit<SessionRecord, "version" | "sessionId" | "createdAt">>;
+}
+
+/** Write a full session record atomically (temp file + rename). */
+export async function writeSessionRecord(input: WriteSessionRecordInput): Promise<void> {
+  await writeRecordFile(input.sessionsRoot, input.record);
+}
+
+/**
+ * Patch an existing record atomically and return the updated value.
+ *
+ * `version`, `sessionId`, and `createdAt` are held immutable — only the
+ * mutable fields can be patched.
+ */
+export async function updateSessionRecord(input: UpdateSessionRecordInput): Promise<SessionRecord> {
+  const current = await readSessionRecord({
+    sessionsRoot: input.sessionsRoot,
+    sessionId: input.sessionId,
+  });
+  const updated: SessionRecord = {
+    ...current,
+    ...input.patch,
+    sessionId: current.sessionId,
+    version: 1,
+    createdAt: current.createdAt,
+  };
+  await writeRecordFile(input.sessionsRoot, updated);
+  return updated;
+}
+
+async function writeRecordFile(sessionsRoot: string, record: SessionRecord): Promise<void> {
+  assertValidSessionId(record.sessionId);
+  const targetPath = sessionRecordPath(sessionsRoot, record.sessionId);
+  await mkdir(dirname(targetPath), { recursive: true, mode: REGISTRY_DIR_MODE });
+  await atomicWriteJson(targetPath, record);
+}
+
+async function atomicWriteJson(targetPath: string, value: SessionRecord): Promise<void> {
+  const tmpPath = join(
+    dirname(targetPath),
+    `${basename(targetPath)}.tmp-${randomBytes(4).toString("hex")}`
+  );
+  const content = `${JSON.stringify(value, null, JSON_INDENT)}\n`;
+
+  try {
+    await writeFile(tmpPath, content, { encoding: "utf8", mode: RECORD_MODE });
+    await rename(tmpPath, targetPath);
+  } catch (err) {
+    await unlink(tmpPath).catch(() => {
+      // Preserve the original write/rename error.
+    });
+    throw err;
+  }
 }

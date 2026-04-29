@@ -76,17 +76,37 @@ export {
   type SessionSpawnMetadata,
   type ReadSessionRecordInput,
   type ListSessionRecordsInput,
+  type WriteSessionRecordInput,
+  type UpdateSessionRecordInput,
   assertValidSessionId,
   sessionRegistryDir,
   sessionRecordPath,
   listSessionRecords,
   readSessionRecord,
   parseSessionRecord,
+  writeSessionRecord,
+  updateSessionRecord,
 } from "./sessions/registry.js";
 export {
   sessionsListService,
   type SessionsListInput,
 } from "./sessions/list.js";
+export {
+  sessionsKillService,
+  type SessionsKillInput,
+  type SessionsKillResult,
+} from "./sessions/kill.js";
+export {
+  sessionsRelaunchService,
+  type SessionsRelaunchInput,
+  type SessionsRelaunchResult,
+} from "./sessions/relaunch.js";
+export {
+  driftService,
+  type DriftServiceInput,
+  type DriftServiceResult,
+  type GetEffectiveFn,
+} from "./sessions/drift.js";
 
 // ─── Daemon ───────────────────────────────────────────────────────────────────
 

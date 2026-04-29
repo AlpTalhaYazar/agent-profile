@@ -250,7 +250,12 @@ export const ReqAuthRemove = z
  *
  * Default `ttlMs` (server-side): 60_000 for the initial token; the daemon may
  * extend the lifetime once the spawned process binds. `authProfileId` binds
- * later `secret.get` calls to a single auth profile.
+ * later `secret.get` calls to a single auth profile. `launchHash` is the
+ * launch-time effective-config digest captured by the caller (see
+ * `computeLaunchHash` in `@agent-profile/cli-services`); the daemon stamps it
+ * onto both its in-memory live-session entry and the persistent
+ * `SessionRecord.launchHash` so the Session Monitor can later compare against
+ * a freshly recomputed cascade and detect drift.
  */
 export const ReqSessionStart = z
   .object({
@@ -260,6 +265,7 @@ export const ReqSessionStart = z
     pid: z.number().int().nonnegative(),
     authProfileId: z.string().min(1).optional(),
     ttlMs: z.number().int().positive().optional(),
+    launchHash: z.string().min(1).optional(),
   })
   .strict();
 

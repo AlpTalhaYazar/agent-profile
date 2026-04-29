@@ -709,6 +709,28 @@ describe("write-side Req schemas", () => {
       });
       expect(r.success).toBe(false);
     });
+
+    it("accepts a hex launchHash", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 12345,
+        launchHash: "a".repeat(64),
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it("rejects an empty launchHash", () => {
+      const r = ReqSessionStart.safeParse({
+        id: "c-110",
+        kind: "session.start",
+        sessionId: "abc",
+        pid: 12345,
+        launchHash: "",
+      });
+      expect(r.success).toBe(false);
+    });
   });
 
   describe("ReqSessionEnd", () => {
