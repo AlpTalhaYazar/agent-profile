@@ -66,6 +66,7 @@ const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
   "sessions.relaunch": "sessions.relaunch.ok",
   "sessions.drift": "sessions.drift.ok",
   "sessions.subscribe": "sessions.subscribe.ok",
+  "persona.render": "persona.render.ok",
 };
 
 /**

@@ -12,6 +12,7 @@ import {
   ReqDaemonStatus,
   ReqDaemonStop,
   ReqHello,
+  ReqPersonaRender,
   ReqProfileList,
   ReqProfilePreview,
   ReqProfileSave,
@@ -37,6 +38,7 @@ import {
   RespDaemonStopOk,
   RespError,
   RespHelloOk,
+  RespPersonaRenderOk,
   RespProfileListOk,
   RespProfilePreviewOk,
   RespProfileSaveOk,
@@ -1277,5 +1279,311 @@ describe("SessionRecordEnrichment narrower", () => {
       capabilityExpiresAtMs: -1,
     });
     expect(r.success).toBe(false);
+  });
+});
+
+// ─── Persona render (Phase 2 milestone 6) ────────────────────────────────────
+
+describe("ReqPersonaRender", () => {
+  it("accepts a valid render request", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.kind).toBe("persona.render");
+      expect(r.data.role).toBe("backend");
+    }
+  });
+
+  it("rejects missing role", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      authProfileId: "work",
+      cwd: "/repo",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects missing authProfileId", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      role: "backend",
+      cwd: "/repo",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects missing cwd", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      role: "backend",
+      authProfileId: "work",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects empty role", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      role: "",
+      authProfileId: "work",
+      cwd: "/repo",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects unknown extra fields (strict)", () => {
+    const r = ReqPersonaRender.safeParse({
+      id: "c-300",
+      kind: "persona.render",
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+      extra: "no",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespPersonaRenderOk", () => {
+  it("accepts a null claudeMd with empty arrays", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-301",
+      kind: "persona.render.ok",
+      claudeMd: null,
+      files: [],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.claudeMd).toBeNull();
+      expect(r.data.files).toHaveLength(0);
+    }
+  });
+
+  it("accepts a populated combined claudeMd with sections + files + collisions + missingSources", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-302",
+      kind: "persona.render.ok",
+      claudeMd: {
+        combinedContent:
+          "<!-- source: project-role/backend -->\n## Backend Engineer\nYou are working on...\n",
+        sections: [
+          {
+            sourcePath: "/repo/.myclaude/persona/backend/CLAUDE.md",
+            originScope: "project-role",
+            content: "## Backend Engineer\nYou are working on...\n",
+          },
+          {
+            sourcePath: "/home/u/.myclaude/persona/shared/CLAUDE.md",
+            originScope: "global-shared",
+            content: "## Shared rules\n...\n",
+          },
+        ],
+      },
+      files: [
+        {
+          category: "agents",
+          basename: "code-reviewer.md",
+          sourcePath: "/repo/.myclaude/persona/backend/agents/code-reviewer.md",
+          originScope: "project-role",
+          content: "# Code Reviewer\n",
+        },
+        {
+          category: "skills",
+          basename: "postgres-query.md",
+          sourcePath: "/home/u/.myclaude/persona/skills/postgres-query.md",
+          originScope: "global-role",
+          content: "# Postgres Query\n",
+        },
+        {
+          category: "slashCmds",
+          basename: "deploy.md",
+          sourcePath: "/repo/.myclaude/persona/commands/deploy.md",
+          originScope: "project-role",
+          content: "# /deploy\n",
+        },
+        {
+          category: "memory",
+          basename: "notes.md",
+          sourcePath: "/home/u/.myclaude/persona/memory/notes.md",
+          originScope: "global-shared",
+          content: "remember the names\n",
+        },
+      ],
+      collisions: [
+        {
+          category: "agents",
+          basename: "code-reviewer.md",
+          winningSource: "/repo/.myclaude/persona/backend/agents/code-reviewer.md",
+          overriddenSources: ["/home/u/.myclaude/persona/backend/agents/code-reviewer.md"],
+        },
+      ],
+      missingSources: [
+        { category: "memory", sourcePath: "/repo/.myclaude/persona/memory/team.md" },
+        { category: "claudeMd", sourcePath: "/repo/.myclaude/persona/backend/MISSING.md" },
+      ],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.claudeMd?.sections).toHaveLength(2);
+      expect(r.data.files).toHaveLength(4);
+      expect(r.data.collisions).toHaveLength(1);
+      expect(r.data.missingSources).toHaveLength(2);
+    }
+  });
+
+  it("accepts an empty sections array inside a non-null claudeMd", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-303",
+      kind: "persona.render.ok",
+      claudeMd: { combinedContent: "", sections: [] },
+      files: [],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects unknown extra fields (strict)", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-304",
+      kind: "persona.render.ok",
+      claudeMd: null,
+      files: [],
+      collisions: [],
+      missingSources: [],
+      extra: "no",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects an unknown file category", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-305",
+      kind: "persona.render.ok",
+      claudeMd: null,
+      files: [
+        {
+          category: "slash-cmds", // wrong; correct enum value is "slashCmds"
+          basename: "deploy.md",
+          sourcePath: "/p",
+          originScope: "global-role",
+          content: "x",
+        },
+      ],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a malformed missingSources category outside the allowed enum", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-306",
+      kind: "persona.render.ok",
+      claudeMd: null,
+      files: [],
+      collisions: [],
+      missingSources: [{ category: "scripts", sourcePath: "/p" }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a missing claudeMd field (must be present, may be null)", () => {
+    const r = RespPersonaRenderOk.safeParse({
+      id: "c-307",
+      kind: "persona.render.ok",
+      files: [],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("Req union routes persona.render", () => {
+  it("discriminates a persona.render request", () => {
+    const r = Req.safeParse({
+      id: "c-310",
+      kind: "persona.render",
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.kind).toBe("persona.render");
+      // Narrowed to ReqPersonaRender shape
+      if (r.data.kind === "persona.render") {
+        expect(r.data.role).toBe("backend");
+        expect(r.data.authProfileId).toBe("work");
+        expect(r.data.cwd).toBe("/repo");
+      }
+    }
+  });
+
+  it("rejects a persona.render request with empty cwd", () => {
+    const r = Req.safeParse({
+      id: "c-310",
+      kind: "persona.render",
+      role: "backend",
+      authProfileId: "work",
+      cwd: "",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("Resp union routes persona.render.ok", () => {
+  it("discriminates a persona.render.ok response", () => {
+    const r = Resp.safeParse({
+      id: "c-320",
+      kind: "persona.render.ok",
+      claudeMd: null,
+      files: [],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.kind).toBe("persona.render.ok");
+    }
+  });
+});
+
+describe("Frame union accepts persona.render.ok", () => {
+  it("parses a persona.render.ok frame end-to-end", () => {
+    const r = Frame.safeParse({
+      id: "c-330",
+      kind: "persona.render.ok",
+      claudeMd: {
+        combinedContent: "## Persona\n",
+        sections: [
+          {
+            sourcePath: "/p/CLAUDE.md",
+            originScope: "project-role",
+            content: "## Persona\n",
+          },
+        ],
+      },
+      files: [],
+      collisions: [],
+      missingSources: [],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.kind).toBe("persona.render.ok");
+    }
   });
 });

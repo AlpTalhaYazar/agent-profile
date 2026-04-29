@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { MAX_LINE_BYTES, MessageDecoder, encodeMessage } from "../src/codec.js";
-import type { EvtT, ReqT } from "../src/messages.js";
+import type { EvtT, ReqT, RespPersonaRenderOkT } from "../src/messages.js";
 
 function makeStream(): Readable {
   return new Readable({
@@ -71,6 +71,50 @@ describe("encodeMessage", () => {
     await new Promise((r) => setImmediate(r));
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual(evt);
+    decoder.close();
+  });
+
+  it("round-trips a persona.render.ok response frame", async () => {
+    const resp: RespPersonaRenderOkT = {
+      id: "c-1",
+      kind: "persona.render.ok",
+      claudeMd: {
+        combinedContent: "## Backend\nbody\n",
+        sections: [
+          {
+            sourcePath: "/repo/.myclaude/persona/backend/CLAUDE.md",
+            originScope: "project-role",
+            content: "## Backend\nbody\n",
+          },
+        ],
+      },
+      files: [
+        {
+          category: "agents",
+          basename: "code-reviewer.md",
+          sourcePath: "/repo/.myclaude/persona/backend/agents/code-reviewer.md",
+          originScope: "project-role",
+          content: "# Code Reviewer\n",
+        },
+      ],
+      collisions: [],
+      missingSources: [],
+    };
+
+    const stream = makeStream();
+    const messages: unknown[] = [];
+    const decoder = new MessageDecoder({
+      stream,
+      onMessage: (m) => messages.push(m),
+      onError: () => {
+        throw new Error("unexpected error");
+      },
+    });
+
+    stream.push(encodeMessage(resp));
+    await new Promise((r) => setImmediate(r));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual(resp);
     decoder.close();
   });
 });
