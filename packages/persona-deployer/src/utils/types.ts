@@ -4,6 +4,11 @@
 
 /**
  * Persona input categories for file deployment.
+ *
+ * Internal disk-layout names used by `copyFiles` and `deployPersona`. The
+ * legacy `commands` literal matches the on-disk subdirectory; the public
+ * `renderPersonaInMemory` boundary remaps it to `slashCmds` for parity with
+ * the cascade output (`EffectiveConfig.persona.slashCmds`).
  */
 export type FileCategory = "agents" | "skills" | "commands" | "memory";
 
@@ -23,12 +28,17 @@ export type FileCategory = "agents" | "skills" | "commands" | "memory";
  *
  * This "step-by-step" log means the caller always has the full overwrite
  * chain rather than just the first and last entry.
+ *
+ * `category` carries either the internal disk name (`commands`) when produced
+ * by `copyFiles` / `deployPersona`, or the public-facing name (`slashCmds`)
+ * when produced by `renderPersonaInMemory`. Callers that mix the two paths
+ * should normalise on the public name.
  */
 export interface CollisionLogEntry {
   /** Basename of the deployed file, e.g. `code-reviewer.md`. */
   target: string;
   /** Category the collision occurred in. */
-  category: FileCategory;
+  category: FileCategory | "slashCmds";
   /** Absolute source path of the file that was overwritten. */
   overriddenSource: string;
   /** Absolute source path of the file that won. */
@@ -37,10 +47,14 @@ export interface CollisionLogEntry {
 
 /**
  * A record of one missing source file when `onMissingSource: 'skip'` is set.
+ *
+ * `category` carries either the internal disk name (`commands`) or the
+ * public-facing name (`slashCmds`); see `CollisionLogEntry.category` for the
+ * same caveat.
  */
 export interface MissingSourceEntry {
   /** Persona category the missing file belongs to. */
-  category: FileCategory | "claudeMd";
+  category: FileCategory | "slashCmds" | "claudeMd";
   /** Absolute path that was expected to exist. */
   sourcePath: string;
   /** Absolute path where the file would have been deployed. */
@@ -155,4 +169,120 @@ export interface OrphanedSession {
   createdAtMs: number;
   /** Age of the directory in milliseconds. */
   ageMs: number;
+}
+
+/**
+ * Public-facing persona file category as exposed by `renderPersonaInMemory`.
+ *
+ * Mirrors the `EffectiveConfig.persona` array names — slash commands are named
+ * `slashCmds` (not `commands`) so consumers can index the result in lockstep
+ * with the cascade output. See `FileCategory` for the internal disk-deployment
+ * variant which keeps the legacy `commands` directory key.
+ */
+export type PersonaRenderCategory = "agents" | "skills" | "slashCmds" | "memory";
+
+/**
+ * One CLAUDE.md fragment (raw, no source-marker prefix) returned alongside the
+ * combined render output.
+ */
+export interface PersonaClaudeMdSectionEntry {
+  /** Absolute path of the source fragment on disk. */
+  sourcePath: string;
+  /**
+   * Origin scope label looked up from `provenanceMap`. Falls back to the
+   * literal string `"unknown"` when the path is not present in the map.
+   */
+  originScope: string;
+  /** Raw fragment content (UTF-8) read verbatim from disk. */
+  content: string;
+}
+
+/**
+ * Combined CLAUDE.md preview returned by `renderPersonaInMemory`.
+ */
+export interface PersonaRenderClaudeMd {
+  /**
+   * Concatenated CLAUDE.md content with `<!-- source: ... -->` markers — the
+   * exact same string `buildClaudeMd` produces.
+   */
+  combinedContent: string;
+  /**
+   * Per-fragment breakdown: caller can render each section independently in a
+   * UI without re-parsing the combined string.
+   */
+  sections: PersonaClaudeMdSectionEntry[];
+}
+
+/**
+ * One persona file entry returned by `renderPersonaInMemory`.
+ *
+ * Content is decoded as UTF-8. Persona files in the cascade are markdown,
+ * YAML, or JSON — never binary.
+ */
+export interface PersonaRenderFile {
+  /** Public-facing category name (`slashCmds`, not `commands`). */
+  category: PersonaRenderCategory;
+  /** File basename (e.g. `code-reviewer.md`). */
+  basename: string;
+  /** Absolute path of the source file on disk. */
+  sourcePath: string;
+  /**
+   * Origin scope label looked up from `provenanceMap`. Falls back to the
+   * literal string `"unknown"` when the path is not present in the map.
+   */
+  originScope: string;
+  /** UTF-8 decoded file content. */
+  content: string;
+}
+
+/**
+ * Input to `renderPersonaInMemory`.
+ */
+export interface PersonaRenderInput {
+  /**
+   * The `persona` section of an `EffectiveConfig` produced by the cascade —
+   * five ordered absolute-path arrays (`claudeMd`, `agents`, `skills`,
+   * `slashCmds`, `memory`).
+   */
+  effective: {
+    claudeMd: string[];
+    agents: string[];
+    skills: string[];
+    slashCmds: string[];
+    memory: string[];
+  };
+  /**
+   * Per-path origin labels keyed by absolute source path. Values are
+   * `ScopeName`-typed scope labels (e.g. `"global-role"`, `"project-shared"`).
+   * Paths absent from the map fall back to the literal `"unknown"` string.
+   */
+  provenanceMap: Record<string, string>;
+  /**
+   * What to do when a source file does not exist on disk.
+   *
+   * - `"skip"` (default): record the missing path in `missingSources` and
+   *   continue.
+   * - `"throw"`: raise `SourceFileNotFoundError` immediately.
+   */
+  onMissingSource?: "throw" | "skip";
+}
+
+/**
+ * Output of `renderPersonaInMemory`.
+ */
+export interface PersonaRenderResult {
+  /**
+   * Combined CLAUDE.md preview plus per-section breakdown, or `null` when
+   * `effective.claudeMd` is empty.
+   */
+  claudeMd: PersonaRenderClaudeMd | null;
+  /** Flat array of agent + skill + slashCmd + memory files. */
+  files: PersonaRenderFile[];
+  /**
+   * Filename collisions detected within each category. The `category` field
+   * uses the public-facing name (`slashCmds`, not `commands`).
+   */
+  collisions: CollisionLogEntry[];
+  /** Missing source files (only when `onMissingSource === "skip"`). */
+  missingSources: MissingSourceEntry[];
 }

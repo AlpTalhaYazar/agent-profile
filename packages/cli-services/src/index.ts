@@ -68,6 +68,17 @@ export {
   type ProfileValidateResult,
 } from "./profile/validate.js";
 
+// ─── Persona ──────────────────────────────────────────────────────────────────
+
+export {
+  personaRenderService,
+  type PersonaRenderInput as PersonaRenderServiceInput,
+} from "./persona/index.js";
+
+// Re-export the persona-deployer result type for callers that only depend on
+// `@agent-profile/cli-services` (Phase 2 daemon handler, CLI subcommand).
+export type { PersonaRenderResult } from "@agent-profile/persona-deployer";
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 export {

@@ -29,6 +29,34 @@ export interface CopyFilesResult {
 }
 
 /**
+ * Result of `readCategoryFiles`.
+ *
+ * Pure read primitive — no `mkdir`, no `atomicWrite`. Returns the buffered
+ * file contents alongside the same collision and missing-source bookkeeping
+ * that `copyFiles` produces, so callers can either deploy to disk (the
+ * `copyFiles` wrapper) or render in-memory (`renderPersonaInMemory`).
+ *
+ * `files` preserves cascade order including colliding entries; callers that
+ * only want the winning content per basename (e.g. `renderPersonaInMemory`)
+ * should post-filter on `basename` keeping the last occurrence.
+ */
+export interface ReadCategoryFilesResult {
+  /** Successfully read files in cascade order — colliding entries included. */
+  files: Array<{
+    /** File basename (deployment key, e.g. `code-reviewer.md`). */
+    basename: string;
+    /** Absolute source path on disk. */
+    sourcePath: string;
+    /** Raw file content (unparsed bytes). */
+    content: Buffer;
+  }>;
+  /** Collision log entries produced during the read. */
+  collisions: CollisionLogEntry[];
+  /** Missing source files (only when `onMissingSource === 'skip'`). */
+  missingSources: MissingSourceEntry[];
+}
+
+/**
  * Options for `copyFiles`.
  */
 export interface CopyFilesOpts {
@@ -37,38 +65,47 @@ export interface CopyFilesOpts {
 }
 
 /**
- * Copy an array of persona files into a target directory.
- *
- * - Each file is read and written via `atomicWrite` (no raw `writeFile` calls).
- * - Filename collisions within the same category: later wins; overwrite is logged.
- * - If `onMissingSource === 'throw'`, throws `SourceFileNotFoundError` immediately.
- * - If `onMissingSource === 'skip'`, records the missing file and continues.
- *
- * @param category    - The persona category (for collision log and error messages).
- * @param sources     - Ordered array of absolute source file paths.
- * @param targetDir   - Absolute path to the destination directory.
- * @param opts        - Missing-source policy.
+ * Options for `readCategoryFiles`.
  */
-export async function copyFiles(
+export interface ReadCategoryFilesOpts {
+  /** What to do when a source file does not exist. */
+  onMissingSource: "throw" | "skip";
+  /**
+   * Optional target directory used only when populating missing-source
+   * records and `SourceFileNotFoundError.targetPath`. When omitted, missing
+   * entries carry an empty `targetPath`.
+   */
+  targetDir?: string;
+}
+
+/**
+ * Read an array of persona files for a given category and surface collisions
+ * + missing-source entries without writing to disk.
+ *
+ * Behaviour mirrors `copyFiles` byte-for-byte (collision detection, ENOENT
+ * handling, basename → winning source map) so that `copyFiles` can wrap this
+ * helper for disk deployment while `renderPersonaInMemory` consumes the same
+ * primitive for in-memory preview.
+ *
+ * @param category  - The persona category (used in collision/missing logs).
+ * @param sources   - Ordered array of absolute source file paths.
+ * @param opts      - Missing-source policy and optional target directory.
+ */
+export async function readCategoryFiles(
   category: FileCategory,
   sources: string[],
-  targetDir: string,
-  opts: CopyFilesOpts
-): Promise<CopyFilesResult> {
-  const writtenFiles: string[] = [];
+  opts: ReadCategoryFilesOpts
+): Promise<ReadCategoryFilesResult> {
+  const files: ReadCategoryFilesResult["files"] = [];
   const collisions: CollisionLogEntry[] = [];
   const missingSources: MissingSourceEntry[] = [];
 
   // Track which basename → winning source path, for collision detection.
   const basenameMap = new Map<string, string>();
 
-  // Ensure the target directory exists (it should already from createSessionDir,
-  // but be defensive here in case deployPersona is called without it).
-  await mkdir(targetDir, { recursive: true, mode: 0o700 });
-
   for (const srcPath of sources) {
     const name = basename(srcPath);
-    const targetPath = join(targetDir, name);
+    const targetPath = opts.targetDir !== undefined ? join(opts.targetDir, name) : "";
 
     let content: Buffer;
     try {
@@ -96,16 +133,67 @@ export async function copyFiles(
       });
     }
 
-    await atomicWrite(targetPath, content);
-
     basenameMap.set(name, srcPath);
 
-    // Add to writtenFiles only if not already present (for the overwrite case,
-    // the target path is the same — we keep one entry per final file).
-    if (!writtenFiles.includes(targetPath)) {
+    // Append every successfully-read entry in order. Callers that only need
+    // the winning content per basename should keep the last occurrence.
+    files.push({ basename: name, sourcePath: srcPath, content });
+  }
+
+  return { files, collisions, missingSources };
+}
+
+/**
+ * Copy an array of persona files into a target directory.
+ *
+ * - Each file is read and written via `atomicWrite` (no raw `writeFile` calls).
+ * - Filename collisions within the same category: later wins; overwrite is logged.
+ * - If `onMissingSource === 'throw'`, throws `SourceFileNotFoundError` immediately.
+ * - If `onMissingSource === 'skip'`, records the missing file and continues.
+ *
+ * Internally this delegates the read pass to `readCategoryFiles` and then
+ * performs the `mkdir` + `atomicWrite` per surviving file. The external
+ * behaviour (`writtenFiles`, `collisions`, `missingSources`) is preserved
+ * byte-for-byte.
+ *
+ * @param category    - The persona category (for collision log and error messages).
+ * @param sources     - Ordered array of absolute source file paths.
+ * @param targetDir   - Absolute path to the destination directory.
+ * @param opts        - Missing-source policy.
+ */
+export async function copyFiles(
+  category: FileCategory,
+  sources: string[],
+  targetDir: string,
+  opts: CopyFilesOpts
+): Promise<CopyFilesResult> {
+  // Ensure the target directory exists (it should already from createSessionDir,
+  // but be defensive here in case deployPersona is called without it).
+  await mkdir(targetDir, { recursive: true, mode: 0o700 });
+
+  const readResult = await readCategoryFiles(category, sources, {
+    onMissingSource: opts.onMissingSource,
+    targetDir,
+  });
+
+  // Write each successfully-read source in cascade order. Colliding entries
+  // overwrite their predecessors on disk via `atomicWrite`'s rename step;
+  // `writtenFiles` records each unique target once (deduplicated by path so
+  // overwrites do not produce duplicate entries).
+  const writtenFiles: string[] = [];
+  const seen = new Set<string>();
+  for (const file of readResult.files) {
+    const targetPath = join(targetDir, file.basename);
+    await atomicWrite(targetPath, file.content);
+    if (!seen.has(targetPath)) {
       writtenFiles.push(targetPath);
+      seen.add(targetPath);
     }
   }
 
-  return { writtenFiles, collisions, missingSources };
+  return {
+    writtenFiles,
+    collisions: readResult.collisions,
+    missingSources: readResult.missingSources,
+  };
 }

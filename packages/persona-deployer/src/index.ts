@@ -12,6 +12,7 @@
 // ─── Main entry points ────────────────────────────────────────────────────────
 
 export { deployPersona } from "./deploy.js";
+export { renderPersonaInMemory } from "./render.js";
 export {
   createSessionDir,
   cleanupSession,
@@ -38,4 +39,10 @@ export type {
   SessionInfo,
   OrphanedSession,
   FileCategory,
+  PersonaClaudeMdSectionEntry,
+  PersonaRenderCategory,
+  PersonaRenderClaudeMd,
+  PersonaRenderFile,
+  PersonaRenderInput,
+  PersonaRenderResult,
 } from "./utils/types.js";
