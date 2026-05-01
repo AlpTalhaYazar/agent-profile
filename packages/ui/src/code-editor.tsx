@@ -24,7 +24,7 @@ export function CodeEditor({
       fallback={
         <output
           aria-label={ariaLabel}
-          className="flex h-full min-h-40 items-center justify-center rounded-md border border-default bg-subtle text-sm text-secondary"
+          className="flex h-full min-h-40 items-center justify-center rounded-md border border-border bg-muted text-sm text-muted-foreground"
         >
           Loading editor
         </output>

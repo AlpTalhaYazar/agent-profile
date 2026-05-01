@@ -79,6 +79,17 @@
   --accent-foreground: var(--ap-color-text-primary);
   --destructive: var(--ap-color-status-danger);
   --destructive-foreground: var(--ap-color-text-on-accent);
+  --destructive-soft: color-mix(in srgb, var(--ap-color-status-danger) 14%, transparent);
+  --success: var(--ap-color-status-success);
+  --success-foreground: var(--ap-color-text-primary);
+  --success-soft: color-mix(in srgb, var(--ap-color-status-success) 14%, transparent);
+  --warning: var(--ap-color-status-warning);
+  --warning-foreground: var(--ap-color-text-primary);
+  --warning-soft: color-mix(in srgb, var(--ap-color-status-warning) 14%, transparent);
+  --info: var(--ap-color-bg-accent-solid);
+  --info-foreground: var(--ap-color-text-primary);
+  --info-soft: color-mix(in srgb, var(--ap-color-bg-accent-solid) 14%, transparent);
+  --overlay: var(--ap-color-bg-overlay);
   --border: var(--ap-color-border-default);
   --input: var(--ap-color-border-default);
   --ring: var(--ap-color-focus-ring);

@@ -19,12 +19,12 @@ export function Field({
 }: FieldProps): React.ReactElement {
   return (
     <div className={cn("grid gap-1.5", className)} {...props}>
-      <label className="text-sm font-medium text-primary" htmlFor={htmlFor}>
+      <label className="text-sm font-medium text-foreground" htmlFor={htmlFor}>
         {label}
       </label>
       {children}
-      {description ? <p className="text-xs text-secondary">{description}</p> : null}
-      {error ? <p className="text-xs font-medium text-status-danger">{error}</p> : null}
+      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
     </div>
   );
 }

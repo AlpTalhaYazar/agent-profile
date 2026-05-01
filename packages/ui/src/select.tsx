@@ -31,7 +31,7 @@ export function Select({
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(
-          "inline-flex h-9 w-full items-center justify-between rounded-md border border-default bg-surface px-3 text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-sm text-foreground shadow-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
       >
@@ -39,11 +39,11 @@ export function Select({
         <SelectPrimitive.Icon aria-hidden>v</SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content className="z-50 min-w-[8rem] overflow-hidden rounded-md border border-default bg-elevated shadow-md">
+        <SelectPrimitive.Content className="z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
           <SelectPrimitive.Viewport className="p-1">
             {options.map((option) => (
               <SelectPrimitive.Item
-                className="relative flex h-8 cursor-default select-none items-center rounded-sm px-2 text-sm text-primary outline-none hover:bg-subtle data-[highlighted]:bg-subtle"
+                className="relative flex h-8 cursor-default select-none items-center rounded-sm px-2 text-sm text-foreground outline-none hover:bg-accent hover:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
                 key={option.value}
                 value={option.value}
               >

@@ -54,7 +54,24 @@ const config: Config = {
         destructive: {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
+          soft: "var(--destructive-soft)",
         },
+        success: {
+          DEFAULT: "var(--success)",
+          foreground: "var(--success-foreground)",
+          soft: "var(--success-soft)",
+        },
+        warning: {
+          DEFAULT: "var(--warning)",
+          foreground: "var(--warning-foreground)",
+          soft: "var(--warning-soft)",
+        },
+        info: {
+          DEFAULT: "var(--info)",
+          foreground: "var(--info-foreground)",
+          soft: "var(--info-soft)",
+        },
+        overlay: "var(--overlay)",
       },
       borderRadius: {
         DEFAULT: "var(--radius)",
