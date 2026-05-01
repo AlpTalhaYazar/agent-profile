@@ -224,6 +224,7 @@ export function AuthVaultScreen(): React.ReactElement {
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [renameTarget, setRenameTarget] = React.useState<AuthProfileView | null>(null);
   const [adoptingId, setAdoptingId] = React.useState<string | null>(null);
+  const [editingSecret, setEditingSecret] = React.useState<string | null>(null);
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
@@ -356,12 +357,13 @@ export function AuthVaultScreen(): React.ReactElement {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {selected.secrets.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={2} className="text-sm text-secondary">
+                      <TableCell colSpan={3} className="text-sm text-secondary">
                         No MCP secrets registered yet.
                       </TableCell>
                     </TableRow>
@@ -371,6 +373,17 @@ export function AuthVaultScreen(): React.ReactElement {
                         <TableCell className="font-mono text-xs">{name}</TableCell>
                         <TableCell>
                           <Badge tone="success">present</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            disabled={busy || selectedIsDetected}
+                            onClick={() => setEditingSecret(name)}
+                          >
+                            Edit
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -497,6 +510,36 @@ export function AuthVaultScreen(): React.ReactElement {
               await auth.updateMeta({ profileId: target.id, displayName });
               await reload();
               setRenameTarget(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      ) : null}
+
+      {selected !== null && editingSecret !== null ? (
+        <EditSecretDialog
+          key={`edit-${selected.id}-${editingSecret}`}
+          open={true}
+          profileId={selected.id}
+          secretName={editingSecret}
+          busy={busy}
+          onOpenChange={(o) => {
+            if (!o) setEditingSecret(null);
+          }}
+          onSubmit={async ({ value }) => {
+            setBusy(true);
+            try {
+              await window.myclaude?.auth?.setSecret({
+                profileId: selected.id,
+                name: editingSecret,
+                value,
+                register: true,
+              });
+              await reload();
+              setEditingSecret(null);
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -879,6 +922,72 @@ function SetSecretDialog({
             }}
           >
             {busy ? "Saving…" : mode === "rotate" ? "Rotate" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface EditSecretDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  profileId: string;
+  secretName: string;
+  busy: boolean;
+  onSubmit: (input: { value: string }) => Promise<void>;
+}
+
+function EditSecretDialog({
+  open,
+  onOpenChange,
+  profileId,
+  secretName,
+  busy,
+  onSubmit,
+}: EditSecretDialogProps): React.ReactElement {
+  const [value, setValue] = React.useState("");
+
+  React.useEffect(() => {
+    if (!open) setValue("");
+  }, [open]);
+
+  const canSubmit = value.length > 0 && !busy;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Edit MCP secret <span className="font-mono">{secretName}</span>
+          </DialogTitle>
+          <DialogDescription>
+            Update the stored value for this secret on profile{" "}
+            <span className="font-mono">{profileId}</span>.
+          </DialogDescription>
+        </DialogHeader>
+        <Field label="Secret value">
+          <PasswordInput
+            value={value}
+            onChange={(ev) => setValue(ev.target.value)}
+            autoFocus
+          />
+        </Field>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!canSubmit}
+            onClick={() => {
+              const submitted = { value };
+              setValue("");
+              void onSubmit(submitted);
+            }}
+          >
+            {busy ? "Saving…" : "Update"}
           </Button>
         </DialogFooter>
       </DialogContent>
