@@ -3,6 +3,10 @@ export const CHANNELS = {
     version: "system.version",
     defaultCwd: "system.defaultCwd",
     pickDirectory: "system.pickDirectory",
+    bootstrap: "system.bootstrap",
+  },
+  setup: {
+    markComplete: "setup.markComplete",
   },
   auth: {
     list: "auth.list",

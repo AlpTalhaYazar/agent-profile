@@ -31,12 +31,31 @@ export type SessionUpdatePayload =
   | { kind: "event"; event: SessionEvent }
   | { kind: "connection"; state: "up" | "down" };
 
+/**
+ * Renderer-facing first-run bootstrap shape. Combines the daemon's
+ * `system.bootstrap` response (`firstRun`, `profileCount`,
+ * `setupCompleteMarker`) with the Main process's static identity
+ * (`serverVersion`, `defaultCwd`) so the Renderer can do its initial wiring
+ * in a single round-trip.
+ */
+export interface BootstrapResult {
+  firstRun: boolean;
+  profileCount: number;
+  setupCompleteMarker: boolean;
+  serverVersion: string;
+  defaultCwd: string;
+}
+
 export interface MyClaudeBridge {
   version?: () => Promise<string>;
   system: {
     version: () => Promise<string>;
     defaultCwd: () => Promise<string>;
     pickDirectory: () => Promise<string | null>;
+    bootstrap: () => Promise<BootstrapResult>;
+  };
+  setup: {
+    markComplete: () => Promise<void>;
   };
   auth: {
     list: () => Promise<unknown>;

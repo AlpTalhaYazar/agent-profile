@@ -725,4 +725,49 @@ describe("daemon write handlers", () => {
       ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     });
   });
+
+  // ─── setup.markComplete (M7 first-run) ─────────────────────────────────────
+
+  describe("setup.markComplete", () => {
+    it("writes the setup-complete marker with mode 0600 and an audit row", async () => {
+      const handlers = build();
+      const handler = handlers["setup.markComplete"];
+      if (!handler) throw new Error("missing handler");
+
+      const body = await handler(req("setup.markComplete"), ctx);
+      expect(body).toEqual({});
+
+      const markerPath = join(myClaudeHome, ".setup-complete");
+      const contents = await readFile(markerPath, "utf8");
+      // Body is an ISO timestamp; parsing must succeed.
+      expect(Number.isNaN(Date.parse(contents))).toBe(false);
+
+      if (process.platform !== "win32") {
+        const { stat } = await import("node:fs/promises");
+        const s = await stat(markerPath);
+        expect(s.mode & 0o777).toBe(0o600);
+      }
+
+      const auditLines = (await readFile(auditPath, "utf8")).trim().split("\n").filter(Boolean);
+      const audited = auditLines
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter((row) => row.kind === "config_change" && row.actionKind === "setup.markComplete");
+      expect(audited).toHaveLength(1);
+      expect(audited[0]).toMatchObject({
+        actor: "gui",
+        target: ".setup-complete",
+      });
+    });
+
+    it("is idempotent — a second call overwrites without throwing", async () => {
+      const handlers = build();
+      const handler = handlers["setup.markComplete"];
+      if (!handler) throw new Error("missing handler");
+      await handler(req("setup.markComplete"), ctx);
+      await handler(req("setup.markComplete"), ctx);
+      const markerPath = join(myClaudeHome, ".setup-complete");
+      const contents = await readFile(markerPath, "utf8");
+      expect(contents.length).toBeGreaterThan(0);
+    });
+  });
 });

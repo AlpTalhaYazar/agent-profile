@@ -7,7 +7,7 @@
  * to the Renderer via `contextBridge.exposeInMainWorld`.
  */
 import { contextBridge, ipcRenderer } from "electron";
-import type { MyClaudeBridge, SessionUpdatePayload } from "../shared/bridge.js";
+import type { BootstrapResult, MyClaudeBridge, SessionUpdatePayload } from "../shared/bridge.js";
 import { CHANNELS, SESSION_EVENT_CHANNEL } from "../shared/channels.js";
 
 const bridge: MyClaudeBridge = {
@@ -15,6 +15,10 @@ const bridge: MyClaudeBridge = {
     version: (): Promise<string> => ipcRenderer.invoke(CHANNELS.system.version),
     defaultCwd: (): Promise<string> => ipcRenderer.invoke(CHANNELS.system.defaultCwd),
     pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(CHANNELS.system.pickDirectory),
+    bootstrap: (): Promise<BootstrapResult> => ipcRenderer.invoke(CHANNELS.system.bootstrap),
+  },
+  setup: {
+    markComplete: (): Promise<void> => ipcRenderer.invoke(CHANNELS.setup.markComplete),
   },
   auth: {
     list: (): Promise<unknown> => ipcRenderer.invoke(CHANNELS.auth.list),

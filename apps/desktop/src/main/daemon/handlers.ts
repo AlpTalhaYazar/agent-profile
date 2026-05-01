@@ -27,6 +27,7 @@
  * without a running Electron runtime.
  */
 
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,6 +42,7 @@ import {
   authGetSecretRefService,
   authListService,
   daemonStatusService,
+  loadAuthProfiles,
   personaRenderService,
   profileListService,
   profilePreviewService,
@@ -59,6 +61,7 @@ import type {
   ReqProfileShowT,
   ReqProfileValidateT,
   ReqSessionsListT,
+  ReqSystemBootstrapT,
 } from "@agent-profile/ipc-protocol";
 import {
   type LiveSession,
@@ -230,6 +233,19 @@ export function createHandlers(
       return { sessions: enriched };
     }),
 
+    "system.bootstrap": wrap<ReqSystemBootstrapT>("system.bootstrap", async () => {
+      // Pure read — no side effects. The wizard relies on `firstRun` to gate
+      // its visibility; the marker is written by `setup.markComplete`.
+      const doc = loadAuthProfiles(myClaudeHome);
+      const profileCount = Object.keys(doc.authProfiles).length;
+      const setupCompleteMarker = await markerExists(myClaudeHome);
+      return {
+        firstRun: profileCount === 0 && !setupCompleteMarker,
+        profileCount,
+        setupCompleteMarker,
+      };
+    }),
+
     "daemon.status": wrap<ReqDaemonStatusT>("daemon.status", async () => {
       const status: DaemonStatus = await daemonStatusService({
         pid: lifecycle.pid,
@@ -290,6 +306,21 @@ function enrichSessionRecord(
 function checkProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Probe the GUI-only setup-complete marker at `<myClaudeHome>/.setup-complete`.
+ * Returns `true` when the file exists, `false` on ENOENT or any other stat
+ * failure (treating the absence-of-evidence as evidence-of-absence is safe:
+ * the wizard will simply re-show, and `setup.markComplete` is idempotent).
+ */
+async function markerExists(myClaudeHome: string): Promise<boolean> {
+  try {
+    await stat(join(myClaudeHome, ".setup-complete"));
     return true;
   } catch {
     return false;

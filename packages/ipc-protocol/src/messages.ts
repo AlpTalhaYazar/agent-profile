@@ -22,6 +22,7 @@ export {
   type RespT,
 } from "./messages/registry.js";
 export * from "./messages/system.js";
+export * from "./messages/setup.js";
 export * from "./messages/auth.js";
 export * from "./messages/profile.js";
 export * from "./messages/sessions.js";

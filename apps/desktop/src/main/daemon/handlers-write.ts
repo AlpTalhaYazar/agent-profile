@@ -26,6 +26,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CapabilityIssuer, CapabilityVerifier } from "@agent-profile/capability";
 import {
@@ -58,6 +59,7 @@ import {
   type ReqSessionsDriftT,
   type ReqSessionsKillT,
   type ReqSessionsRelaunchT,
+  type ReqSetupMarkCompleteT,
 } from "@agent-profile/ipc-protocol";
 import {
   type Backend,
@@ -673,6 +675,22 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         expiresAtMs: issued.expiresAtMs,
         relaunchedFrom: req.sessionId,
       };
+    }),
+
+    "setup.markComplete": wrap<ReqSetupMarkCompleteT>("setup.markComplete", async () => {
+      // GUI-only marker; the CLI never reads or writes it. Idempotent: a
+      // second call simply overwrites the timestamp.
+      const markerPath = join(deps.myClaudeHome, ".setup-complete");
+      const ts = new Date(now()).toISOString();
+      await writeFile(markerPath, ts, { encoding: "utf8", mode: 0o600 });
+      await deps.audit.append({
+        kind: "config_change",
+        actionKind: "setup.markComplete",
+        actor: "gui",
+        target: ".setup-complete",
+        diffSha256: null,
+      });
+      return {};
     }),
 
     "sessions.drift": wrap<ReqSessionsDriftT>("sessions.drift", async (req) => {

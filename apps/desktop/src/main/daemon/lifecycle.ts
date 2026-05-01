@@ -165,6 +165,7 @@ export class DaemonLifecycle {
       "persona.render",
       "daemon.status",
       "daemon.stop",
+      "system.bootstrap",
     ];
     if (opts.writeHandlers) {
       features.push(
@@ -180,7 +181,8 @@ export class DaemonLifecycle {
         "sessions.kill",
         "sessions.relaunch",
         "sessions.drift",
-        "sessions.subscribe"
+        "sessions.subscribe",
+        "setup.markComplete"
       );
     }
 

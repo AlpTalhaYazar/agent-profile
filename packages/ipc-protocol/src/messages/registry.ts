@@ -59,6 +59,12 @@ import {
   RespSessionsSubscribeOk,
 } from "./sessions.js";
 import {
+  ReqSetupMarkComplete,
+  ReqSystemBootstrap,
+  RespSetupMarkCompleteOk,
+  RespSystemBootstrapOk,
+} from "./setup.js";
+import {
   ReqDaemonStatus,
   ReqDaemonStop,
   ReqHello,
@@ -249,6 +255,18 @@ export const endpoints = [
     request: ReqPersonaRender,
     responseKind: "persona.render.ok",
     response: RespPersonaRenderOk,
+  }),
+  endpoint({
+    requestKind: "system.bootstrap",
+    request: ReqSystemBootstrap,
+    responseKind: "system.bootstrap.ok",
+    response: RespSystemBootstrapOk,
+  }),
+  endpoint({
+    requestKind: "setup.markComplete",
+    request: ReqSetupMarkComplete,
+    responseKind: "setup.markComplete.ok",
+    response: RespSetupMarkCompleteOk,
   }),
 ] as const;
 

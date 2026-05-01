@@ -383,4 +383,77 @@ authProfiles:
       expect(["BAD_REQUEST", "INTERNAL"]).toContain((err as IpcError).code);
     }
   });
+
+  // ─── system.bootstrap (M7 first-run) ──────────────────────────────────────
+
+  it("system.bootstrap reports firstRun=true on a brand-new home", async () => {
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["system.bootstrap"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(req("system.bootstrap"), ctx)) as {
+      firstRun: boolean;
+      profileCount: number;
+      setupCompleteMarker: boolean;
+    };
+    expect(body).toEqual({
+      firstRun: true,
+      profileCount: 0,
+      setupCompleteMarker: false,
+    });
+  });
+
+  it("system.bootstrap reports firstRun=false when at least one profile exists", async () => {
+    await writeFile(
+      join(home, ".myclaude", "config", "authProfiles.yml"),
+      `
+version: 1
+authProfiles:
+  work:
+    anthropic:
+      mode: apiKey
+      secretRef: keyring://anthropic/work
+    mcpSecretRefs: {}
+`.trim()
+    );
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["system.bootstrap"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(req("system.bootstrap"), ctx)) as {
+      firstRun: boolean;
+      profileCount: number;
+      setupCompleteMarker: boolean;
+    };
+    expect(body.firstRun).toBe(false);
+    expect(body.profileCount).toBe(1);
+    expect(body.setupCompleteMarker).toBe(false);
+  });
+
+  it("system.bootstrap reports firstRun=false when only the marker exists (dismissed wizard)", async () => {
+    await writeFile(join(home, ".myclaude", ".setup-complete"), new Date().toISOString());
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["system.bootstrap"];
+    if (!handler) throw new Error("missing handler");
+    const body = (await handler(req("system.bootstrap"), ctx)) as {
+      firstRun: boolean;
+      profileCount: number;
+      setupCompleteMarker: boolean;
+    };
+    expect(body).toEqual({
+      firstRun: false,
+      profileCount: 0,
+      setupCompleteMarker: true,
+    });
+  });
+
+  it("system.bootstrap is a pure read — calling it twice does not create the marker", async () => {
+    const handlers = createHandlers(lifecycleFor(home), home);
+    const handler = handlers["system.bootstrap"];
+    if (!handler) throw new Error("missing handler");
+    await handler(req("system.bootstrap"), ctx);
+    await handler(req("system.bootstrap"), ctx);
+    const second = (await handler(req("system.bootstrap"), ctx)) as {
+      setupCompleteMarker: boolean;
+    };
+    expect(second.setupCompleteMarker).toBe(false);
+  });
 });

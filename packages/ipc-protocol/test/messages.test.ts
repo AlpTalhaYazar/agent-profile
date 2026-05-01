@@ -27,6 +27,8 @@ import {
   ReqSessionsList,
   ReqSessionsRelaunch,
   ReqSessionsSubscribe,
+  ReqSetupMarkComplete,
+  ReqSystemBootstrap,
   Resp,
   RespAuthAddOk,
   RespAuthGetSecretRefOk,
@@ -53,6 +55,8 @@ import {
   RespSessionsListOk,
   RespSessionsRelaunchOk,
   RespSessionsSubscribeOk,
+  RespSetupMarkCompleteOk,
+  RespSystemBootstrapOk,
   SessionRecordEnrichment,
 } from "../src/messages.js";
 
@@ -1585,5 +1589,108 @@ describe("Frame union accepts persona.render.ok", () => {
     if (r.success) {
       expect(r.data.kind).toBe("persona.render.ok");
     }
+  });
+});
+
+// ─── Setup (M7 first-run) ───────────────────────────────────────────────────
+
+describe("ReqSystemBootstrap", () => {
+  it("accepts a minimal bootstrap request", () => {
+    const r = ReqSystemBootstrap.safeParse({ id: "c-700", kind: "system.bootstrap" });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects unknown extra fields", () => {
+    const r = ReqSystemBootstrap.safeParse({
+      id: "c-700",
+      kind: "system.bootstrap",
+      extra: 1,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespSystemBootstrapOk", () => {
+  it("accepts a fully-populated response", () => {
+    const r = RespSystemBootstrapOk.safeParse({
+      id: "c-700",
+      kind: "system.bootstrap.ok",
+      firstRun: true,
+      profileCount: 0,
+      setupCompleteMarker: false,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a negative profileCount", () => {
+    const r = RespSystemBootstrapOk.safeParse({
+      id: "c-700",
+      kind: "system.bootstrap.ok",
+      firstRun: false,
+      profileCount: -1,
+      setupCompleteMarker: true,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a non-boolean firstRun", () => {
+    const r = RespSystemBootstrapOk.safeParse({
+      id: "c-700",
+      kind: "system.bootstrap.ok",
+      firstRun: "yes",
+      profileCount: 1,
+      setupCompleteMarker: true,
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("ReqSetupMarkComplete", () => {
+  it("accepts a minimal markComplete request", () => {
+    const r = ReqSetupMarkComplete.safeParse({ id: "c-701", kind: "setup.markComplete" });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a wrong kind discriminant", () => {
+    const r = ReqSetupMarkComplete.safeParse({ id: "c-701", kind: "setup.markIncomplete" });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("RespSetupMarkCompleteOk", () => {
+  it("accepts the empty-body response", () => {
+    const r = RespSetupMarkCompleteOk.safeParse({
+      id: "c-701",
+      kind: "setup.markComplete.ok",
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("Req/Resp/Frame unions route the setup kinds", () => {
+  it("Req discriminates a system.bootstrap request", () => {
+    const r = Req.safeParse({ id: "c-710", kind: "system.bootstrap" });
+    expect(r.success).toBe(true);
+  });
+
+  it("Req discriminates a setup.markComplete request", () => {
+    const r = Req.safeParse({ id: "c-710", kind: "setup.markComplete" });
+    expect(r.success).toBe(true);
+  });
+
+  it("Resp discriminates a system.bootstrap.ok response", () => {
+    const r = Resp.safeParse({
+      id: "c-720",
+      kind: "system.bootstrap.ok",
+      firstRun: false,
+      profileCount: 2,
+      setupCompleteMarker: true,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("Frame accepts a setup.markComplete.ok frame", () => {
+    const r = Frame.safeParse({ id: "c-721", kind: "setup.markComplete.ok" });
+    expect(r.success).toBe(true);
   });
 });

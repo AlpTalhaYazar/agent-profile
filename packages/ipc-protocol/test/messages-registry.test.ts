@@ -8,6 +8,8 @@ describe("message registry", () => {
     expect(responseKindByRequest["auth.oauth.start"]).toBe("auth.oauth.start.ok");
     expect(responseKindByRequest["sessions.subscribe"]).toBe("sessions.subscribe.ok");
     expect(responseKindByRequest["persona.render"]).toBe("persona.render.ok");
+    expect(responseKindByRequest["system.bootstrap"]).toBe("system.bootstrap.ok");
+    expect(responseKindByRequest["setup.markComplete"]).toBe("setup.markComplete.ok");
   });
 
   it("maps event kinds to subscription channels", () => {
