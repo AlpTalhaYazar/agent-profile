@@ -318,3 +318,41 @@ textarea:focus-visible,
 .ap-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ============================================================================
+ * REDUCED-MOTION OVERRIDES (Phase 2 milestone 7)
+ *
+ * Honour `prefers-reduced-motion: reduce` everywhere by collapsing the motion
+ * duration tokens to 0ms and short-circuiting any *-duration / *-iteration
+ * declaration on every element. The View Transition API pseudo-elements are
+ * also nulled out so the theme-toggle circle-reveal does not play.
+ *
+ * The `usePrefersReducedMotion` hook in `lib/use-prefers-reduced-motion.ts`
+ * mirrors this signal at the JS layer for imperative animations.
+ * ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="light"] {
+    --ap-duration-instant: 0ms;
+    --ap-duration-fast: 0ms;
+    --ap-duration-normal: 0ms;
+    --ap-duration-slow: 0ms;
+    --ap-duration-slower: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
