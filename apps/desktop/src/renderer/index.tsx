@@ -1072,7 +1072,7 @@ function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): React.R
 
   if (entries.length === 0) {
     return (
-      <div className="px-4 py-6 text-sm text-neutral-500">
+      <div className="px-4 py-6 text-sm text-secondary">
         No scope files discovered for the current directory.
       </div>
     );
@@ -1081,11 +1081,8 @@ function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): React.R
   return (
     <div className="px-2 py-2">
       {groupedEntries.map((group) => (
-        <section
-          className="border-b border-neutral-100 px-2 py-2 last:border-b-0"
-          key={group.scope}
-        >
-          <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+        <section className="border-b border-subtle px-2 py-2 last:border-b-0" key={group.scope}>
+          <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-secondary">
             {group.scope}
           </h2>
           <ul className="grid gap-1">
@@ -1097,20 +1094,20 @@ function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): React.R
                     className={cn(
                       "grid w-full gap-1 rounded-md border border-transparent px-2 py-2 text-left transition-colors",
                       selectedPath === entry.path
-                        ? "border-neutral-300 bg-neutral-100"
-                        : "hover:bg-neutral-50"
+                        ? "border-default bg-elevated"
+                        : "hover:bg-subtle"
                     )}
                     onClick={() => onSelect(entry.path)}
                     type="button"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-medium text-neutral-900">
+                      <span className="truncate text-sm font-medium text-primary">
                         {entry.role !== "—" ? entry.role : leafName(entry.path)}
                       </span>
-                      <span className="text-xs text-neutral-400">{stats.servers} srv</span>
+                      <span className="text-xs text-tertiary">{stats.servers} srv</span>
                     </div>
-                    <div className="truncate text-xs text-neutral-500">{entry.path}</div>
-                    <div className="flex flex-wrap gap-2 text-[11px] text-neutral-500">
+                    <div className="truncate text-xs text-secondary">{entry.path}</div>
+                    <div className="flex flex-wrap gap-2 text-[11px] text-tertiary">
                       <span>{stats.env} env</span>
                       <span>{stats.settings} settings</span>
                       <span>{stats.persona} persona</span>
@@ -1180,13 +1177,13 @@ function PreviewSummary({
       >
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold">MCP servers</h3>
-          <span className="text-xs text-neutral-500">
+          <span className="text-xs text-secondary">
             {Object.keys(effective?.mcpServers ?? {}).length} active
           </span>
         </div>
-        <div className="mt-3 overflow-hidden rounded-md border border-neutral-200 bg-white">
-          <table className="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead className="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
+        <div className="mt-3 overflow-hidden rounded-md border border-default bg-surface">
+          <table className="min-w-full divide-y divide-subtle text-sm">
+            <thead className="bg-subtle text-left text-xs uppercase tracking-wide text-secondary">
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Transport</th>
@@ -1194,16 +1191,16 @@ function PreviewSummary({
                 <th className="px-3 py-2 font-medium">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-subtle">
               {Object.entries(effective?.mcpServers ?? {}).map(([name, server]) => {
                 const source = provenance?.mcpServers?.[name]?.source ?? "—";
                 const suppressedBy = provenance?.mcpServers?.[name]?.suppressedBy;
                 return (
                   <tr key={name}>
-                    <td className="px-3 py-2 font-medium text-neutral-900">{name}</td>
-                    <td className="px-3 py-2 text-neutral-600">{transportLabel(server)}</td>
-                    <td className="px-3 py-2 text-neutral-600">{source}</td>
-                    <td className="px-3 py-2 text-neutral-600">
+                    <td className="px-3 py-2 font-medium text-primary">{name}</td>
+                    <td className="px-3 py-2 text-secondary">{transportLabel(server)}</td>
+                    <td className="px-3 py-2 text-secondary">{source}</td>
+                    <td className="px-3 py-2 text-secondary">
                       {suppressedBy
                         ? `Suppressed by ${suppressedBy}`
                         : server.enabled === false
@@ -1225,17 +1222,14 @@ function PreviewSummary({
         <h3 className="text-sm font-semibold">Environment</h3>
         <div className="mt-3 grid gap-2">
           {Object.entries(effective?.env ?? {}).map(([key, value]) => (
-            <div
-              className="grid gap-1 rounded-md border border-neutral-200 bg-white px-3 py-2"
-              key={key}
-            >
+            <div className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2" key={key}>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-neutral-900">{key}</span>
-                <span className="text-xs text-neutral-500">
+                <span className="font-medium text-primary">{key}</span>
+                <span className="text-xs text-secondary">
                   {provenance?.env?.[key]?.source ?? "—"}
                 </span>
               </div>
-              <div className="font-mono text-xs text-neutral-600">{redactText(value)}</div>
+              <div className="font-mono text-xs text-secondary">{redactText(value)}</div>
             </div>
           ))}
         </div>
@@ -1249,21 +1243,18 @@ function PreviewSummary({
         <div className="mt-3 grid gap-2">
           {settingsEntries.length > 0 ? (
             settingsEntries.map(([key, value]) => (
-              <div
-                className="grid gap-1 rounded-md border border-neutral-200 bg-white px-3 py-2"
-                key={key}
-              >
+              <div className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2" key={key}>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-neutral-900">{key}</span>
-                  <span className="text-xs text-neutral-500">
+                  <span className="font-medium text-primary">{key}</span>
+                  <span className="text-xs text-secondary">
                     {provenance?.settings?.[key]?.source ?? "—"}
                   </span>
                 </div>
-                <div className="font-mono text-xs text-neutral-600">{stringifyInline(value)}</div>
+                <div className="font-mono text-xs text-secondary">{stringifyInline(value)}</div>
               </div>
             ))
           ) : (
-            <p className="text-sm text-neutral-500">No settings in the resolved config.</p>
+            <p className="text-sm text-secondary">No settings in the resolved config.</p>
           )}
         </div>
       </section>
@@ -1277,11 +1268,11 @@ function PreviewSummary({
           {Object.entries(effective?.persona ?? emptyPersona()).map(([label, paths]) => (
             <div className="grid gap-1" key={label}>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-neutral-900">{label}</span>
-                <span className="text-xs text-neutral-500">{paths.length}</span>
+                <span className="font-medium text-primary">{label}</span>
+                <span className="text-xs text-secondary">{paths.length}</span>
               </div>
               {paths.length > 0 ? (
-                <ul className="grid gap-1 text-xs text-neutral-600">
+                <ul className="grid gap-1 text-xs text-secondary">
                   {paths.map((path) => (
                     <li className="truncate font-mono" key={`${label}:${path}`}>
                       {path}
@@ -1289,7 +1280,7 @@ function PreviewSummary({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-neutral-500">None</p>
+                <p className="text-sm text-secondary">None</p>
               )}
             </div>
           ))}
@@ -1306,9 +1297,9 @@ interface SummaryMetricProps {
 
 function SummaryMetric({ label, value }: SummaryMetricProps): React.ReactElement {
   return (
-    <div className="rounded-md border border-neutral-200 bg-white px-3 py-3">
-      <div className="text-xs uppercase tracking-wide text-neutral-500">{label}</div>
-      <div className="mt-2 text-lg font-semibold text-neutral-900">{value}</div>
+    <div className="rounded-md border border-default bg-surface px-3 py-3">
+      <div className="text-xs uppercase tracking-wide text-secondary">{label}</div>
+      <div className="mt-2 text-lg font-semibold text-primary">{value}</div>
     </div>
   );
 }
@@ -1338,14 +1329,14 @@ function FormEditor({
 }: FormEditorProps): React.ReactElement {
   if (!doc) {
     return (
-      <div className="px-4 py-8 text-sm text-neutral-500">
+      <div className="px-4 py-8 text-sm text-secondary">
         Select a scope entry with content to start editing.
       </div>
     );
   }
 
   return (
-    <div className="divide-y divide-neutral-200">
+    <div className="divide-y divide-subtle">
       <section className="px-4 py-4">
         <div className="grid gap-4 xl:grid-cols-3">
           <Field {...(versionError !== undefined ? { error: versionError } : {})} label="Version">
@@ -1407,7 +1398,7 @@ function FormEditor({
             label="Settings"
           >
             <textarea
-              className="min-h-44 rounded-md border border-neutral-300 bg-white px-3 py-2 font-mono text-sm text-neutral-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+              className="min-h-44 rounded-md border border-default bg-surface px-3 py-2 font-mono text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus"
               disabled={disabled}
               onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                 updateSettingsObject(event.target.value)
@@ -1422,7 +1413,7 @@ function FormEditor({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold">MCP servers</h3>
-            <p className="mt-1 text-sm text-neutral-500">
+            <p className="mt-1 text-sm text-secondary">
               Transport-aware fields for stdio, HTTP, and SSE.
             </p>
           </div>
@@ -1472,7 +1463,7 @@ function FormEditor({
               />
             ))
           ) : (
-            <p className="text-sm text-neutral-500">No servers in this scope.</p>
+            <p className="text-sm text-secondary">No servers in this scope.</p>
           )}
         </div>
       </section>
@@ -1569,11 +1560,11 @@ function ServerEditor({
 }: ServerEditorProps): React.ReactElement {
   if (entry === null) {
     return (
-      <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3">
+      <div className="rounded-md border border-default bg-subtle px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-medium text-neutral-900">{name}</div>
-            <div className="mt-1 text-sm text-neutral-500">Tombstoned in this scope.</div>
+            <div className="text-sm font-medium text-primary">{name}</div>
+            <div className="mt-1 text-sm text-secondary">Tombstoned in this scope.</div>
           </div>
           <div className="flex gap-2">
             <Button
@@ -1599,8 +1590,8 @@ function ServerEditor({
   const envPairs = recordToPairs(entry.env);
 
   return (
-    <div className="rounded-md border border-neutral-200 bg-neutral-50">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3">
+    <div className="rounded-md border border-default bg-subtle">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-4 py-3">
         <div className="grid gap-2 sm:grid-cols-[minmax(14rem,1fr)_10rem]">
           <Field label="Name">
             <Input
@@ -1630,7 +1621,7 @@ function ServerEditor({
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 text-sm text-neutral-700">
+          <div className="flex items-center gap-2 text-sm text-primary">
             <Switch
               checked={entry.enabled ?? true}
               disabled={disabled}
@@ -1673,7 +1664,7 @@ function ServerEditor({
         </Field>
       </div>
 
-      <div className="grid gap-4 border-t border-neutral-200 px-4 py-4 xl:grid-cols-2">
+      <div className="grid gap-4 border-t border-subtle px-4 py-4 xl:grid-cols-2">
         {transport === "stdio" ? (
           <>
             <Field label="Command">
@@ -1688,7 +1679,7 @@ function ServerEditor({
             </Field>
             <Field description="One argument per line." label="Args">
               <textarea
-                className="min-h-28 rounded-md border border-neutral-300 bg-white px-3 py-2 font-mono text-sm text-neutral-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-neutral-950"
+                className="min-h-28 rounded-md border border-default bg-surface px-3 py-2 font-mono text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus"
                 disabled={disabled}
                 onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                   onChange(name, { ...entry, args: splitLines(event.target.value) })
@@ -1724,7 +1715,7 @@ function ServerEditor({
         )}
       </div>
 
-      <div className="border-t border-neutral-200 px-4 py-4">
+      <div className="border-t border-subtle px-4 py-4">
         <Field description="Server-specific environment variables." label="Env">
           <KeyValueEditor
             addLabel="Add env"
@@ -2090,8 +2081,8 @@ function scopeSelectionToken(scope: ScopeListEntry | null): string | null {
 
 function sectionClassName(section: string, selectedSection: string | null): string {
   return cn(
-    "border-b border-neutral-200 px-4 py-4 last:border-b-0",
-    selectedSection === section && "bg-amber-50/50"
+    "border-b border-subtle px-4 py-4 last:border-b-0",
+    selectedSection === section && "bg-status-warning-soft"
   );
 }
 
