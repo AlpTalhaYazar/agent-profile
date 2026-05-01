@@ -58,6 +58,7 @@ const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
   "auth.setSecret": "auth.setSecret.ok",
   "auth.rotate": "auth.rotate.ok",
   "auth.remove": "auth.remove.ok",
+  "auth.update-meta": "auth.update-meta.ok",
   "auth.oauth.start": "auth.oauth.start.ok",
   "auth.oauth.refresh": "auth.oauth.refresh.ok",
   "auth.oauth.detect": "auth.oauth.detect.ok",

@@ -176,6 +176,20 @@ export const AuthProfileSpec = z
       .object({
         mode: z.enum(["apiKey", "bedrock", "vertex", "gateway", "oauth"]),
         secretRef: z.string().min(1),
+        /** OAuth-specific metadata. Present only when mode is "oauth". */
+        oauth: z
+          .object({
+            email: z.string().optional(),
+            orgName: z.string().optional(),
+            planType: z.string().optional(),
+            accessTokenExpiresAt: z.string().optional(),
+            refreshTokenRef: z
+              .string()
+              .regex(/^keyring:\/\//)
+              .optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     mcpSecretRefs: z.record(z.string(), z.string()).optional(),
@@ -227,6 +241,35 @@ export const ReqAuthRotate = z
     kind: z.literal("auth.rotate"),
     authId: z.string().min(1),
     anthropicSecretB64: z.string().min(1),
+  })
+  .strict();
+
+/**
+ * Update non-secret metadata on an existing auth profile.
+ *
+ * Only fields that do NOT touch the keychain are settable: `displayName` and
+ * the OAuth metadata block. To change the Anthropic secret, use `auth.rotate`;
+ * to add or replace a profile from scratch, use `auth.add`.
+ */
+export const ReqAuthUpdateMeta = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.update-meta"),
+    authId: z.string().min(1),
+    displayName: z.string().optional(),
+    oauth: z
+      .object({
+        email: z.string().optional(),
+        orgName: z.string().optional(),
+        planType: z.string().optional(),
+        accessTokenExpiresAt: z.string().optional(),
+        refreshTokenRef: z
+          .string()
+          .regex(/^keyring:\/\//)
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -451,6 +494,7 @@ export const Req = z.discriminatedUnion("kind", [
   ReqAuthSetSecret,
   ReqAuthRotate,
   ReqAuthRemove,
+  ReqAuthUpdateMeta,
   ReqAuthOAuthStart,
   ReqAuthOAuthRefresh,
   ReqAuthOAuthDetect,
@@ -498,6 +542,8 @@ export type ReqAuthSetSecretT = z.infer<typeof ReqAuthSetSecret>;
 export type ReqAuthRotateT = z.infer<typeof ReqAuthRotate>;
 /** Static type for `auth.remove` requests (write-side). */
 export type ReqAuthRemoveT = z.infer<typeof ReqAuthRemove>;
+/** Static type for `auth.update-meta` requests (write-side). */
+export type ReqAuthUpdateMetaT = z.infer<typeof ReqAuthUpdateMeta>;
 /** Static type for `auth.oauth.start` requests. */
 export type ReqAuthOAuthStartT = z.infer<typeof ReqAuthOAuthStart>;
 /** Static type for `auth.oauth.refresh` requests. */
@@ -557,6 +603,16 @@ export const RespAuthListOk = z
           displayName: z.string(),
           mode: z.string().min(1),
           secrets: z.array(z.string()),
+          oauth: z
+            .object({
+              email: z.string().optional(),
+              orgName: z.string().optional(),
+              planType: z.string().optional(),
+              accessTokenExpiresAt: z.string().optional(),
+              refreshTokenRef: z.string().optional(),
+            })
+            .strict()
+            .optional(),
         })
         .strict()
     ),
@@ -788,6 +844,11 @@ export const RespAuthRemoveOk = z
     kind: z.literal("auth.remove.ok"),
     failed: z.array(z.string()),
   })
+  .strict();
+
+/** Response to `auth.update-meta`. */
+export const RespAuthUpdateMetaOk = z
+  .object({ id: z.string().min(1), kind: z.literal("auth.update-meta.ok") })
   .strict();
 
 /** Response to `auth.oauth.start`. */
@@ -1089,6 +1150,7 @@ export const Resp = z.discriminatedUnion("kind", [
   RespAuthSetSecretOk,
   RespAuthRotateOk,
   RespAuthRemoveOk,
+  RespAuthUpdateMetaOk,
   RespAuthOAuthStartOk,
   RespAuthOAuthRefreshOk,
   RespAuthOAuthDetectOk,
@@ -1169,6 +1231,7 @@ export const Frame = z.discriminatedUnion("kind", [
   RespAuthSetSecretOk,
   RespAuthRotateOk,
   RespAuthRemoveOk,
+  RespAuthUpdateMetaOk,
   RespAuthOAuthStartOk,
   RespAuthOAuthRefreshOk,
   RespAuthOAuthDetectOk,
@@ -1219,6 +1282,8 @@ export type RespAuthSetSecretOkT = z.infer<typeof RespAuthSetSecretOk>;
 export type RespAuthRotateOkT = z.infer<typeof RespAuthRotateOk>;
 /** Static type for `auth.remove.ok` responses. */
 export type RespAuthRemoveOkT = z.infer<typeof RespAuthRemoveOk>;
+/** Static type for `auth.update-meta.ok` responses. */
+export type RespAuthUpdateMetaOkT = z.infer<typeof RespAuthUpdateMetaOk>;
 /** Static type for `auth.oauth.start.ok` responses. */
 export type RespAuthOAuthStartOkT = z.infer<typeof RespAuthOAuthStartOk>;
 /** Static type for `auth.oauth.refresh.ok` responses. */
