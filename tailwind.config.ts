@@ -21,11 +21,47 @@ const config: Config = {
         ],
         mono: ["JetBrains Mono", "SFMono-Regular", "Menlo", "monospace"],
       },
+      colors: {
+        border: "var(--border)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+        card: {
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
+        },
+        popover: {
+          DEFAULT: "var(--popover)",
+          foreground: "var(--popover-foreground)",
+        },
+        primary: {
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
+        },
+        secondary: {
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
+        },
+        muted: {
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
+        },
+        accent: {
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
+        },
+        destructive: {
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
+        },
+      },
       borderRadius: {
+        DEFAULT: "var(--radius)",
         xs: "var(--ap-radius-xs)",
-        sm: "var(--ap-radius-sm)",
-        md: "var(--ap-radius-md)",
-        lg: "var(--ap-radius-lg)",
+        sm: "calc(var(--radius) - 4px)",
+        md: "calc(var(--radius) - 2px)",
+        lg: "var(--radius)",
         xl: "var(--ap-radius-xl)",
         "2xl": "var(--ap-radius-2xl)",
       },

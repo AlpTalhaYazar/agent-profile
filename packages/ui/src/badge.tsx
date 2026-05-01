@@ -20,14 +20,35 @@ const badgeVariants = cva(
   }
 );
 
+type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+
+const badgeVariantTone: Record<BadgeVariant, VariantProps<typeof badgeVariants>["tone"]> = {
+  default: "info",
+  secondary: "neutral",
+  destructive: "danger",
+  outline: "neutral",
+};
+
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  variant?: BadgeVariant;
+}
 
 export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
-  ({ className, tone, ...props }, ref) => (
-    <span ref={ref} className={cn(badgeVariants({ tone, className }))} {...props} />
-  )
+  ({ className, tone, variant, ...props }, ref) => {
+    const resolvedTone = tone ?? (variant ? badgeVariantTone[variant] : undefined);
+    return (
+      <span
+        ref={ref}
+        className={cn(
+          badgeVariants({ tone: resolvedTone, className }),
+          variant === "outline" && "bg-transparent text-foreground"
+        )}
+        {...props}
+      />
+    );
+  }
 );
 Badge.displayName = "Badge";
 

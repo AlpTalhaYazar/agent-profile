@@ -16,12 +16,12 @@
 
   body {
     margin: 0;
-    background: var(--ap-color-bg-canvas);
-    color: var(--ap-color-text-primary);
+    @apply bg-background text-foreground;
   }
 
   * {
     box-sizing: border-box;
+    @apply border-border;
   }
 
   button,

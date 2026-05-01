@@ -62,6 +62,27 @@
   --ap-color-status-warning: #fbbf24;
   --ap-color-status-danger: #f87171;
 
+  /* ---- shadcn/ui compatibility aliases -------------------------------- */
+  --background: var(--ap-color-bg-canvas);
+  --foreground: var(--ap-color-text-primary);
+  --card: var(--ap-color-bg-surface);
+  --card-foreground: var(--ap-color-text-primary);
+  --popover: var(--ap-color-bg-elevated);
+  --popover-foreground: var(--ap-color-text-primary);
+  --primary: var(--ap-color-bg-accent-solid);
+  --primary-foreground: var(--ap-color-text-on-accent);
+  --secondary: var(--ap-color-bg-surface);
+  --secondary-foreground: var(--ap-color-text-primary);
+  --muted: var(--ap-color-bg-subtle);
+  --muted-foreground: var(--ap-color-text-secondary);
+  --accent: var(--ap-color-bg-accent-soft);
+  --accent-foreground: var(--ap-color-text-primary);
+  --destructive: var(--ap-color-status-danger);
+  --destructive-foreground: var(--ap-color-text-on-accent);
+  --border: var(--ap-color-border-default);
+  --input: var(--ap-color-border-default);
+  --ring: var(--ap-color-focus-ring);
+
   /* ---- Radius ---- */
   --ap-radius-none: 0px;
   --ap-radius-xs: 4px;
@@ -71,6 +92,7 @@
   --ap-radius-xl: 12px;
   --ap-radius-2xl: 16px;
   --ap-radius-full: 999px;
+  --radius: var(--ap-radius-lg);
 
   /* ---- Shadow (drama-light; border carries elevation in dark) ---- */
   --ap-shadow-none: none;
