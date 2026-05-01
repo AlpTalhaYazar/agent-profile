@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@agent-profile/ui";
 import * as React from "react";
+import type { SessionUpdatePayload } from "../../shared/bridge.js";
 
 interface SessionView {
   sessionId: string;
@@ -46,19 +47,6 @@ interface DriftView {
   scopesChanged: string[];
   oldHash: string;
   newHash: string;
-}
-
-interface SessionEventPayload {
-  sessionId: string;
-  event: "started" | "idle" | "exited" | "killed" | "drifted";
-  exitCode?: number;
-  ts: number;
-}
-
-interface SessionUpdatePayload {
-  kind: "event" | "connection";
-  event?: SessionEventPayload;
-  state?: "up" | "down";
 }
 
 function normalizeSessions(input: unknown): SessionView[] {

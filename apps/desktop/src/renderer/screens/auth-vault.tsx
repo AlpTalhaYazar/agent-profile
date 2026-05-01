@@ -38,14 +38,7 @@ import {
   TableRow,
 } from "@agent-profile/ui";
 import * as React from "react";
-
-interface OAuthMeta {
-  email?: string;
-  orgName?: string;
-  planType?: string;
-  accessTokenExpiresAt?: string;
-  refreshTokenRef?: string;
-}
+import type { AuthMode, OAuthMeta, SecretBackedAuthMode } from "../../shared/bridge.js";
 
 interface AuthProfileView {
   id: string;
@@ -84,10 +77,7 @@ function normalizeAuthList(input: unknown): AuthProfileView[] {
         ? e.secrets.filter((s): s is string => typeof s === "string")
         : [];
       const oauthRaw = (e as { oauth?: unknown }).oauth;
-      const oauth =
-        oauthRaw && typeof oauthRaw === "object"
-          ? (oauthRaw as OAuthMeta)
-          : undefined;
+      const oauth = oauthRaw && typeof oauthRaw === "object" ? (oauthRaw as OAuthMeta) : undefined;
       const view: AuthProfileView = { id, displayName, mode, secrets };
       if (oauth) view.oauth = oauth;
       return view;
@@ -175,7 +165,7 @@ export function AuthVaultScreen(): React.ReactElement {
             (p) =>
               p.mode === "oauth" &&
               !!p.oauth?.refreshTokenRef &&
-              p.oauth.refreshTokenRef.includes("anthropic-oauth-refresh"),
+              p.oauth.refreshTokenRef.includes("anthropic-oauth-refresh")
           );
           if (!alreadyAdopted) {
             const detectedView: AuthProfileView = {
@@ -694,13 +684,7 @@ function CollapsibleAdoptForm({
             />
           </Field>
           <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onCancel}
-              disabled={busy}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={busy}>
               Cancel
             </Button>
             <Button
@@ -735,7 +719,7 @@ interface AddProfileDialogProps {
   onSubmit: (spec: {
     id: string;
     displayName?: string;
-    anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth"; secretRef: string };
+    anthropic: { mode: SecretBackedAuthMode; secretRef: string };
   }) => Promise<void>;
 }
 
@@ -748,7 +732,7 @@ function AddProfileDialog({
 }: AddProfileDialogProps): React.ReactElement {
   const [localBusy, setLocalBusy] = React.useState(false);
   const [displayName, setDisplayName] = React.useState("");
-  const [mode, setMode] = React.useState<"apiKey" | "bedrock" | "vertex" | "gateway" | "oauth">("apiKey");
+  const [mode, setMode] = React.useState<AuthMode>("apiKey");
   const [secretRef, setSecretRef] = React.useState("");
 
   const derivedId = slugify(displayName);
@@ -769,7 +753,8 @@ function AddProfileDialog({
 
   const isOAuth = mode === "oauth";
   const effectiveBusy = busy || localBusy;
-  const canSubmit = displayName.trim().length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
+  const canSubmit =
+    displayName.trim().length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -793,7 +778,7 @@ function AddProfileDialog({
           <Field label="Auth mode">
             <Select
               value={mode}
-              onValueChange={(v) => setMode(v as "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth")}
+              onValueChange={(v) => setMode(v as AuthMode)}
               options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
             />
           </Field>
@@ -804,7 +789,12 @@ function AddProfileDialog({
           )}
         </div>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={effectiveBusy}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={effectiveBusy}
+          >
             Cancel
           </Button>
           <Button
@@ -817,7 +807,9 @@ function AddProfileDialog({
                 try {
                   const bridge = window.myclaude?.oauth;
                   if (!bridge) throw new Error("OAuth bridge unavailable");
-                  const opts: { profileId: string; displayName?: string } = { profileId: derivedId };
+                  const opts: { profileId: string; displayName?: string } = {
+                    profileId: derivedId,
+                  };
                   if (displayName) opts.displayName = displayName;
                   await bridge.start(opts);
                   onOpenChange(false);
@@ -832,7 +824,7 @@ function AddProfileDialog({
                 id: string;
                 displayName?: string;
                 anthropic: {
-                  mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
+                  mode: SecretBackedAuthMode;
                   secretRef: string;
                 };
               } = {
@@ -843,7 +835,13 @@ function AddProfileDialog({
               void onSubmit(spec);
             }}
           >
-            {effectiveBusy ? (isOAuth ? "Opening browser…" : "Saving…") : isOAuth ? "Sign in with Anthropic" : "Continue (collect key)"}
+            {effectiveBusy
+              ? isOAuth
+                ? "Opening browser…"
+                : "Saving…"
+              : isOAuth
+                ? "Sign in with Anthropic"
+                : "Continue (collect key)"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -880,7 +878,9 @@ function SetSecretDialog({
 
   const canSubmit = name.length > 0 && value.length > 0 && !busy;
   const title =
-    mode === "rotate" ? `Rotate Anthropic key for "${profileId}"` : `Add MCP secret to "${profileId}"`;
+    mode === "rotate"
+      ? `Rotate Anthropic key for "${profileId}"`
+      : `Add MCP secret to "${profileId}"`;
   const description =
     mode === "rotate"
       ? "Replaces the stored Anthropic key and revokes every live capability bound to this profile."
@@ -967,11 +967,7 @@ function EditSecretDialog({
           </DialogDescription>
         </DialogHeader>
         <Field label="Secret value">
-          <PasswordInput
-            value={value}
-            onChange={(ev) => setValue(ev.target.value)}
-            autoFocus
-          />
+          <PasswordInput value={value} onChange={(ev) => setValue(ev.target.value)} autoFocus />
         </Field>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
@@ -1024,8 +1020,8 @@ function RenameProfileDialog({
         <DialogHeader>
           <DialogTitle>Rename profile</DialogTitle>
           <DialogDescription>
-            Updates the human-readable label for <span className="font-mono">{profileId}</span>.
-            The profile id and stored secrets are unchanged.
+            Updates the human-readable label for <span className="font-mono">{profileId}</span>. The
+            profile id and stored secrets are unchanged.
           </DialogDescription>
         </DialogHeader>
         <Field label="Display name">
