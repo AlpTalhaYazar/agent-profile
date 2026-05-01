@@ -55,6 +55,22 @@ const config: Config = {
         ".bg-overlay": { backgroundColor: "var(--ap-color-bg-overlay)" },
         ".bg-accent-soft": { backgroundColor: "var(--ap-color-bg-accent-soft)" },
         ".bg-accent-solid": { backgroundColor: "var(--ap-color-bg-accent-solid)" },
+        ".bg-status-success": { backgroundColor: "var(--ap-color-status-success)" },
+        ".bg-status-warning": { backgroundColor: "var(--ap-color-status-warning)" },
+        ".bg-status-danger": { backgroundColor: "var(--ap-color-status-danger)" },
+        ".bg-status-info": { backgroundColor: "var(--ap-color-bg-accent-solid)" },
+        ".bg-status-success-soft": {
+          backgroundColor: "color-mix(in srgb, var(--ap-color-status-success) 14%, transparent)",
+        },
+        ".bg-status-warning-soft": {
+          backgroundColor: "color-mix(in srgb, var(--ap-color-status-warning) 14%, transparent)",
+        },
+        ".bg-status-danger-soft": {
+          backgroundColor: "color-mix(in srgb, var(--ap-color-status-danger) 14%, transparent)",
+        },
+        ".bg-status-info-soft": {
+          backgroundColor: "color-mix(in srgb, var(--ap-color-bg-accent-solid) 14%, transparent)",
+        },
         ".text-primary": { color: "var(--ap-color-text-primary)" },
         ".text-secondary": { color: "var(--ap-color-text-secondary)" },
         ".text-tertiary": { color: "var(--ap-color-text-tertiary)" },
@@ -62,9 +78,15 @@ const config: Config = {
         ".text-status-success": { color: "var(--ap-color-status-success)" },
         ".text-status-warning": { color: "var(--ap-color-status-warning)" },
         ".text-status-danger": { color: "var(--ap-color-status-danger)" },
+        ".text-status-info": { color: "var(--ap-color-bg-accent-solid)" },
         ".border-default": { borderColor: "var(--ap-color-border-default)" },
         ".border-subtle": { borderColor: "var(--ap-color-border-subtle)" },
         ".border-strong": { borderColor: "var(--ap-color-border-strong)" },
+        ".border-accent-solid": { borderColor: "var(--ap-color-bg-accent-solid)" },
+        ".border-status-success": { borderColor: "var(--ap-color-status-success)" },
+        ".border-status-warning": { borderColor: "var(--ap-color-status-warning)" },
+        ".border-status-danger": { borderColor: "var(--ap-color-status-danger)" },
+        ".border-status-info": { borderColor: "var(--ap-color-bg-accent-solid)" },
         ".ring-focus": { "--tw-ring-color": "var(--ap-color-focus-ring)" },
       });
     }),
