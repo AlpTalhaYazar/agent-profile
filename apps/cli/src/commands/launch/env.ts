@@ -1,7 +1,7 @@
 import type { EffectiveConfig } from "@agent-profile/core";
 
 /** Auth modes that affect Claude Code launch-time provider environment. */
-export type LaunchAuthMode = "apiKey" | "bedrock" | "vertex" | "gateway";
+export type LaunchAuthMode = "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
 
 /** Runtime artifact paths needed by the Claude Code process. */
 export interface ClaudeLaunchRuntimePaths {

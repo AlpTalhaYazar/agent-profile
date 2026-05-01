@@ -151,12 +151,15 @@ describe("launch env helpers", () => {
     expect(env.CLAUDE_CODE_USE_VERTEX).toBe("1");
   });
 
-  it.each(["apiKey", "gateway"] as const)("sets no provider flag for %s auth", (authMode) => {
-    const env = buildClaudeLaunchEnv(launchEnvInput(authMode));
+  it.each(["apiKey", "gateway", "oauth"] as const)(
+    "sets no provider flag for %s auth",
+    (authMode) => {
+      const env = buildClaudeLaunchEnv(launchEnvInput(authMode));
 
-    expect(env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
-    expect(env.CLAUDE_CODE_USE_VERTEX).toBeUndefined();
-  });
+      expect(env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
+      expect(env.CLAUDE_CODE_USE_VERTEX).toBeUndefined();
+    }
+  );
 });
 
 describe("spawnClaude", () => {

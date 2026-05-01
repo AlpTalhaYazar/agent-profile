@@ -6,7 +6,7 @@ import type {
 } from "@agent-profile/persona-deployer";
 
 /** Supported Anthropic auth modes carried by auth profiles. */
-export type AuthMode = "apiKey" | "bedrock" | "vertex" | "gateway";
+export type AuthMode = "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
 
 /**
  * Runtime file paths produced by `emitSessionArtifacts`.
