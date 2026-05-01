@@ -11,6 +11,10 @@ const fromWebContents = vi.fn(() => undefined);
 const connectToSocket = vi.fn();
 const readCookie = vi.fn();
 const defaultSocketPath = vi.fn(() => "/tmp/myclaude.sock");
+const runOAuthFlow = vi.fn();
+const detectClaudeCodeCredentials = vi.fn();
+const fetchClientMetadata = vi.fn();
+const refreshAccessToken = vi.fn();
 
 vi.mock("electron", () => {
   return {
@@ -41,6 +45,19 @@ vi.mock("@agent-profile/ipc-protocol", () => ({
   defaultSocketPath,
 }));
 
+vi.mock("../src/main/oauth/flow.js", () => ({
+  runOAuthFlow,
+}));
+
+vi.mock("../src/main/oauth/detect.js", () => ({
+  detectClaudeCodeCredentials,
+}));
+
+vi.mock("../src/main/oauth/token-client.js", () => ({
+  fetchClientMetadata,
+  refreshAccessToken,
+}));
+
 describe("main renderer IPC bridge", () => {
   beforeEach(() => {
     handlerMap.clear();
@@ -50,6 +67,10 @@ describe("main renderer IPC bridge", () => {
     connectToSocket.mockReset();
     readCookie.mockReset();
     defaultSocketPath.mockClear();
+    runOAuthFlow.mockReset();
+    detectClaudeCodeCredentials.mockReset();
+    fetchClientMetadata.mockReset();
+    refreshAccessToken.mockReset();
     vi.resetModules();
   });
 
@@ -71,7 +92,7 @@ describe("main renderer IPC bridge", () => {
     connectToSocket.mockResolvedValue({ request, close });
     readCookie.mockResolvedValue("cookie-1");
 
-    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
     registerRendererIpcHandlers({
       expectedFrameUrl: "file:///trusted/index.html",
       myClaudeHome: "/Users/test/.myclaude",
@@ -143,7 +164,7 @@ describe("main renderer IPC bridge", () => {
     connectToSocket.mockResolvedValue({ request, close });
     readCookie.mockResolvedValue("cookie-1");
 
-    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
     registerRendererIpcHandlers({
       expectedFrameUrl: "file:///trusted/index.html",
       myClaudeHome: "/Users/test/.myclaude",
@@ -183,7 +204,7 @@ describe("main renderer IPC bridge", () => {
   });
 
   it("rejects an invalid persona.render payload before opening a daemon connection", async () => {
-    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
     registerRendererIpcHandlers({
       expectedFrameUrl: "file:///trusted/index.html",
       myClaudeHome: "/Users/test/.myclaude",
@@ -202,7 +223,7 @@ describe("main renderer IPC bridge", () => {
   });
 
   it("rejects invalid renderer payloads before they reach the daemon", async () => {
-    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
     registerRendererIpcHandlers({
       expectedFrameUrl: "file:///trusted/index.html",
       myClaudeHome: "/Users/test/.myclaude",
@@ -223,7 +244,7 @@ describe("main renderer IPC bridge", () => {
       filePaths: ["/picked/project"],
     });
 
-    const { registerRendererIpcHandlers } = await import("../src/main/index.js");
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
     registerRendererIpcHandlers({
       expectedFrameUrl: "file:///trusted/index.html",
       myClaudeHome: "/Users/test/.myclaude",
@@ -243,8 +264,197 @@ describe("main renderer IPC bridge", () => {
     await expect(pickDirectory(event, undefined)).resolves.toBe("/picked/project");
   });
 
+  it("persists oauth.start once and stores refresh token without replacing the access-token ref", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({ id: "c-1", kind: "auth.add.ok" });
+    const store = { set: vi.fn(), get: vi.fn() };
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+    runOAuthFlow.mockResolvedValue({
+      profileId: "web",
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      accessTokenExpiresAt: "2026-05-01T12:00:00.000Z",
+      email: "dev@example.com",
+      orgName: "Example",
+      planType: "max",
+    });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      store: store as never,
+    });
+
+    const oauthStart = handlerMap.get("auth.oauth.start");
+    if (!oauthStart) throw new Error("missing auth.oauth.start handler");
+
+    await expect(
+      oauthStart(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { profileId: "web", displayName: "Web" }
+      )
+    ).resolves.toEqual({
+      profileId: "web",
+      oauth: {
+        email: "dev@example.com",
+        orgName: "Example",
+        planType: "max",
+      },
+    });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith("auth.add", {
+      spec: {
+        id: "web",
+        displayName: "Web",
+        anthropic: {
+          mode: "oauth",
+          secretRef: "keyring://anthropic/web",
+          oauth: {
+            email: "dev@example.com",
+            orgName: "Example",
+            planType: "max",
+            accessTokenExpiresAt: "2026-05-01T12:00:00.000Z",
+            refreshTokenRef: "keyring://anthropic-oauth-refresh/web",
+          },
+        },
+      },
+      anthropicSecretB64: Buffer.from("access-token", "utf8").toString("base64"),
+      force: true,
+    });
+    expect(store.set).toHaveBeenCalledWith(
+      "agent-profile.anthropic-oauth-refresh.web",
+      "refresh-token"
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts detected OAuth credentials using the access-token ref as the profile secret", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({ id: "c-1", kind: "auth.add.ok" });
+    const store = { set: vi.fn(), get: vi.fn() };
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+    detectClaudeCodeCredentials.mockResolvedValue({
+      detected: true,
+      accessToken: "detected-access",
+      refreshToken: "detected-refresh",
+      accessTokenExpiresAt: "2026-05-01T12:00:00.000Z",
+      planType: "pro",
+    });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      store: store as never,
+    });
+
+    const adopt = handlerMap.get("auth.oauth.adopt");
+    if (!adopt) throw new Error("missing auth.oauth.adopt handler");
+
+    await expect(
+      adopt(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { profileId: "claude-code", displayName: "Claude Code" }
+      )
+    ).resolves.toEqual({ profileId: "claude-code" });
+
+    expect(request).toHaveBeenCalledWith(
+      "auth.add",
+      expect.objectContaining({
+        spec: expect.objectContaining({
+          id: "claude-code",
+          anthropic: expect.objectContaining({
+            secretRef: "keyring://anthropic/claude-code",
+            oauth: expect.objectContaining({
+              refreshTokenRef: "keyring://anthropic-oauth-refresh/claude-code",
+            }),
+          }),
+        }),
+        anthropicSecretB64: Buffer.from("detected-access", "utf8").toString("base64"),
+        force: true,
+      })
+    );
+    expect(store.set).toHaveBeenCalledWith(
+      "agent-profile.anthropic-oauth-refresh.claude-code",
+      "detected-refresh"
+    );
+  });
+
+  it("refreshes OAuth using the refresh-token ref and daemon rotate/update-meta calls", async () => {
+    const close = vi.fn();
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "c-1",
+        kind: "auth.list.ok",
+        profiles: [
+          {
+            id: "web",
+            displayName: "Web",
+            mode: "oauth",
+            secrets: [],
+            oauth: { refreshTokenRef: "keyring://anthropic-oauth-refresh/web" },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ id: "c-2", kind: "auth.rotate.ok" })
+      .mockResolvedValueOnce({ id: "c-3", kind: "auth.update-meta.ok" });
+    const store = { get: vi.fn().mockResolvedValue("old-refresh"), set: vi.fn() };
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+    fetchClientMetadata.mockResolvedValue({ client_id: "client-id" });
+    refreshAccessToken.mockResolvedValue({
+      access_token: "new-access",
+      refresh_token: "new-refresh",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      store: store as never,
+    });
+
+    const refresh = handlerMap.get("auth.oauth.refresh");
+    if (!refresh) throw new Error("missing auth.oauth.refresh handler");
+
+    await expect(
+      refresh({ senderFrame: { url: "file:///trusted/index.html" }, sender: {} }, { authId: "web" })
+    ).resolves.toEqual({
+      refreshed: true,
+      accessTokenExpiresAt: expect.any(String),
+    });
+
+    expect(store.get).toHaveBeenCalledWith("agent-profile.anthropic-oauth-refresh.web");
+    expect(fetchClientMetadata).toHaveBeenCalledTimes(1);
+    expect(refreshAccessToken).toHaveBeenCalledWith("old-refresh", "client-id");
+    expect(request).toHaveBeenNthCalledWith(1, "auth.list", { includeRefs: true });
+    expect(request).toHaveBeenNthCalledWith(2, "auth.rotate", {
+      authId: "web",
+      anthropicSecretB64: Buffer.from("new-access", "utf8").toString("base64"),
+    });
+    expect(request).toHaveBeenNthCalledWith(3, "auth.update-meta", {
+      authId: "web",
+      oauth: {
+        accessTokenExpiresAt: expect.any(String),
+        refreshTokenRef: "keyring://anthropic-oauth-refresh/web",
+      },
+    });
+    expect(store.set).toHaveBeenCalledWith(
+      "agent-profile.anthropic-oauth-refresh.web",
+      "new-refresh"
+    );
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("resolves the nested renderer HTML path in dev and packaged modes", async () => {
-    const { rendererEntryUrl } = await import("../src/main/index.js");
+    const { rendererEntryUrl } = await import("../src/main/window/entry.js");
 
     expect(rendererEntryUrl({ devServerUrl: "http://localhost:5173" })).toBe(
       "http://localhost:5173/src/renderer/index.html"
