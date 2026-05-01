@@ -71,11 +71,11 @@ export async function runOAuthFlow(args: {
     ).toISOString();
 
     // 10. Store tokens in keychain
-    const secretKey = `agent-profile.anthropic/${profileId}`;
+    const secretKey = `anthropic/${profileId}`;
     await storeSecret(secretKey, tokens.access_token);
 
     if (tokens.refresh_token) {
-      const refreshKey = `agent-profile.anthropic-oauth-refresh/${profileId}`;
+      const refreshKey = `anthropic-oauth-refresh/${profileId}`;
       await storeSecret(refreshKey, tokens.refresh_token);
     }
 

@@ -149,6 +149,23 @@ const AuthRemovePayload = z
   })
   .strict();
 
+const AuthUpdateMetaPayload = z
+  .object({
+    profileId: z.string().min(1),
+    displayName: z.string().optional(),
+    oauth: z
+      .object({
+        email: z.string().optional(),
+        orgName: z.string().optional(),
+        planType: z.string().optional(),
+        accessTokenExpiresAt: z.string().optional(),
+        refreshTokenRef: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 const AuthOAuthStartPayload = z
   .object({
     profileId: z.string().min(1),
@@ -163,6 +180,13 @@ const AuthOAuthRefreshPayload = z
   .strict();
 
 const AuthOAuthDetectPayload = z.undefined();
+
+const AuthOAuthAdoptPayload = z
+  .object({
+    profileId: z.string().min(1),
+    displayName: z.string().optional(),
+  })
+  .strict();
 
 // ─── Session Monitor payloads (Phase 2 milestone 5) ──────────────────────────
 
@@ -397,6 +421,18 @@ export function registerRendererIpcHandlers(opts: {
     });
   });
 
+  ipcMain.handle("auth.updateMeta", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.updateMeta");
+    const parsed = parseRendererPayload(AuthUpdateMetaPayload, payload, "auth.updateMeta");
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const body: Record<string, unknown> = { authId: parsed.profileId };
+      if (parsed.displayName !== undefined) body.displayName = parsed.displayName;
+      if (parsed.oauth !== undefined) body.oauth = parsed.oauth;
+      await client.request("auth.update-meta", body);
+      return { ok: true };
+    });
+  });
+
   ipcMain.handle("auth.rotate", async (event, payload) => {
     assertValidSenderFrame(event, expectedFrameUrl, "auth.rotate");
     const parsed = parseRendererPayload(AuthRotatePayload, payload, "auth.rotate");
@@ -467,7 +503,7 @@ export function registerRendererIpcHandlers(opts: {
                   planType: result.planType,
                   accessTokenExpiresAt: result.accessTokenExpiresAt,
                   ...(result.refreshToken
-                    ? { refreshTokenRef: `keyring://agent-profile.anthropic-oauth-refresh/${parsed.profileId}` }
+                    ? { refreshTokenRef: `keyring://anthropic-oauth-refresh/${parsed.profileId}` }
                     : {}),
                 },
               },
@@ -517,6 +553,57 @@ export function registerRendererIpcHandlers(opts: {
 
     const { detectClaudeCodeCredentials } = await import("./oauth/detect.js");
     return detectClaudeCodeCredentials();
+  });
+
+  ipcMain.handle("auth.oauth.adopt", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.oauth.adopt");
+    const parsed = parseRendererPayload(AuthOAuthAdoptPayload, payload, "auth.oauth.adopt");
+
+    const { detectClaudeCodeCredentials } = await import("./oauth/detect.js");
+    const detected = await detectClaudeCodeCredentials();
+    if (!detected.detected || !detected.accessToken) {
+      throw new Error("No Claude Code credentials detected on this machine");
+    }
+
+    const profileId = parsed.profileId;
+    const displayName = parsed.displayName;
+    const accessToken = detected.accessToken;
+    const refreshToken = detected.refreshToken;
+
+    await withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const writeSecret = async (keyringKey: string, value: string): Promise<void> => {
+        const b64 = Buffer.from(value).toString("base64");
+        const oauthMeta: Record<string, string> = {};
+        if (detected.email) oauthMeta.email = detected.email;
+        if (detected.orgName) oauthMeta.orgName = detected.orgName;
+        if (detected.planType) oauthMeta.planType = detected.planType;
+        if (detected.accessTokenExpiresAt)
+          oauthMeta.accessTokenExpiresAt = detected.accessTokenExpiresAt;
+        if (detected.refreshToken)
+          oauthMeta.refreshTokenRef = `keyring://anthropic-oauth-refresh/${profileId}`;
+
+        await client.request("auth.add", {
+          spec: {
+            id: profileId,
+            ...(displayName ? { displayName } : {}),
+            anthropic: {
+              mode: "oauth",
+              secretRef: `keyring://${keyringKey}`,
+              oauth: oauthMeta,
+            },
+          },
+          anthropicSecretB64: b64,
+          force: true,
+        });
+      };
+
+      await writeSecret(`anthropic/${profileId}`, accessToken);
+      if (refreshToken) {
+        await writeSecret(`anthropic-oauth-refresh/${profileId}`, refreshToken);
+      }
+    });
+
+    return { profileId };
   });
 
   // ─── Session Monitor (Phase 2 milestone 5) ─────────────────────────────────

@@ -72,6 +72,18 @@ contextBridge.exposeInMainWorld("myclaude", {
     /** Remove an entire auth profile. Main native confirm guards the path. */
     remove: (opts: { profileId: string; yes?: boolean }): Promise<unknown> =>
       ipcRenderer.invoke("auth.remove", opts),
+    /** Update non-secret metadata (display name, oauth meta) on an existing profile. */
+    updateMeta: (opts: {
+      profileId: string;
+      displayName?: string;
+      oauth?: {
+        email?: string;
+        orgName?: string;
+        planType?: string;
+        accessTokenExpiresAt?: string;
+        refreshTokenRef?: string;
+      };
+    }): Promise<unknown> => ipcRenderer.invoke("auth.updateMeta", opts),
   },
   oauth: {
     start: (opts: { profileId: string; displayName?: string }): Promise<unknown> =>
@@ -79,6 +91,9 @@ contextBridge.exposeInMainWorld("myclaude", {
     refresh: (opts: { authId: string }): Promise<unknown> =>
       ipcRenderer.invoke("auth.oauth.refresh", opts),
     detect: (): Promise<unknown> => ipcRenderer.invoke("auth.oauth.detect"),
+    /** Import detected Claude Code keychain credentials into the vault. */
+    adopt: (opts: { profileId: string; displayName?: string }): Promise<unknown> =>
+      ipcRenderer.invoke("auth.oauth.adopt", opts),
   },
   profile: {
     list: (opts: { cwd: string; roleFilter?: string }): Promise<unknown> =>
