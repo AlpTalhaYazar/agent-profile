@@ -50,6 +50,18 @@ export interface AuthListEntry {
    * Omitted otherwise.
    */
   anthropicRef?: string;
+  /**
+   * For `oauth` profiles, the public OAuth metadata stored alongside the
+   * profile (no tokens, only the descriptive fields). Omitted for non-oauth
+   * profiles or when no metadata was recorded.
+   */
+  oauth?: {
+    email?: string;
+    orgName?: string;
+    planType?: string;
+    accessTokenExpiresAt?: string;
+    refreshTokenRef?: string;
+  };
 }
 
 /**
@@ -84,6 +96,16 @@ export function authListService(input: AuthListInput = {}): AuthListResult {
     if (includeRefs) {
       entry.refs = { ...profile.mcpSecretRefs };
       entry.anthropicRef = profile.anthropic.secretRef;
+    }
+    if (profile.anthropic.oauth) {
+      const o = profile.anthropic.oauth;
+      const meta: NonNullable<AuthListEntry["oauth"]> = {};
+      if (o.email !== undefined) meta.email = o.email;
+      if (o.orgName !== undefined) meta.orgName = o.orgName;
+      if (o.planType !== undefined) meta.planType = o.planType;
+      if (o.accessTokenExpiresAt !== undefined) meta.accessTokenExpiresAt = o.accessTokenExpiresAt;
+      if (o.refreshTokenRef !== undefined) meta.refreshTokenRef = o.refreshTokenRef;
+      entry.oauth = meta;
     }
     profiles.push(entry);
   }
