@@ -8,6 +8,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./messages": {
+      "types": "./dist/messages.d.ts",
+      "import": "./dist/messages.js"
+    },
+    "./messages/system": {
+      "types": "./dist/messages/system.d.ts",
+      "import": "./dist/messages/system.js"
+    },
+    "./messages/auth": {
+      "types": "./dist/messages/auth.d.ts",
+      "import": "./dist/messages/auth.js"
+    },
+    "./messages/profile": {
+      "types": "./dist/messages/profile.d.ts",
+      "import": "./dist/messages/profile.js"
+    },
+    "./messages/sessions": {
+      "types": "./dist/messages/sessions.d.ts",
+      "import": "./dist/messages/sessions.js"
+    },
+    "./messages/secrets": {
+      "types": "./dist/messages/secrets.d.ts",
+      "import": "./dist/messages/secrets.js"
+    },
+    "./messages/persona": {
+      "types": "./dist/messages/persona.d.ts",
+      "import": "./dist/messages/persona.js"
     }
   },
   "scripts": {
