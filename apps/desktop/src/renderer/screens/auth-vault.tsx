@@ -95,6 +95,30 @@ export function AuthVaultScreen(): React.ReactElement {
     try {
       const list = await bridge.list();
       const next = normalizeAuthList(list);
+
+      // Detect existing Claude Code OAuth credentials
+      try {
+        const detectResult = await window.myclaude?.oauth?.detect();
+        if (detectResult && (detectResult as { detected?: boolean }).detected) {
+          const d = detectResult as {
+            detected: boolean;
+            planType?: string;
+            accessTokenExpiresAt?: string;
+          };
+          const alreadyAdded = next.some((p) => p.mode === "oauth");
+          if (!alreadyAdded) {
+            next.push({
+              id: "claude-code-detected",
+              displayName: `Claude Code Login${d.planType ? ` (${d.planType})` : ""}`,
+              mode: "oauth",
+              secrets: [],
+            });
+          }
+        }
+      } catch {
+        // Detection is best-effort, don't block the list
+      }
+
       setProfiles(next);
       if (next.length > 0 && !next.some((p) => p.id === selectedId)) {
         setSelectedId(next[0]?.id ?? null);
@@ -170,6 +194,7 @@ export function AuthVaultScreen(): React.ReactElement {
           <ul className="divide-y divide-subtle">
             {profiles.map((p) => {
               const active = p.id === selectedId;
+              const isDetected = p.id === "claude-code-detected";
               return (
                 <li key={p.id}>
                   <button
@@ -179,7 +204,12 @@ export function AuthVaultScreen(): React.ReactElement {
                       active ? "bg-elevated" : ""
                     }`}
                   >
-                    <span className="text-sm font-medium text-primary">{p.id}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-primary">{p.id}</span>
+                      {isDetected ? (
+                        <Badge tone="info">detected</Badge>
+                      ) : null}
+                    </div>
                     <span className="text-xs text-secondary">
                       {p.displayName || "(no display name)"} · {p.mode} · {p.secrets.length} secret
                       {p.secrets.length === 1 ? "" : "s"}

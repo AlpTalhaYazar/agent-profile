@@ -516,11 +516,7 @@ export function registerRendererIpcHandlers(opts: {
     parseRendererPayload(AuthOAuthDetectPayload, payload, "auth.oauth.detect");
 
     const { detectClaudeCodeCredentials } = await import("./oauth/detect.js");
-    const os = await import("node:os");
-    return detectClaudeCodeCredentials({
-      getSecret: async () => null, // Keychain access via daemon in production
-      getUsername: () => os.userInfo().username,
-    });
+    return detectClaudeCodeCredentials();
   });
 
   // ─── Session Monitor (Phase 2 milestone 5) ─────────────────────────────────

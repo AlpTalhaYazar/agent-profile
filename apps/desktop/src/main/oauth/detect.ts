@@ -1,30 +1,60 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { platform } from "node:os";
+import * as os from "node:os";
 import type { DetectedCredentials } from "./types.js";
+
+const execFileAsync = promisify(execFile);
 
 const CLAUDE_CODE_SERVICE = "Claude Code-credentials";
 
-export async function detectClaudeCodeCredentials(args: {
-  getSecret: (service: string, account: string) => Promise<string | null>;
-  getUsername: () => string;
-}): Promise<DetectedCredentials> {
-  const { getSecret, getUsername } = args;
+interface ClaudeCodeOAuthPayload {
+  claudeAiOauth?: {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    scopes?: string[];
+    subscriptionType?: string;
+    rateLimitTier?: string;
+  };
+}
 
+async function readKeychainPassword(service: string, account: string): Promise<string | null> {
+  if (platform() !== "darwin") return null;
   try {
-    const username = getUsername();
-    const raw = await getSecret(CLAUDE_CODE_SERVICE, username);
+    const { stdout } = await execFileAsync("/usr/bin/security", [
+      "find-generic-password",
+      "-s",
+      service,
+      "-a",
+      account,
+      "-w",
+    ]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function detectClaudeCodeCredentials(): Promise<DetectedCredentials> {
+  try {
+    const username = os.userInfo().username;
+    const raw = await readKeychainPassword(CLAUDE_CODE_SERVICE, username);
     if (!raw) return { detected: false };
 
-    const data = JSON.parse(raw);
+    const data: ClaudeCodeOAuthPayload = JSON.parse(raw);
+    const oauth = data.claudeAiOauth;
+    if (!oauth?.accessToken) return { detected: false };
 
-    const hasAccessToken = typeof data.access_token === "string" && data.access_token.length > 0;
-    if (!hasAccessToken) return { detected: false };
+    const accessTokenExpiresAt = oauth.expiresAt
+      ? new Date(oauth.expiresAt).toISOString()
+      : undefined;
 
-    return {
-      detected: true,
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token ?? undefined,
-      email: data.email ?? undefined,
-      accessTokenExpiresAt: data.expires_at ?? undefined,
-    };
+    const result: DetectedCredentials = { detected: true, accessToken: oauth.accessToken };
+    if (oauth.refreshToken) result.refreshToken = oauth.refreshToken;
+    if (accessTokenExpiresAt) result.accessTokenExpiresAt = accessTokenExpiresAt;
+    if (oauth.subscriptionType) result.planType = oauth.subscriptionType;
+    return result;
   } catch {
     return { detected: false };
   }
