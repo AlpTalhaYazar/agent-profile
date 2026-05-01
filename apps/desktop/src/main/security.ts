@@ -96,6 +96,8 @@ export function createSecureWindow(
   return new Ctor({
     width: opts.width ?? 1280,
     height: opts.height ?? 800,
+    minWidth: 720,
+    minHeight: 500,
     show: opts.show ?? false,
     center: true,
     titleBarStyle: "hiddenInset",
