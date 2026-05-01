@@ -37,41 +37,11 @@ import {
   type RespErrorT,
   type RespT,
 } from "./messages.js";
-
-/** Push channels a connection can subscribe to. */
-type SubscriptionChannel = "sessions";
-
-/** Mapping from request kind to its `*.ok` response kind. */
-const RESPONSE_KIND: Record<ReqT["kind"], RespT["kind"]> = {
-  hello: "hello.ok",
-  "auth.list": "auth.list.ok",
-  "auth.get-secret-ref": "auth.get-secret-ref.ok",
-  "profile.show": "profile.show.ok",
-  "profile.list": "profile.list.ok",
-  "profile.validate": "profile.validate.ok",
-  "profile.preview": "profile.preview.ok",
-  "sessions.list": "sessions.list.ok",
-  "daemon.status": "daemon.status.ok",
-  "daemon.stop": "daemon.stop.ok",
-  "profile.save": "profile.save.ok",
-  "auth.add": "auth.add.ok",
-  "auth.setSecret": "auth.setSecret.ok",
-  "auth.rotate": "auth.rotate.ok",
-  "auth.remove": "auth.remove.ok",
-  "auth.update-meta": "auth.update-meta.ok",
-  "auth.oauth.start": "auth.oauth.start.ok",
-  "auth.oauth.refresh": "auth.oauth.refresh.ok",
-  "auth.oauth.detect": "auth.oauth.detect.ok",
-  "session.start": "session.start.ok",
-  "session.end": "session.end.ok",
-  "secret.get": "secret.get.ok",
-  "secrets.migrate": "secrets.migrate.ok",
-  "sessions.kill": "sessions.kill.ok",
-  "sessions.relaunch": "sessions.relaunch.ok",
-  "sessions.drift": "sessions.drift.ok",
-  "sessions.subscribe": "sessions.subscribe.ok",
-  "persona.render": "persona.render.ok",
-};
+import {
+  type SubscriptionChannel,
+  eventChannelByKind,
+  responseKindByRequest,
+} from "./messages/registry.js";
 
 /**
  * Context passed to a handler.
@@ -384,13 +354,7 @@ export class DaemonServer {
 
 /** Map an event frame to the subscriber channel it should reach. */
 function channelForEvent(evt: EvtT): SubscriptionChannel {
-  // The kind discriminator is exhaustive over `EvtT`; a future channel adds
-  // a branch here. Today every event lands on `"sessions"`.
-  if (evt.kind === "sessions.event") return "sessions";
-  // Defensive fallback: TypeScript will flag this branch if a new event kind
-  // is added without updating the routing table.
-  const exhaustive: never = evt.kind;
-  throw new Error(`ipc-protocol: no subscriber channel for event kind ${String(exhaustive)}`);
+  return eventChannelByKind[evt.kind];
 }
 
 /**
@@ -521,7 +485,7 @@ class ConnectionState {
     this.parent.beginHandler();
     try {
       const body = await handler(req, { socket: this.socket });
-      const respKind = RESPONSE_KIND[req.kind];
+      const respKind = responseKindByRequest[req.kind];
       this.sendOk(respKind, req.id, body);
     } catch (err) {
       if (err instanceof IpcError) {
