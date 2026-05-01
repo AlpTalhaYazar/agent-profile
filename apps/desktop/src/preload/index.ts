@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld("myclaude", {
       spec: {
         id: string;
         displayName?: string;
-        anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway"; secretRef: string };
+        anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth"; secretRef: string };
         mcpSecretRefs?: Record<string, string>;
       };
       force?: boolean;
@@ -72,6 +72,13 @@ contextBridge.exposeInMainWorld("myclaude", {
     /** Remove an entire auth profile. Main native confirm guards the path. */
     remove: (opts: { profileId: string; yes?: boolean }): Promise<unknown> =>
       ipcRenderer.invoke("auth.remove", opts),
+  },
+  oauth: {
+    start: (opts: { profileId: string; displayName?: string }): Promise<unknown> =>
+      ipcRenderer.invoke("auth.oauth.start", opts),
+    refresh: (opts: { authId: string }): Promise<unknown> =>
+      ipcRenderer.invoke("auth.oauth.refresh", opts),
+    detect: (): Promise<unknown> => ipcRenderer.invoke("auth.oauth.detect"),
   },
   profile: {
     list: (opts: { cwd: string; roleFilter?: string }): Promise<unknown> =>

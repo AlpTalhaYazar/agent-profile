@@ -54,6 +54,7 @@ const AUTH_MODES = [
   { value: "bedrock", label: "bedrock" },
   { value: "vertex", label: "vertex" },
   { value: "gateway", label: "gateway" },
+  { value: "oauth", label: "OAuth (Anthropic Login)" },
 ] as const;
 
 function normalizeAuthList(input: unknown): AuthProfileView[] {
@@ -134,6 +135,31 @@ export function AuthVaultScreen(): React.ReactElement {
             disabled={busy}
           >
             + Add profile
+          </Button>
+        </div>
+        <div className="border-b border-subtle px-4 py-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="w-full"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const bridge = window.myclaude?.oauth;
+                if (!bridge) throw new Error("OAuth bridge unavailable");
+                const profileId = `oauth-${Date.now()}`;
+                await bridge.start({ profileId });
+                await reload();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Sign in with Anthropic
           </Button>
         </div>
         {loading ? (
@@ -248,6 +274,7 @@ export function AuthVaultScreen(): React.ReactElement {
         open={addProfileOpen}
         onOpenChange={setAddProfileOpen}
         busy={busy}
+        onError={setError}
         onSubmit={async (spec) => {
           setBusy(true);
           try {
@@ -347,10 +374,11 @@ interface AddProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   busy: boolean;
+  onError?: (error: string) => void;
   onSubmit: (spec: {
     id: string;
     displayName?: string;
-    anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway"; secretRef: string };
+    anthropic: { mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth"; secretRef: string };
   }) => Promise<void>;
 }
 
@@ -358,11 +386,13 @@ function AddProfileDialog({
   open,
   onOpenChange,
   busy,
+  onError,
   onSubmit,
 }: AddProfileDialogProps): React.ReactElement {
+  const [localBusy, setLocalBusy] = React.useState(false);
   const [id, setId] = React.useState("");
   const [displayName, setDisplayName] = React.useState("");
-  const [mode, setMode] = React.useState<"apiKey" | "bedrock" | "vertex" | "gateway">("apiKey");
+  const [mode, setMode] = React.useState<"apiKey" | "bedrock" | "vertex" | "gateway" | "oauth">("apiKey");
   const [secretRef, setSecretRef] = React.useState("");
 
   React.useEffect(() => {
@@ -380,7 +410,9 @@ function AddProfileDialog({
     }
   }, [id, secretRef]);
 
-  const canSubmit = id.length > 0 && secretRef.length > 0 && !busy;
+  const isOAuth = mode === "oauth";
+  const effectiveBusy = busy || localBusy;
+  const canSubmit = id.length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -411,28 +443,46 @@ function AddProfileDialog({
           <Field label="Auth mode">
             <Select
               value={mode}
-              onValueChange={(v) => setMode(v as "apiKey" | "bedrock" | "vertex" | "gateway")}
+              onValueChange={(v) => setMode(v as "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth")}
               options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
             />
           </Field>
-          <Field label="Anthropic secret ref" description="Where the key will be stored">
-            <Input value={secretRef} onChange={(ev) => setSecretRef(ev.target.value)} />
-          </Field>
+          {isOAuth ? null : (
+            <Field label="Anthropic secret ref" description="Where the key will be stored">
+              <Input value={secretRef} onChange={(ev) => setSecretRef(ev.target.value)} />
+            </Field>
+          )}
         </div>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={effectiveBusy}>
             Cancel
           </Button>
           <Button
             type="button"
             variant="primary"
             disabled={!canSubmit}
-            onClick={() => {
+            onClick={async () => {
+              if (isOAuth) {
+                setLocalBusy(true);
+                try {
+                  const bridge = window.myclaude?.oauth;
+                  if (!bridge) throw new Error("OAuth bridge unavailable");
+                  const opts: { profileId: string; displayName?: string } = { profileId: id };
+                  if (displayName) opts.displayName = displayName;
+                  await bridge.start(opts);
+                  onOpenChange(false);
+                } catch (err) {
+                  onError?.(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setLocalBusy(false);
+                }
+                return;
+              }
               const spec: {
                 id: string;
                 displayName?: string;
                 anthropic: {
-                  mode: "apiKey" | "bedrock" | "vertex" | "gateway";
+                  mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
                   secretRef: string;
                 };
               } = {
@@ -443,7 +493,7 @@ function AddProfileDialog({
               void onSubmit(spec);
             }}
           >
-            {busy ? "Saving…" : "Continue (collect key)"}
+            {effectiveBusy ? (isOAuth ? "Opening browser…" : "Saving…") : isOAuth ? "Sign in with Anthropic" : "Continue (collect key)"}
           </Button>
         </DialogFooter>
       </DialogContent>

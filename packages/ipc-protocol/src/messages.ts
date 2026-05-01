@@ -174,7 +174,7 @@ export const AuthProfileSpec = z
     displayName: z.string().optional(),
     anthropic: z
       .object({
-        mode: z.enum(["apiKey", "bedrock", "vertex", "gateway"]),
+        mode: z.enum(["apiKey", "bedrock", "vertex", "gateway", "oauth"]),
         secretRef: z.string().min(1),
       })
       .strict(),
@@ -242,6 +242,33 @@ export const ReqAuthRemove = z
     kind: z.literal("auth.remove"),
     authId: z.string().min(1),
     yes: z.boolean().optional(),
+  })
+  .strict();
+
+/** Start an OAuth Authorization Code + PKCE flow for an Anthropic web subscription. */
+export const ReqAuthOAuthStart = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.start"),
+    profileId: z.string().min(1),
+    displayName: z.string().optional(),
+  })
+  .strict();
+
+/** Refresh the OAuth access token for an existing profile. */
+export const ReqAuthOAuthRefresh = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.refresh"),
+    authId: z.string().min(1),
+  })
+  .strict();
+
+/** Detect existing Claude Code OAuth credentials in the OS keychain. */
+export const ReqAuthOAuthDetect = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.detect"),
   })
   .strict();
 
@@ -424,6 +451,9 @@ export const Req = z.discriminatedUnion("kind", [
   ReqAuthSetSecret,
   ReqAuthRotate,
   ReqAuthRemove,
+  ReqAuthOAuthStart,
+  ReqAuthOAuthRefresh,
+  ReqAuthOAuthDetect,
   ReqSessionStart,
   ReqSessionEnd,
   ReqSecretGet,
@@ -468,6 +498,12 @@ export type ReqAuthSetSecretT = z.infer<typeof ReqAuthSetSecret>;
 export type ReqAuthRotateT = z.infer<typeof ReqAuthRotate>;
 /** Static type for `auth.remove` requests (write-side). */
 export type ReqAuthRemoveT = z.infer<typeof ReqAuthRemove>;
+/** Static type for `auth.oauth.start` requests. */
+export type ReqAuthOAuthStartT = z.infer<typeof ReqAuthOAuthStart>;
+/** Static type for `auth.oauth.refresh` requests. */
+export type ReqAuthOAuthRefreshT = z.infer<typeof ReqAuthOAuthRefresh>;
+/** Static type for `auth.oauth.detect` requests. */
+export type ReqAuthOAuthDetectT = z.infer<typeof ReqAuthOAuthDetect>;
 /** Static type for `session.start` requests (issues a capability token). */
 export type ReqSessionStartT = z.infer<typeof ReqSessionStart>;
 /** Static type for `session.end` requests (revokes capabilities). */
@@ -754,6 +790,45 @@ export const RespAuthRemoveOk = z
   })
   .strict();
 
+/** Response to `auth.oauth.start`. */
+export const RespAuthOAuthStartOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.start.ok"),
+    profileId: z.string().min(1),
+    oauth: z
+      .object({
+        email: z.string().optional(),
+        orgName: z.string().optional(),
+        planType: z.string().optional(),
+      })
+      .optional(),
+  })
+  .strict();
+
+/** Response to `auth.oauth.refresh`. */
+export const RespAuthOAuthRefreshOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.refresh.ok"),
+    refreshed: z.literal(true),
+    accessTokenExpiresAt: z.string().optional(),
+  })
+  .strict();
+
+/** Response to `auth.oauth.detect`. */
+export const RespAuthOAuthDetectOk = z
+  .object({
+    id: z.string().min(1),
+    kind: z.literal("auth.oauth.detect.ok"),
+    detected: z.boolean(),
+    email: z.string().optional(),
+    orgName: z.string().optional(),
+    planType: z.string().optional(),
+    accessTokenExpiresAt: z.string().optional(),
+  })
+  .strict();
+
 /**
  * Response to `session.start`. Carries the freshly minted capability token
  * and its absolute expiry epoch.
@@ -1014,6 +1089,9 @@ export const Resp = z.discriminatedUnion("kind", [
   RespAuthSetSecretOk,
   RespAuthRotateOk,
   RespAuthRemoveOk,
+  RespAuthOAuthStartOk,
+  RespAuthOAuthRefreshOk,
+  RespAuthOAuthDetectOk,
   RespSessionStartOk,
   RespSessionEndOk,
   RespSecretGetOk,
@@ -1091,6 +1169,9 @@ export const Frame = z.discriminatedUnion("kind", [
   RespAuthSetSecretOk,
   RespAuthRotateOk,
   RespAuthRemoveOk,
+  RespAuthOAuthStartOk,
+  RespAuthOAuthRefreshOk,
+  RespAuthOAuthDetectOk,
   RespSessionStartOk,
   RespSessionEndOk,
   RespSecretGetOk,
@@ -1138,6 +1219,12 @@ export type RespAuthSetSecretOkT = z.infer<typeof RespAuthSetSecretOk>;
 export type RespAuthRotateOkT = z.infer<typeof RespAuthRotateOk>;
 /** Static type for `auth.remove.ok` responses. */
 export type RespAuthRemoveOkT = z.infer<typeof RespAuthRemoveOk>;
+/** Static type for `auth.oauth.start.ok` responses. */
+export type RespAuthOAuthStartOkT = z.infer<typeof RespAuthOAuthStartOk>;
+/** Static type for `auth.oauth.refresh.ok` responses. */
+export type RespAuthOAuthRefreshOkT = z.infer<typeof RespAuthOAuthRefreshOk>;
+/** Static type for `auth.oauth.detect.ok` responses. */
+export type RespAuthOAuthDetectOkT = z.infer<typeof RespAuthOAuthDetectOk>;
 /** Static type for `session.start.ok` responses. */
 export type RespSessionStartOkT = z.infer<typeof RespSessionStartOk>;
 /** Static type for `session.end.ok` responses. */

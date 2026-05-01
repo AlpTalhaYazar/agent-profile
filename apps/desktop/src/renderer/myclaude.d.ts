@@ -35,7 +35,7 @@ interface AuthAddSpec {
   id: string;
   displayName?: string;
   anthropic: {
-    mode: "apiKey" | "bedrock" | "vertex" | "gateway";
+    mode: "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
     secretRef: string;
   };
   mcpSecretRefs?: Record<string, string>;
@@ -71,6 +71,11 @@ interface MyClaudeBridge {
     }) => Promise<unknown>;
     rotate: (input: { profileId: string; name?: string; value: string }) => Promise<unknown>;
     remove: (input: { profileId: string; yes?: boolean }) => Promise<unknown>;
+  };
+  oauth?: {
+    start: (input: { profileId: string; displayName?: string }) => Promise<unknown>;
+    refresh: (input: { authId: string }) => Promise<unknown>;
+    detect: () => Promise<unknown>;
   };
   profile?: {
     list: (input: { cwd: string; roleFilter?: string }) => Promise<unknown>;

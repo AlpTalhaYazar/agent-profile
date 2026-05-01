@@ -15,12 +15,22 @@ export const AuthProfilesDoc = z.object({
       /** Human-readable label shown in the GUI. */
       displayName: z.string().optional(),
       anthropic: z.object({
-        mode: z.enum(["apiKey", "bedrock", "vertex", "gateway"]),
+        mode: z.enum(["apiKey", "bedrock", "vertex", "gateway", "oauth"]),
         /**
-         * Keyring URI pointing to the Anthropic API key.
+         * Keyring URI pointing to the Anthropic API key (or OAuth access token).
          * Must match `keyring://service/account` format exactly.
          */
         secretRef: z.string().regex(/^keyring:\/\//, "Must be a keyring:// URI"),
+        /** OAuth-specific metadata. Present only when mode is "oauth". */
+        oauth: z
+          .object({
+            email: z.string().optional(),
+            orgName: z.string().optional(),
+            planType: z.string().optional(),
+            accessTokenExpiresAt: z.string().optional(),
+            refreshTokenRef: z.string().regex(/^keyring:\/\//).optional(),
+          })
+          .optional(),
       }),
       /**
        * Map from secret name to keyring URI.

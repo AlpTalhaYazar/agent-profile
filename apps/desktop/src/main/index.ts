@@ -149,6 +149,21 @@ const AuthRemovePayload = z
   })
   .strict();
 
+const AuthOAuthStartPayload = z
+  .object({
+    profileId: z.string().min(1),
+    displayName: z.string().optional(),
+  })
+  .strict();
+
+const AuthOAuthRefreshPayload = z
+  .object({
+    authId: z.string().min(1),
+  })
+  .strict();
+
+const AuthOAuthDetectPayload = z.undefined();
+
 // ─── Session Monitor payloads (Phase 2 milestone 5) ──────────────────────────
 
 const SessionsListPayload = NoPayload;
@@ -423,6 +438,88 @@ export function registerRendererIpcHandlers(opts: {
         ...(parsed.yes !== undefined ? { yes: parsed.yes } : {}),
       });
       return { failed: resp.failed };
+    });
+  });
+
+  // ─── OAuth (Anthropic web subscription) ────────────────────────────────────
+
+  ipcMain.handle("auth.oauth.start", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.oauth.start");
+    const parsed = parseRendererPayload(AuthOAuthStartPayload, payload, "auth.oauth.start");
+
+    const { runOAuthFlow } = await import("./oauth/flow.js");
+    const result = await runOAuthFlow({
+      profileId: parsed.profileId,
+      ...(parsed.displayName ? { displayName: parsed.displayName } : {}),
+      storeSecret: async (key, value) => {
+        await withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+          const b64 = Buffer.from(value).toString("base64");
+          await client.request("auth.add", {
+            spec: {
+              id: parsed.profileId,
+              displayName: parsed.displayName,
+              anthropic: {
+                mode: "oauth",
+                secretRef: `keyring://${key}`,
+                oauth: {
+                  email: result.email,
+                  orgName: result.orgName,
+                  planType: result.planType,
+                  accessTokenExpiresAt: result.accessTokenExpiresAt,
+                  ...(result.refreshToken
+                    ? { refreshTokenRef: `keyring://agent-profile.anthropic-oauth-refresh/${parsed.profileId}` }
+                    : {}),
+                },
+              },
+            },
+            anthropicSecretB64: b64,
+            force: true,
+          });
+        });
+      },
+    });
+
+    return {
+      profileId: result.profileId,
+      oauth: {
+        email: result.email,
+        orgName: result.orgName,
+        planType: result.planType,
+      },
+    };
+  });
+
+  ipcMain.handle("auth.oauth.refresh", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.oauth.refresh");
+    const parsed = parseRendererPayload(AuthOAuthRefreshPayload, payload, "auth.oauth.refresh");
+
+    return withDaemonClient(myClaudeHome, app.getVersion(), async (client) => {
+      const listResp = await client.request("auth.list", { includeRefs: true });
+      const profile = (listResp as { profiles: Array<{ id: string; mode: string }> }).profiles.find(
+        (p) => p.id === parsed.authId
+      );
+      if (!profile) throw new Error(`Auth profile "${parsed.authId}" not found`);
+
+      const { refreshOAuthToken } = await import("./oauth/refresh.js");
+      return refreshOAuthToken({
+        profileId: parsed.authId,
+        profile: { anthropic: { mode: profile.mode, secretRef: "", oauth: {} } },
+        getSecret: async () => null,
+        storeSecret: async () => {},
+        updateProfile: async () => {},
+      });
+    });
+  });
+
+  ipcMain.handle("auth.oauth.detect", async (event, payload) => {
+    assertValidSenderFrame(event, expectedFrameUrl, "auth.oauth.detect");
+    parseRendererPayload(AuthOAuthDetectPayload, payload, "auth.oauth.detect");
+
+    const { detectClaudeCodeCredentials } = await import("./oauth/detect.js");
+    const os = await import("node:os");
+    return detectClaudeCodeCredentials({
+      getSecret: async () => null, // Keychain access via daemon in production
+      getUsername: () => os.userInfo().username,
     });
   });
 
