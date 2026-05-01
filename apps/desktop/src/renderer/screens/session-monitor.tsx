@@ -259,11 +259,11 @@ export function SessionMonitorScreen(): React.ReactElement {
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[1fr_auto]">
-      <section className="app-scrollbar min-h-0 overflow-auto bg-white">
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+      <section className="app-scrollbar min-h-0 overflow-auto bg-surface">
+        <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
           <div>
-            <h2 className="text-base font-semibold">Sessions</h2>
-            <p className="text-sm text-neutral-500">
+            <h2 className="text-base font-semibold text-primary">Sessions</h2>
+            <p className="text-sm text-secondary">
               {connection === "up" ? "Live (push events)" : "Reconnecting (polling)"} ·{" "}
               {sessions.length} record{sessions.length === 1 ? "" : "s"}
             </p>
@@ -279,9 +279,9 @@ export function SessionMonitorScreen(): React.ReactElement {
           </Button>
         </div>
         {loading ? (
-          <p className="px-4 py-6 text-sm text-neutral-500">Loading…</p>
+          <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
         ) : sessions.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-neutral-500">No sessions yet.</p>
+          <p className="px-4 py-6 text-sm text-secondary">No sessions yet.</p>
         ) : (
           <Table>
             <TableHeader>
@@ -345,46 +345,46 @@ export function SessionMonitorScreen(): React.ReactElement {
           </Table>
         )}
         {error ? (
-          <div className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <div className="m-4 rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger">
             {error}
           </div>
         ) : null}
       </section>
 
-      <aside className="border-t border-neutral-200 bg-neutral-50 p-4">
+      <aside className="border-t border-subtle bg-subtle p-4">
         {selected === null ? (
-          <p className="text-sm text-neutral-500">Select a session to see details.</p>
+          <p className="text-sm text-secondary">Select a session to see details.</p>
         ) : (
           <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
             <div className="space-y-1 text-sm">
               <div className="font-mono text-xs">{selected.sessionId}</div>
               <div>
-                <span className="text-neutral-500">Dir:</span>{" "}
+                <span className="text-secondary">Dir:</span>{" "}
                 <span className="font-mono text-xs">{selected.cwd}</span>
               </div>
               {selected.spawnCommand !== undefined ? (
                 <div>
-                  <span className="text-neutral-500">Command:</span>{" "}
+                  <span className="text-secondary">Command:</span>{" "}
                   <span className="font-mono text-xs">{selected.spawnCommand}</span>
                 </div>
               ) : null}
               {selected.relaunchedFrom !== undefined ? (
                 <div>
-                  <span className="text-neutral-500">Relaunched from:</span>{" "}
+                  <span className="text-secondary">Relaunched from:</span>{" "}
                   <span className="font-mono text-xs">{selected.relaunchedFrom}</span>
                 </div>
               ) : null}
               <div>
-                <span className="text-neutral-500">Drift:</span>{" "}
+                <span className="text-secondary">Drift:</span>{" "}
                 {driftFor === undefined ? (
-                  <span className="text-neutral-500">not checked</span>
+                  <span className="text-secondary">not checked</span>
                 ) : driftFor.drifted ? (
-                  <span className="text-amber-700">
+                  <span className="text-status-warning">
                     drifted ({driftFor.scopesChanged.length} scope
                     {driftFor.scopesChanged.length === 1 ? "" : "s"} changed)
                   </span>
                 ) : (
-                  <span className="text-emerald-700">in sync</span>
+                  <span className="text-status-success">in sync</span>
                 )}
               </div>
             </div>

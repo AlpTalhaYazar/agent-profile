@@ -8,7 +8,7 @@
  * fragments, agents, skills, slash commands, memory seeds. Each file shows
  * its origin scope; collisions and missing sources are surfaced as banners.
  */
-import { Badge, CodeEditor } from "@agent-profile/ui";
+import { Badge, Button, CodeEditor } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import {
@@ -77,11 +77,11 @@ export function PersonaComposerScreen(): React.ReactElement {
   if (!role || !auth || !cwd) {
     return (
       <div
-        className="flex h-full items-center justify-center text-center text-sm text-neutral-600"
+        className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="persona-empty"
       >
         <div className="max-w-md space-y-2 px-6">
-          <p className="text-base font-semibold text-neutral-900">No selection</p>
+          <p className="text-base font-semibold text-primary">No selection</p>
           <p>Pick role + auth + cwd in the Profile Editor tab to render the persona.</p>
         </div>
       </div>
@@ -90,21 +90,22 @@ export function PersonaComposerScreen(): React.ReactElement {
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="persona-composer">
-      <header className="flex items-start justify-between gap-3 border-b border-neutral-200 bg-white px-4 py-3">
+      <header className="flex items-start justify-between gap-3 border-b border-subtle bg-surface px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold text-neutral-900">Persona Composer</h1>
-          <p className="mt-0.5 text-xs text-neutral-600">
+          <h1 className="text-lg font-semibold text-primary">Persona Composer</h1>
+          <p className="mt-0.5 text-xs text-secondary">
             role={role} · auth={auth} · cwd={cwd}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void fetchRender()}
-          className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+        <Button
           data-testid="persona-refresh"
+          onClick={() => void fetchRender()}
+          size="sm"
+          type="button"
+          variant="secondary"
         >
           Refresh
-        </button>
+        </Button>
       </header>
 
       <ComposerBanner state={personaState} />
@@ -124,7 +125,7 @@ function ComposerBanner({
 }): React.ReactElement | null {
   if (state.status === "loading") {
     return (
-      <div className="border-b border-neutral-200 bg-blue-50 px-4 py-2 text-xs text-blue-900">
+      <div className="border-b border-subtle bg-status-info-soft px-4 py-2 text-xs text-status-info">
         Loading persona render…
       </div>
     );
@@ -132,7 +133,7 @@ function ComposerBanner({
   if (state.status === "error") {
     return (
       <div
-        className="border-b border-neutral-200 bg-red-50 px-4 py-2 text-xs text-red-900"
+        className="border-b border-subtle bg-status-danger-soft px-4 py-2 text-xs text-status-danger"
         data-testid="persona-error"
       >
         {state.errorMessage ?? "Persona render failed."}
@@ -145,7 +146,7 @@ function ComposerBanner({
   const missing = result.missingSources.length;
   if (collisions === 0 && missing === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-neutral-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+    <div className="flex flex-wrap items-center gap-2 border-b border-subtle bg-status-warning-soft px-4 py-2 text-xs text-status-warning">
       {collisions > 0 ? (
         <span data-testid="persona-collision-count">
           <Badge tone="warning">
@@ -175,7 +176,7 @@ function Catalog({
 }): React.ReactElement {
   if (state.status === "loading" || state.status === "idle") {
     return (
-      <nav className="overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-500">
+      <nav className="overflow-y-auto border-r border-default bg-subtle p-3 text-xs text-secondary">
         Loading…
       </nav>
     );
@@ -183,7 +184,7 @@ function Catalog({
   const result = state.result;
   if (!result) {
     return (
-      <nav className="overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-500">
+      <nav className="overflow-y-auto border-r border-default bg-subtle p-3 text-xs text-secondary">
         (no data)
       </nav>
     );
@@ -191,11 +192,11 @@ function Catalog({
 
   return (
     <nav
-      className="overflow-y-auto border-r border-neutral-200 bg-neutral-50"
+      className="overflow-y-auto border-r border-default bg-subtle"
       data-testid="persona-catalog"
     >
-      <div className="border-b border-neutral-200">
-        <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-600">
+      <div className="border-b border-subtle">
+        <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
           CLAUDE.md{" "}
           {result.claudeMd
             ? `(${result.claudeMd.sections.length} source${result.claudeMd.sections.length === 1 ? "" : "s"})`
@@ -218,12 +219,12 @@ function Catalog({
       {(["agents", "skills", "slashCmds", "memory"] as const).map((category) => {
         const files = result.files.filter((f) => f.category === category);
         return (
-          <div key={category} className="border-b border-neutral-200 last:border-b-0">
-            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-600">
+          <div key={category} className="border-b border-subtle last:border-b-0">
+            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
               {CATEGORY_LABELS[category]} ({files.length})
             </div>
             {files.length === 0 ? (
-              <div className="px-3 pb-3 text-xs text-neutral-500">(empty)</div>
+              <div className="px-3 pb-3 text-xs text-secondary">(empty)</div>
             ) : (
               <ul>
                 {files.map((file) => {
@@ -276,12 +277,12 @@ function CatalogButton({
       type="button"
       onClick={onClick}
       className={`block w-full px-3 py-1.5 text-left text-sm ${
-        isSelected ? "bg-blue-100 text-blue-900" : "text-neutral-800 hover:bg-neutral-100"
+        isSelected ? "bg-accent-soft text-primary" : "text-primary hover:bg-elevated"
       }`}
       data-testid={testId}
     >
       <div>{label}</div>
-      {sublabel ? <div className="text-[11px] text-neutral-500">↳ {sublabel}</div> : null}
+      {sublabel ? <div className="text-[11px] text-secondary">↳ {sublabel}</div> : null}
     </button>
   );
 }
@@ -295,14 +296,14 @@ function Preview({
 }): React.ReactElement {
   if (state.status !== "ready" || !state.result) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+      <div className="flex h-full items-center justify-center text-sm text-secondary">
         {state.status === "loading" ? "Rendering…" : "No content."}
       </div>
     );
   }
   if (!selected) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+      <div className="flex h-full items-center justify-center text-sm text-secondary">
         Pick an entry on the left to preview its content.
       </div>
     );
@@ -313,7 +314,7 @@ function Preview({
   if (selected.kind === "combined-claudeMd") {
     if (!result.claudeMd) {
       return (
-        <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+        <div className="flex h-full items-center justify-center text-sm text-secondary">
           No CLAUDE.md sources for this profile.
         </div>
       );
@@ -331,7 +332,7 @@ function Preview({
   const file = pickFile(result.files, selected.category, selected.basename);
   if (!file) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+      <div className="flex h-full items-center justify-center text-sm text-secondary">
         File not found in current render.
       </div>
     );
@@ -362,11 +363,11 @@ function FilePreview({
 }): React.ReactElement {
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="persona-preview">
-      <div className="border-b border-neutral-200 bg-white px-4 py-2">
-        <h2 className="text-sm font-semibold text-neutral-900">{title}</h2>
-        <p className="text-xs text-neutral-600">{subtitle}</p>
+      <div className="border-b border-subtle bg-surface px-4 py-2">
+        <h2 className="text-sm font-semibold text-primary">{title}</h2>
+        <p className="text-xs text-secondary">{subtitle}</p>
         {sourcePath ? (
-          <p className="mt-0.5 font-mono text-[11px] text-neutral-500">{sourcePath}</p>
+          <p className="mt-0.5 font-mono text-[11px] text-secondary">{sourcePath}</p>
         ) : null}
       </div>
       <div className="min-h-0 flex-1">

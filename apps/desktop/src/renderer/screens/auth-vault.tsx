@@ -119,12 +119,12 @@ export function AuthVaultScreen(): React.ReactElement {
   const [removeOpen, setRemoveOpen] = React.useState(false);
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)]">
-      <aside className="app-scrollbar min-h-0 overflow-auto border-r border-neutral-200 bg-white">
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+    <div className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
+      <aside className="app-scrollbar min-h-0 overflow-auto border-r border-default bg-surface">
+        <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
           <div>
-            <h2 className="text-base font-semibold">Auth profiles</h2>
-            <p className="text-sm text-neutral-500">Metadata only — no secret values</p>
+            <h2 className="text-base font-semibold text-primary">Auth profiles</h2>
+            <p className="text-sm text-secondary">Metadata only — no secret values</p>
           </div>
           <Button
             type="button"
@@ -137,11 +137,11 @@ export function AuthVaultScreen(): React.ReactElement {
           </Button>
         </div>
         {loading ? (
-          <p className="px-4 py-6 text-sm text-neutral-500">Loading…</p>
+          <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
         ) : profiles.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-neutral-500">No auth profiles yet.</p>
+          <p className="px-4 py-6 text-sm text-secondary">No auth profiles yet.</p>
         ) : (
-          <ul className="divide-y divide-neutral-100">
+          <ul className="divide-y divide-subtle">
             {profiles.map((p) => {
               const active = p.id === selectedId;
               return (
@@ -149,12 +149,12 @@ export function AuthVaultScreen(): React.ReactElement {
                   <button
                     type="button"
                     onClick={() => setSelectedId(p.id)}
-                    className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-neutral-50 ${
-                      active ? "bg-neutral-100" : ""
+                    className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-subtle ${
+                      active ? "bg-elevated" : ""
                     }`}
                   >
-                    <span className="text-sm font-medium">{p.id}</span>
-                    <span className="text-xs text-neutral-500">
+                    <span className="text-sm font-medium text-primary">{p.id}</span>
+                    <span className="text-xs text-secondary">
                       {p.displayName || "(no display name)"} · {p.mode} · {p.secrets.length} secret
                       {p.secrets.length === 1 ? "" : "s"}
                     </span>
@@ -165,21 +165,21 @@ export function AuthVaultScreen(): React.ReactElement {
           </ul>
         )}
         {error ? (
-          <div className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <div className="m-4 rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger">
             {error}
           </div>
         ) : null}
       </aside>
 
-      <section className="app-scrollbar min-h-0 overflow-auto bg-neutral-50">
+      <section className="app-scrollbar min-h-0 overflow-auto bg-subtle">
         {selected === null ? (
-          <p className="p-6 text-sm text-neutral-500">Select an auth profile.</p>
+          <p className="p-6 text-sm text-secondary">Select an auth profile.</p>
         ) : (
           <div className="space-y-4 p-6">
             <header className="flex items-start justify-between">
               <div>
-                <h2 className="text-lg font-semibold">{selected.id}</h2>
-                <p className="text-sm text-neutral-600">
+                <h2 className="text-lg font-semibold text-primary">{selected.id}</h2>
+                <p className="text-sm text-secondary">
                   {selected.displayName || "(no display name)"} · mode {selected.mode}
                 </p>
               </div>
@@ -224,7 +224,7 @@ export function AuthVaultScreen(): React.ReactElement {
               <TableBody>
                 {selected.secrets.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={2} className="text-sm text-neutral-500">
+                    <TableCell colSpan={2} className="text-sm text-secondary">
                       No MCP secrets. Use “Add secret” to register one.
                     </TableCell>
                   </TableRow>

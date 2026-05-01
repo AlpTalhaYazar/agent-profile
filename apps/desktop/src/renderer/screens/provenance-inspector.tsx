@@ -50,11 +50,11 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
   if (!provenance || !effective) {
     return (
       <div
-        className="flex h-full items-center justify-center text-center text-sm text-neutral-600"
+        className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="provenance-empty"
       >
         <div className="max-w-md space-y-2 px-6">
-          <p className="text-base font-semibold text-neutral-900">No provenance loaded</p>
+          <p className="text-base font-semibold text-primary">No provenance loaded</p>
           <p>
             Open the Profile Editor tab and pick a role + auth. The cascade resolves once those are
             set; come back here to inspect each field.
@@ -81,9 +81,9 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="provenance-inspector">
-      <header className="border-b border-neutral-200 bg-white px-4 py-3">
-        <h1 className="text-lg font-semibold text-neutral-900">Provenance Inspector</h1>
-        <p className="mt-0.5 text-xs text-neutral-600">
+      <header className="border-b border-subtle bg-surface px-4 py-3">
+        <h1 className="text-lg font-semibold text-primary">Provenance Inspector</h1>
+        <p className="mt-0.5 text-xs text-secondary">
           role={role || "—"} · auth={auth || "—"} · cwd={cwd || "—"}
         </p>
       </header>
@@ -106,16 +106,16 @@ function FieldSelector({
 }): React.ReactElement {
   return (
     <nav
-      className="overflow-y-auto border-r border-neutral-200 bg-neutral-50"
+      className="overflow-y-auto border-r border-default bg-subtle"
       data-testid="provenance-selector"
     >
       {sections.map((section) => (
-        <div key={section.id} className="border-b border-neutral-200 last:border-b-0">
-          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-600">
+        <div key={section.id} className="border-b border-subtle last:border-b-0">
+          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
             {section.label} ({section.keys.length})
           </div>
           {section.keys.length === 0 ? (
-            <div className="px-3 pb-3 text-xs text-neutral-500">(empty)</div>
+            <div className="px-3 pb-3 text-xs text-secondary">(empty)</div>
           ) : (
             <ul>
               {section.keys.map((key, idx) => {
@@ -130,8 +130,8 @@ function FieldSelector({
                       onClick={() => onSelect({ section: section.id, key: compositeKey })}
                       className={`block w-full px-3 py-1.5 text-left text-sm ${
                         isSelected
-                          ? "bg-blue-100 text-blue-900"
-                          : "text-neutral-800 hover:bg-neutral-100"
+                          ? "bg-accent-soft text-primary"
+                          : "text-primary hover:bg-elevated"
                       }`}
                       data-testid={`provenance-entry-${section.id}-${key}`}
                     >
@@ -159,7 +159,7 @@ function FieldDetail({
 }): React.ReactElement {
   if (!selected) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+      <div className="flex h-full items-center justify-center text-sm text-secondary">
         Pick a field on the left to see its provenance chain.
       </div>
     );
@@ -215,25 +215,25 @@ function McpServerDetail({
   const chain = provenance.chain ?? [];
   return (
     <div className="overflow-y-auto p-4" data-testid="provenance-detail">
-      <h2 className="text-base font-semibold text-neutral-900">mcpServers.{name}</h2>
+      <h2 className="text-base font-semibold text-primary">mcpServers.{name}</h2>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-neutral-600">Source:</span>
+        <span className="text-secondary">Source:</span>
         <Badge tone="info">{provenance.source ?? "unknown"}</Badge>
         {provenance.suppressedBy ? (
           <>
-            <span className="text-neutral-600">Suppressed by:</span>
+            <span className="text-secondary">Suppressed by:</span>
             <Badge tone="warning">{provenance.suppressedBy}</Badge>
           </>
         ) : null}
       </div>
 
-      <h3 className="mt-4 text-sm font-semibold text-neutral-900">Chain</h3>
+      <h3 className="mt-4 text-sm font-semibold text-primary">Chain</h3>
       {chain.length === 0 ? (
-        <p className="mt-1 text-xs text-neutral-500">(no chain entries)</p>
+        <p className="mt-1 text-xs text-secondary">(no chain entries)</p>
       ) : (
         <table className="mt-1 w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-neutral-200 text-xs text-neutral-600">
+            <tr className="border-b border-subtle text-xs text-secondary">
               <th className="py-1.5 pr-4 font-medium">Scope</th>
               <th className="py-1.5 font-medium">Event</th>
             </tr>
@@ -242,9 +242,9 @@ function McpServerDetail({
             {chain.map((step, idx) => (
               <tr
                 key={`${step.scope ?? ""}-${step.event ?? ""}-${idx}`}
-                className="border-b border-neutral-100 last:border-b-0"
+                className="border-b border-subtle last:border-b-0"
               >
-                <td className="py-1.5 pr-4 font-mono text-xs text-neutral-800">
+                <td className="py-1.5 pr-4 font-mono text-xs text-primary">
                   {step.scope ?? "—"}
                 </td>
                 <td className="py-1.5">
@@ -258,8 +258,8 @@ function McpServerDetail({
 
       {(provenance.overriddenFields?.length ?? 0) > 0 ? (
         <>
-          <h3 className="mt-4 text-sm font-semibold text-neutral-900">Overridden fields</h3>
-          <ul className="mt-1 space-y-1 text-xs text-neutral-700">
+          <h3 className="mt-4 text-sm font-semibold text-primary">Overridden fields</h3>
+          <ul className="mt-1 space-y-1 text-xs text-primary">
             {(provenance.overriddenFields ?? []).map((f) => (
               <li key={f} className="font-mono">
                 {f}
@@ -271,27 +271,27 @@ function McpServerDetail({
 
       {value ? (
         <>
-          <h3 className="mt-4 text-sm font-semibold text-neutral-900">Final value</h3>
+          <h3 className="mt-4 text-sm font-semibold text-primary">Final value</h3>
           <dl className="mt-1 space-y-1 text-xs">
             {value.type ? (
               <div className="flex gap-2">
-                <dt className="w-20 text-neutral-500">type</dt>
-                <dd className="font-mono text-neutral-800">{value.type}</dd>
+                <dt className="w-20 text-secondary">type</dt>
+                <dd className="font-mono text-primary">{value.type}</dd>
               </div>
             ) : null}
             {value.command ? (
               <div className="flex gap-2">
-                <dt className="w-20 text-neutral-500">command</dt>
-                <dd className="font-mono text-neutral-800">{value.command}</dd>
+                <dt className="w-20 text-secondary">command</dt>
+                <dd className="font-mono text-primary">{value.command}</dd>
               </div>
             ) : null}
             {value.env && Object.keys(value.env).length > 0 ? (
               <div>
-                <dt className="text-neutral-500">env</dt>
+                <dt className="text-secondary">env</dt>
                 <dd className="mt-0.5 ml-4 space-y-0.5">
                   {Object.entries(value.env).map(([k, v]) => (
-                    <div key={k} className="flex gap-2 font-mono text-neutral-800">
-                      <span className="text-neutral-500">{k}=</span>
+                    <div key={k} className="flex gap-2 font-mono text-primary">
+                      <span className="text-secondary">{k}=</span>
                       <span>{redactText(String(v))}</span>
                     </div>
                   ))}
@@ -320,24 +320,24 @@ function FieldChainDetail({
   const chain = provenance.chain ?? [];
   return (
     <div className="overflow-y-auto p-4" data-testid="provenance-detail">
-      <h2 className="text-base font-semibold text-neutral-900">{label}</h2>
+      <h2 className="text-base font-semibold text-primary">{label}</h2>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-neutral-600">Source:</span>
+        <span className="text-secondary">Source:</span>
         <Badge tone="info">{provenance.source ?? "unknown"}</Badge>
       </div>
 
-      <h3 className="mt-4 text-sm font-semibold text-neutral-900">Contributing scopes</h3>
+      <h3 className="mt-4 text-sm font-semibold text-primary">Contributing scopes</h3>
       {chain.length === 0 ? (
-        <p className="mt-1 text-xs text-neutral-500">(no chain entries)</p>
+        <p className="mt-1 text-xs text-secondary">(no chain entries)</p>
       ) : (
         <ol className="mt-1 space-y-1 text-sm">
           {chain.map((scope, idx) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: chain may repeat scope labels (e.g. deep-merged), so index disambiguates
             <li key={`${scope}-${idx}`} className="flex items-center gap-2">
-              <span className="w-6 text-right text-xs text-neutral-500">{idx + 1}.</span>
+              <span className="w-6 text-right text-xs text-secondary">{idx + 1}.</span>
               <Badge tone={idx === chain.length - 1 ? "success" : "neutral"}>{scope}</Badge>
               {idx === chain.length - 1 ? (
-                <span className="text-xs text-neutral-500">(winning)</span>
+                <span className="text-xs text-secondary">(winning)</span>
               ) : null}
             </li>
           ))}
@@ -346,8 +346,8 @@ function FieldChainDetail({
 
       {value !== undefined ? (
         <>
-          <h3 className="mt-4 text-sm font-semibold text-neutral-900">Final value</h3>
-          <pre className="mt-1 overflow-x-auto rounded border border-neutral-200 bg-neutral-50 p-2 font-mono text-xs text-neutral-800">
+          <h3 className="mt-4 text-sm font-semibold text-primary">Final value</h3>
+          <pre className="mt-1 overflow-x-auto rounded border border-default bg-subtle p-2 font-mono text-xs text-primary">
             {redactText(value)}
           </pre>
         </>
@@ -365,18 +365,18 @@ function PersonaDetail({
 }): React.ReactElement {
   return (
     <div className="overflow-y-auto p-4" data-testid="provenance-detail">
-      <h2 className="text-base font-semibold text-neutral-900">Persona contribution</h2>
+      <h2 className="text-base font-semibold text-primary">Persona contribution</h2>
       <div className="mt-2 flex items-center gap-2 text-sm">
-        <span className="text-neutral-600">Source:</span>
+        <span className="text-secondary">Source:</span>
         <Badge tone="info">{source}</Badge>
       </div>
-      <h3 className="mt-4 text-sm font-semibold text-neutral-900">Files ({files.length})</h3>
+      <h3 className="mt-4 text-sm font-semibold text-primary">Files ({files.length})</h3>
       {files.length === 0 ? (
-        <p className="mt-1 text-xs text-neutral-500">(no files)</p>
+        <p className="mt-1 text-xs text-secondary">(no files)</p>
       ) : (
         <ul className="mt-1 space-y-1 text-xs">
           {files.map((path) => (
-            <li key={path} className="font-mono text-neutral-800">
+            <li key={path} className="font-mono text-primary">
               {path}
             </li>
           ))}
@@ -388,7 +388,7 @@ function PersonaDetail({
 
 function EmptyDetail({ message }: { message: string }): React.ReactElement {
   return (
-    <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+    <div className="flex h-full items-center justify-center text-sm text-secondary">
       {message}
     </div>
   );
