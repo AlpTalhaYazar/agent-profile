@@ -6,6 +6,7 @@
   "type": "module",
   "main": ".vite/build/main.cjs",
   "scripts": {
+    "build": "electron-forge package",
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",

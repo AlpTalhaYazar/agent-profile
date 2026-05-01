@@ -4,11 +4,7 @@
 
 @layer base {
   :root {
-    color-scheme: light;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-      sans-serif;
-    background-color: rgb(245 245 245);
-    color: rgb(23 23 23);
+    color-scheme: dark;
   }
 
   html,
@@ -20,8 +16,8 @@
 
   body {
     margin: 0;
-    background: linear-gradient(180deg, rgb(250 250 250) 0%, rgb(244 244 245) 100%);
-    color: rgb(23 23 23);
+    background: var(--ap-color-bg-canvas);
+    color: var(--ap-color-text-primary);
   }
 
   * {
@@ -43,7 +39,7 @@
 @layer utilities {
   .app-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgb(161 161 170) transparent;
+    scrollbar-color: var(--ap-color-border-strong) transparent;
   }
 
   .app-scrollbar::-webkit-scrollbar {
@@ -52,7 +48,7 @@
   }
 
   .app-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgb(161 161 170);
+    background-color: var(--ap-color-border-strong);
     border: 2px solid transparent;
     border-radius: 999px;
     background-clip: padding-box;

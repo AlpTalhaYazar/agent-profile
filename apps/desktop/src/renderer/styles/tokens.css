@@ -1,0 +1,234 @@
+/* ============================================================================
+ * Agent Profile — Colors & Type
+ * Source of truth: design-system/tokens/01-color-tokens.md, 02-typography-tokens.md
+ *
+ * Dark-first with full light parity. Every screen color goes through a
+ * semantic token (--ap-color-bg-canvas etc), never a raw hex.
+ * Toggle theme by setting `data-theme="light|dark"` on <html>.
+ * ========================================================================= */
+
+/* ---------- Fonts (Google Fonts CDN; substitute the .woff2 you prefer) ---- */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ---- Primitive: Gray ------------------------------------------------- */
+  --ap-gray-50:  #fafafa;
+  --ap-gray-100: #f4f4f5;
+  --ap-gray-200: #e4e4e7;
+  --ap-gray-300: #d4d4d8;
+  --ap-gray-400: #a1a1aa;
+  --ap-gray-500: #71717a;
+  --ap-gray-600: #52525b;
+  --ap-gray-700: #3f3f46;
+  --ap-gray-800: #27272a;
+  --ap-gray-900: #18181b;
+  --ap-gray-950: #09090f;
+
+  /* ---- Primitive: Accent (blue, restrained) ---------------------------- */
+  --ap-accent-50:  #eff6ff;
+  --ap-accent-100: #dbeafe;
+  --ap-accent-200: #bfdbfe;
+  --ap-accent-300: #93c5fd;
+  --ap-accent-400: #60a5fa;
+  --ap-accent-500: #3b82f6;
+  --ap-accent-600: #2563eb;
+  --ap-accent-700: #1d4ed8;
+  --ap-accent-800: #1e40af;
+  --ap-accent-900: #1e3a8a;
+  --ap-accent-950: #172554;
+
+  /* ---- Primitive: Status ---------------------------------------------- */
+  --ap-success-500: #10b981;
+  --ap-success-600: #059669;
+  --ap-success-400: #34d399;
+  --ap-warning-500: #f59e0b;
+  --ap-warning-600: #d97706;
+  --ap-warning-400: #fbbf24;
+  --ap-danger-500:  #ef4444;
+  --ap-danger-600:  #dc2626;
+  --ap-danger-400:  #f87171;
+
+  /* ---- Semantic: surfaces (DARK defaults) ---------------------------- */
+  --ap-color-bg-canvas:        #09090f;
+  --ap-color-bg-surface:       #18181b;
+  --ap-color-bg-elevated:      #27272a;
+  --ap-color-bg-subtle:        #18181b;
+  --ap-color-bg-overlay:       rgba(9, 9, 15, 0.64);
+  --ap-color-bg-accent-soft:   #1e3a8a;
+  --ap-color-bg-accent-solid:  #60a5fa;
+
+  --ap-color-text-primary:     #fafafa;
+  --ap-color-text-secondary:   #d4d4d8;
+  --ap-color-text-tertiary:    #a1a1aa;
+  --ap-color-text-on-accent:   #09090f;
+
+  --ap-color-border-default:   #3f3f46;
+  --ap-color-border-subtle:    #27272a;
+  --ap-color-border-strong:    #52525b;
+
+  --ap-color-focus-ring:       #60a5fa;
+
+  --ap-color-status-success:   #34d399;
+  --ap-color-status-warning:   #fbbf24;
+  --ap-color-status-danger:    #f87171;
+
+  /* ---- Radius ---- */
+  --ap-radius-none: 0px;
+  --ap-radius-xs:   4px;
+  --ap-radius-sm:   6px;
+  --ap-radius-md:   8px;
+  --ap-radius-lg:   10px;
+  --ap-radius-xl:   12px;
+  --ap-radius-2xl:  16px;
+  --ap-radius-full: 999px;
+
+  /* ---- Shadow (drama-light; border carries elevation in dark) ---- */
+  --ap-shadow-none:  none;
+  --ap-shadow-xs:    0 1px 2px rgba(9, 9, 15, 0.06);
+  --ap-shadow-sm:    0 2px 6px rgba(9, 9, 15, 0.08);
+  --ap-shadow-md:    0 10px 24px rgba(9, 9, 15, 0.12);
+  --ap-shadow-lg:    0 18px 40px rgba(9, 9, 15, 0.18);
+  --ap-shadow-xl:    0 24px 56px rgba(9, 9, 15, 0.22);
+  --ap-shadow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  /* ---- Spacing (4px base, half-steps allowed) ---- */
+  --ap-space-0:    0px;
+  --ap-space-0_5:  2px;
+  --ap-space-1:    4px;
+  --ap-space-1_5:  6px;
+  --ap-space-2:    8px;
+  --ap-space-2_5:  10px;
+  --ap-space-3:    12px;
+  --ap-space-3_5:  14px;
+  --ap-space-4:    16px;
+  --ap-space-5:    20px;
+  --ap-space-6:    24px;
+  --ap-space-7:    28px;
+  --ap-space-8:    32px;
+  --ap-space-10:   40px;
+  --ap-space-12:   48px;
+  --ap-space-14:   56px;
+  --ap-space-16:   64px;
+
+  /* ---- Motion ---- */
+  --ap-duration-instant: 50ms;
+  --ap-duration-fast:    100ms;
+  --ap-duration-normal:  150ms;
+  --ap-duration-slow:    200ms;
+  --ap-duration-slower:  300ms;
+  --ap-ease-default:     cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ap-ease-out:         cubic-bezier(0, 0, 0.2, 1);
+  --ap-ease-in:          cubic-bezier(0.4, 0, 1, 1);
+  --ap-ease-in-out:      cubic-bezier(0.4, 0, 0.2, 1);
+  --ap-ease-spring:      cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---- Type primitives ---- */
+  --ap-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ap-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --ap-text-12: 12px; --ap-lh-12: 16px;
+  --ap-text-13: 13px; --ap-lh-13: 18px;
+  --ap-text-14: 14px; --ap-lh-14: 20px;
+  --ap-text-16: 16px; --ap-lh-16: 24px;
+  --ap-text-18: 18px; --ap-lh-18: 26px;
+  --ap-text-20: 20px; --ap-lh-20: 28px;
+  --ap-text-24: 24px; --ap-lh-24: 32px;
+  --ap-text-28: 28px; --ap-lh-28: 36px;
+  --ap-text-32: 32px; --ap-lh-32: 40px;
+
+  /* ---- Z-index ---- */
+  --ap-z-base:    0;
+  --ap-z-popover: 40;
+  --ap-z-modal:   50;
+  --ap-z-toast:   60;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ap-color-bg-canvas:       #fafafa;
+  --ap-color-bg-surface:      #ffffff;
+  --ap-color-bg-elevated:     #ffffff;
+  --ap-color-bg-subtle:       #f4f4f5;
+  --ap-color-bg-overlay:      rgba(9, 9, 15, 0.48);
+  --ap-color-bg-accent-soft:  #dbeafe;
+  --ap-color-bg-accent-solid: #2563eb;
+
+  --ap-color-text-primary:    #18181b;
+  --ap-color-text-secondary:  #52525b;
+  --ap-color-text-tertiary:   #71717a;
+  --ap-color-text-on-accent:  #ffffff;
+
+  --ap-color-border-default:  #d4d4d8;
+  --ap-color-border-subtle:   #e4e4e7;
+  --ap-color-border-strong:   #a1a1aa;
+
+  --ap-color-focus-ring:      #2563eb;
+
+  --ap-color-status-success:  #059669;
+  --ap-color-status-warning:  #d97706;
+  --ap-color-status-danger:   #dc2626;
+
+  --ap-shadow-xs:    0 1px 2px rgba(9, 9, 15, 0.04);
+  --ap-shadow-sm:    0 2px 6px rgba(9, 9, 15, 0.06);
+  --ap-shadow-md:    0 10px 24px rgba(9, 9, 15, 0.08);
+  --ap-shadow-lg:    0 18px 40px rgba(9, 9, 15, 0.10);
+  --ap-shadow-xl:    0 24px 56px rgba(9, 9, 15, 0.12);
+}
+
+/* ============================================================================
+ * SEMANTIC TYPE STYLES
+ * Use these classes (or copy declarations) in screen-level CSS.
+ * ========================================================================= */
+html, body {
+  font-family: var(--ap-font-sans);
+  background: var(--ap-color-bg-canvas);
+  color: var(--ap-color-text-primary);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+.ap-display    { font: 700 28px/36px var(--ap-font-sans); letter-spacing: -0.03em; color: var(--ap-color-text-primary); }
+.ap-h1         { font: 600 24px/32px var(--ap-font-sans); letter-spacing: -0.02em; color: var(--ap-color-text-primary); }
+.ap-h2         { font: 600 20px/28px var(--ap-font-sans); letter-spacing: -0.02em; color: var(--ap-color-text-primary); }
+.ap-h3         { font: 500 18px/26px var(--ap-font-sans); letter-spacing: -0.01em; color: var(--ap-color-text-primary); }
+.ap-body       { font: 400 14px/20px var(--ap-font-sans); color: var(--ap-color-text-primary); }
+.ap-body-lg    { font: 400 16px/24px var(--ap-font-sans); color: var(--ap-color-text-primary); }
+.ap-secondary  { font: 400 13px/18px var(--ap-font-sans); color: var(--ap-color-text-secondary); }
+.ap-meta       { font: 500 12px/16px var(--ap-font-sans); color: var(--ap-color-text-tertiary); }
+.ap-label      { font: 600 11px/14px var(--ap-font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ap-color-text-secondary); }
+.ap-mono       { font: 400 13px/18px var(--ap-font-mono); color: var(--ap-color-text-primary); }
+.ap-code       { font: 500 12px/16px var(--ap-font-mono); color: var(--ap-color-text-primary);
+                 background: var(--ap-color-bg-subtle); padding: 1px 6px; border-radius: var(--ap-radius-xs);
+                 border: 1px solid var(--ap-color-border-subtle); }
+.ap-kbd        { font: 500 11px/14px var(--ap-font-mono); color: var(--ap-color-text-secondary);
+                 background: var(--ap-color-bg-subtle); padding: 2px 6px; border-radius: var(--ap-radius-xs);
+                 border: 1px solid var(--ap-color-border-default); border-bottom-width: 2px; }
+
+/* ---------- Focus ring (every interactive element) -------------------- */
+.ap-focus-ring:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ap-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--ap-radius-sm);
+}
+
+/* ---------- Scrollbar (matches existing app-scrollbar utility) -------- */
+.ap-scrollbar { scrollbar-width: thin; scrollbar-color: var(--ap-color-border-strong) transparent; }
+.ap-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
+.ap-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--ap-color-border-strong);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+.ap-scrollbar::-webkit-scrollbar-track { background: transparent; }

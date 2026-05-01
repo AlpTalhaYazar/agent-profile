@@ -14,6 +14,7 @@ import {
 import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/tokens.css";
 import "./global.css";
 import {
   type AppScreen,
