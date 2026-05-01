@@ -3,7 +3,6 @@ import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import logoMonoUrl from "./assets/logo-mono.svg";
-import trafficLightsUrl from "./assets/traffic-lights.svg";
 import "./styles/tokens.css";
 import "./global.css";
 import {
@@ -398,9 +397,56 @@ function App(): React.ReactElement {
     }
   }, [setTheme]);
 
+  const themeRevealRef = React.useRef<{ x: number; y: number } | null>(null);
+
+  const handleToggleTheme = React.useCallback(
+    (event?: { clientX?: number; clientY?: number }) => {
+      const nextTheme = theme === "dark" ? "light" : "dark";
+      const origin =
+        event?.clientX != null && event?.clientY != null
+          ? { x: event.clientX, y: event.clientY }
+          : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
+      const endRadius = Math.hypot(
+        Math.max(origin.x, window.innerWidth - origin.x),
+        Math.max(origin.y, window.innerHeight - origin.y)
+      );
+
+      const transition = (document as unknown as { startViewTransition?: (cb: () => void) => { ready: Promise<void> } }).startViewTransition?.(() => {
+        document.documentElement.dataset.theme = nextTheme;
+        window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+        setTheme(nextTheme);
+      });
+
+      if (transition) {
+        transition.ready.then(() => {
+          document.documentElement.animate(
+            {
+              clipPath: [
+                `circle(0px at ${origin.x}px ${origin.y}px)`,
+                `circle(${endRadius}px at ${origin.x}px ${origin.y}px)`,
+              ],
+            },
+            {
+              duration: 550,
+              easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+              pseudoElement: "::view-transition-new(root)",
+            }
+          );
+        });
+      } else {
+        document.documentElement.dataset.theme = nextTheme;
+        window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+        setTheme(nextTheme);
+      }
+    },
+    [setTheme, theme]
+  );
+
   React.useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    if (document.documentElement.dataset.theme !== theme) {
+      document.documentElement.dataset.theme = theme;
+    }
   }, [theme]);
 
   const closeCommandPalette = React.useCallback(() => {
@@ -686,7 +732,7 @@ function App(): React.ReactElement {
           }
           openCommandPalette();
         }}
-        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        onToggleTheme={handleToggleTheme}
         theme={theme}
       />
 
@@ -2173,14 +2219,16 @@ function AppTitlebar({
   currentScreen: AppScreen;
   isPaletteOpen: boolean;
   onOpenPalette: () => void;
-  onToggleTheme: () => void;
+  onToggleTheme: (event?: { clientX?: number; clientY?: number }) => void;
   theme: "dark" | "light";
 }): React.ReactElement {
   return (
-    <header className="grid grid-cols-[78px_minmax(0,1fr)_auto] items-center border-b border-default bg-surface px-3">
-      <div className="flex h-full items-center">
-        <img alt="" className="h-3.5 w-[54px]" src={trafficLightsUrl} />
-      </div>
+    <header
+      className="grid grid-cols-[78px_minmax(0,1fr)_auto] items-center border-b border-default bg-surface px-3"
+      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+    >
+      {/* Native traffic lights rendered by macOS via titleBarStyle:"hiddenInset" */}
+      <div className="flex h-full items-center" />
       <div className="flex min-w-0 items-center gap-3">
         <img alt="Agent Profile" className="h-7 w-7 shrink-0" src={logoMonoUrl} />
         <div className="hidden min-w-0 flex-col window-medium:flex">
@@ -2192,6 +2240,7 @@ function AppTitlebar({
           aria-label="Open command palette"
           className="ml-auto flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary transition-colors hover:bg-elevated window-medium:max-w-[420px]"
           onClick={onOpenPalette}
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           type="button"
         >
           <span className="text-base leading-none">⌕</span>
@@ -2201,15 +2250,40 @@ function AppTitlebar({
           </span>
         </button>
       </div>
-      <div className="ml-3 flex items-center gap-2">
-        <div className="inline-flex h-8 items-center gap-2 rounded-md border border-default bg-canvas px-3 text-xs font-medium text-secondary">
-          <span>{theme === "dark" ? "Dark" : "Light"}</span>
-          <Switch
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-            checked={theme === "dark"}
-            onCheckedChange={() => onToggleTheme()}
-          />
-        </div>
+      <div className="ml-3 flex items-center">
+        <button
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          className="theme-orb group relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-default bg-canvas transition-all duration-500 hover:border-strong hover:bg-elevated"
+          onClick={(e) => onToggleTheme(e)}
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          type="button"
+        >
+          <span
+            aria-hidden="true"
+            className="theme-orb-icon absolute transition-all duration-500 ease-[var(--ap-ease-spring)]"
+            style={{
+              opacity: theme === "dark" ? 1 : 0,
+              transform: theme === "dark" ? "rotate(0deg) scale(1)" : "rotate(-90deg) scale(0.4)",
+            }}
+          >
+            <svg className="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+              <path clipRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" fillRule="evenodd" />
+            </svg>
+          </span>
+          <span
+            aria-hidden="true"
+            className="theme-orb-icon absolute transition-all duration-500 ease-[var(--ap-ease-spring)]"
+            style={{
+              opacity: theme === "light" ? 1 : 0,
+              transform: theme === "light" ? "rotate(0deg) scale(1)" : "rotate(90deg) scale(0.4)",
+            }}
+          >
+            <svg className="h-4 w-4 text-blue-300" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+            </svg>
+          </span>
+        </button>
       </div>
     </header>
   );

@@ -98,6 +98,7 @@ export function createSecureWindow(
     height: opts.height ?? 800,
     show: opts.show ?? false,
     center: true,
+    titleBarStyle: "hiddenInset",
     webPreferences,
   });
 }
