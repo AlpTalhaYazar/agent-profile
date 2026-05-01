@@ -244,9 +244,7 @@ function McpServerDetail({
                 key={`${step.scope ?? ""}-${step.event ?? ""}-${idx}`}
                 className="border-b border-subtle last:border-b-0"
               >
-                <td className="py-1.5 pr-4 font-mono text-xs text-primary">
-                  {step.scope ?? "—"}
-                </td>
+                <td className="py-1.5 pr-4 font-mono text-xs text-primary">{step.scope ?? "—"}</td>
                 <td className="py-1.5">
                   <Badge tone={badgeToneForEvent(step.event)}>{step.event ?? "—"}</Badge>
                 </td>
@@ -388,9 +386,7 @@ function PersonaDetail({
 
 function EmptyDetail({ message }: { message: string }): React.ReactElement {
   return (
-    <div className="flex h-full items-center justify-center text-sm text-secondary">
-      {message}
-    </div>
+    <div className="flex h-full items-center justify-center text-sm text-secondary">{message}</div>
   );
 }
 

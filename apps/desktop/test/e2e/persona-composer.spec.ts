@@ -2,7 +2,7 @@
  * @file persona-composer.spec.ts
  *
  * Smoke coverage for the Phase 2 milestone 6 Persona Composer screen:
- *  - Tabs nav switches to "Persona" and the screen renders.
+ *  - Sidebar nav switches to "Persona" and the screen renders.
  *  - persona.render fires once role + auth + cwd are non-empty; the catalog
  *    surfaces the combined CLAUDE.md plus per-category counts.
  *  - Clicking the combined CLAUDE.md entry shows the Monaco preview.
@@ -96,8 +96,8 @@ persona:
     const page = await app.firstWindow();
     await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
 
-    // Switch to the Persona tab.
-    await page.getByRole("tab", { name: "Persona" }).click();
+    // Switch to the Persona screen from the shell sidebar.
+    await page.getByTestId("sidebar-persona").click();
     await expect(page.getByRole("heading", { name: "Persona Composer" })).toBeVisible();
 
     // Once persona.render resolves, the catalog appears. Wait for the

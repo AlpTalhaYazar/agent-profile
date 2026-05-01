@@ -1,13 +1,4 @@
-import {
-  Badge,
-  Button,
-  CodeEditor,
-  Field,
-  Input,
-  Select,
-  Switch,
-  cn,
-} from "@agent-profile/ui";
+import { Badge, Button, CodeEditor, Field, Input, Select, Switch, cn } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
@@ -44,8 +35,8 @@ import {
   selectedScopeLabelAtom,
   selectedScopePathAtom,
   settingsParseErrorAtom,
-  themeAtom,
   settingsTextAtom,
+  themeAtom,
   validationStateAtom,
   versionAtom,
 } from "./lib/atoms.js";
@@ -636,7 +627,9 @@ function App(): React.ReactElement {
 
     if (effectiveState.provenance) {
       const provenanceEntries: Array<[string, string]> = [
-        ...Object.keys(effectiveState.provenance.env).map((key) => ["env", key] as [string, string]),
+        ...Object.keys(effectiveState.provenance.env).map(
+          (key) => ["env", key] as [string, string]
+        ),
         ...Object.keys(effectiveState.provenance.settings).map(
           (key) => ["settings", key] as [string, string]
         ),
@@ -644,7 +637,7 @@ function App(): React.ReactElement {
           (key) => ["mcpServers", key] as [string, string]
         ),
       ];
-      provenanceEntries.forEach(([section, key]) => {
+      for (const [section, key] of provenanceEntries) {
         items.push({
           id: `provenance:${section}:${key}`,
           group: "Provenance",
@@ -659,7 +652,7 @@ function App(): React.ReactElement {
             setCurrentScreen("provenance");
           },
         });
-      });
+      }
     }
 
     const query = commandPaletteQuery.trim().toLowerCase();
@@ -762,7 +755,11 @@ function App(): React.ReactElement {
                     <div className="flex min-w-0 flex-col justify-end gap-1 text-sm text-secondary">
                       <span className="truncate">Version {version ?? "loading"}</span>
                       <span className="truncate">
-                        {isRefreshing ? "Refreshing scopes" : isBootstrapping ? "Bootstrapping" : "Ready"}
+                        {isRefreshing
+                          ? "Refreshing scopes"
+                          : isBootstrapping
+                            ? "Bootstrapping"
+                            : "Ready"}
                       </span>
                     </div>
                   </div>
@@ -778,7 +775,8 @@ function App(): React.ReactElement {
                     <div className="border-b border-subtle px-4 py-3">
                       <h1 className="text-base font-semibold text-primary">Profile Explorer</h1>
                       <p className="mt-1 text-sm text-secondary">
-                        Scope files for <span className="font-medium text-primary">{selectedRole || "—"}</span>
+                        Scope files for{" "}
+                        <span className="font-medium text-primary">{selectedRole || "—"}</span>
                       </p>
                     </div>
                     <ScopeTree
@@ -821,7 +819,9 @@ function App(): React.ReactElement {
                           </span>
                         </div>
                         {previewState.errorMessage ? (
-                          <p className="mt-2 text-sm text-status-danger">{previewState.errorMessage}</p>
+                          <p className="mt-2 text-sm text-status-danger">
+                            {previewState.errorMessage}
+                          </p>
                         ) : previewState.diff.length > 0 ? (
                           <ul className="mt-3 grid gap-2 text-sm">
                             {previewState.diff.slice(0, 16).map((item) => (
@@ -846,10 +846,14 @@ function App(): React.ReactElement {
                                   </span>
                                 </div>
                                 {item.before ? (
-                                  <span className="font-mono text-xs text-secondary">- {item.before}</span>
+                                  <span className="font-mono text-xs text-secondary">
+                                    - {item.before}
+                                  </span>
                                 ) : null}
                                 {item.after ? (
-                                  <span className="font-mono text-xs text-primary">+ {item.after}</span>
+                                  <span className="font-mono text-xs text-primary">
+                                    + {item.after}
+                                  </span>
                                 ) : null}
                               </li>
                             ))}
@@ -906,7 +910,9 @@ function App(): React.ReactElement {
                       <div className="border-b border-subtle px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
-                            disabled={!hasUnsavedChanges || invalidDraft || isSaving || editorDisabled}
+                            disabled={
+                              !hasUnsavedChanges || invalidDraft || isSaving || editorDisabled
+                            }
                             onClick={() => void handleSave()}
                             type="button"
                             variant="primary"
@@ -935,10 +941,14 @@ function App(): React.ReactElement {
                         </div>
 
                         {validationState.errorMessage ? (
-                          <p className="mt-2 text-sm text-status-danger">{validationState.errorMessage}</p>
+                          <p className="mt-2 text-sm text-status-danger">
+                            {validationState.errorMessage}
+                          </p>
                         ) : null}
 
-                        {validationState.issues.length > 0 || settingsParseError || jsonState.parseError ? (
+                        {validationState.issues.length > 0 ||
+                        settingsParseError ||
+                        jsonState.parseError ? (
                           <div className="mt-3 grid gap-2 rounded-md border border-status-warning bg-status-warning-soft px-3 py-3 text-sm text-status-warning">
                             {settingsParseError ? <div>settings: {settingsParseError}</div> : null}
                             {jsonState.parseError ? <div>json: {jsonState.parseError}</div> : null}
@@ -1093,9 +1103,7 @@ function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): React.R
                   <button
                     className={cn(
                       "grid w-full gap-1 rounded-md border border-transparent px-2 py-2 text-left transition-colors",
-                      selectedPath === entry.path
-                        ? "border-default bg-elevated"
-                        : "hover:bg-subtle"
+                      selectedPath === entry.path ? "border-default bg-elevated" : "hover:bg-subtle"
                     )}
                     onClick={() => onSelect(entry.path)}
                     type="button"
@@ -1222,7 +1230,10 @@ function PreviewSummary({
         <h3 className="text-sm font-semibold">Environment</h3>
         <div className="mt-3 grid gap-2">
           {Object.entries(effective?.env ?? {}).map(([key, value]) => (
-            <div className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2" key={key}>
+            <div
+              className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2"
+              key={key}
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-primary">{key}</span>
                 <span className="text-xs text-secondary">
@@ -1243,7 +1254,10 @@ function PreviewSummary({
         <div className="mt-3 grid gap-2">
           {settingsEntries.length > 0 ? (
             settingsEntries.map(([key, value]) => (
-              <div className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2" key={key}>
+              <div
+                className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2"
+                key={key}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-primary">{key}</span>
                   <span className="text-xs text-secondary">
@@ -2188,14 +2202,14 @@ function AppTitlebar({
         </button>
       </div>
       <div className="ml-3 flex items-center gap-2">
-        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-default bg-canvas px-3 text-xs font-medium text-secondary">
+        <div className="inline-flex h-8 items-center gap-2 rounded-md border border-default bg-canvas px-3 text-xs font-medium text-secondary">
           <span>{theme === "dark" ? "Dark" : "Light"}</span>
           <Switch
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
             checked={theme === "dark"}
             onCheckedChange={() => onToggleTheme()}
           />
-        </label>
+        </div>
       </div>
     </header>
   );
@@ -2247,7 +2261,9 @@ function AppSidebar({
                   title={item.label}
                   type="button"
                 >
-                  <span className="w-4 shrink-0 text-center text-base leading-none">{item.icon}</span>
+                  <span className="w-4 shrink-0 text-center text-base leading-none">
+                    {item.icon}
+                  </span>
                   <span className="hidden truncate window-medium:block">{item.label}</span>
                   {item.badge ? (
                     <span className="ml-auto hidden font-mono text-[11px] text-tertiary window-medium:block">
@@ -2288,14 +2304,28 @@ function AppStatusbar({
       <span
         className={cn(
           "h-1.5 w-1.5 rounded-full",
-          appError ? "bg-status-danger" : isRefreshing || isBootstrapping ? "bg-status-warning" : "bg-status-success"
+          appError
+            ? "bg-status-danger"
+            : isRefreshing || isBootstrapping
+              ? "bg-status-warning"
+              : "bg-status-success"
         )}
       />
-      <span>{appError ? "Error" : isRefreshing ? "Refreshing" : isBootstrapping ? "Bootstrapping" : "Ready"}</span>
+      <span>
+        {appError
+          ? "Error"
+          : isRefreshing
+            ? "Refreshing"
+            : isBootstrapping
+              ? "Bootstrapping"
+              : "Ready"}
+      </span>
       <span className="text-secondary">·</span>
       <span>{SCREEN_LABELS[currentScreen]}</span>
       <span className="text-secondary">·</span>
-      <span className="truncate">{selectedRole || "—"} @ {selectedAuthId || "—"}</span>
+      <span className="truncate">
+        {selectedRole || "—"} @ {selectedAuthId || "—"}
+      </span>
       <span className="text-secondary">·</span>
       <span className="truncate">{cwd || "No working directory"}</span>
       <span className="ml-auto">v{version ?? "loading"}</span>
@@ -2353,7 +2383,9 @@ function ProfileEditorInspector({
           </div>
           <div className="flex items-center justify-between gap-2">
             <dt className="text-secondary">Scope</dt>
-            <dd className="truncate font-mono text-[11px] text-primary">{selectedScope?.path ?? "—"}</dd>
+            <dd className="truncate font-mono text-[11px] text-primary">
+              {selectedScope?.path ?? "—"}
+            </dd>
           </div>
           <div className="flex items-center justify-between gap-2">
             <dt className="text-secondary">Version</dt>
@@ -2364,7 +2396,13 @@ function ProfileEditorInspector({
 
       <div className="flex flex-wrap gap-2">
         <Badge tone={appError ? "danger" : isRefreshing || isBootstrapping ? "warning" : "success"}>
-          {appError ? "error" : isRefreshing ? "refreshing" : isBootstrapping ? "bootstrapping" : "ready"}
+          {appError
+            ? "error"
+            : isRefreshing
+              ? "refreshing"
+              : isBootstrapping
+                ? "bootstrapping"
+                : "ready"}
         </Badge>
         <Badge tone={hasUnsavedChanges ? "warning" : "neutral"}>
           {hasUnsavedChanges ? "unsaved changes" : "saved"}
@@ -2377,7 +2415,15 @@ function ProfileEditorInspector({
       <div className="rounded-lg border border-default bg-canvas p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold text-primary">Validation</span>
-          <Badge tone={validationState.status === "error" ? "danger" : validationState.issues.length > 0 ? "warning" : "success"}>
+          <Badge
+            tone={
+              validationState.status === "error"
+                ? "danger"
+                : validationState.issues.length > 0
+                  ? "warning"
+                  : "success"
+            }
+          >
             {validationState.status}
           </Badge>
         </div>
@@ -2393,7 +2439,15 @@ function ProfileEditorInspector({
       <div className="rounded-lg border border-default bg-canvas p-3">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold text-primary">Preview</span>
-          <Badge tone={previewState.status === "error" ? "danger" : previewState.diff.length > 0 ? "warning" : "neutral"}>
+          <Badge
+            tone={
+              previewState.status === "error"
+                ? "danger"
+                : previewState.diff.length > 0
+                  ? "warning"
+                  : "neutral"
+            }
+          >
             {previewState.status}
           </Badge>
         </div>
@@ -2431,9 +2485,9 @@ function CommandPalette({
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const groupedItems = React.useMemo(() => {
     const groups = new Map<string, CommandPaletteItem[]>();
-    items.forEach((item) => {
+    for (const item of items) {
       groups.set(item.group, [...(groups.get(item.group) ?? []), item]);
-    });
+    }
     return Array.from(groups.entries());
   }, [items]);
 
@@ -2464,9 +2518,6 @@ function CommandPalette({
       >
         <div className="border-b border-subtle p-3">
           <Input
-            aria-activedescendant={items[activeIndex] ? `command-palette-item-${items[activeIndex].id}` : undefined}
-            aria-controls="command-palette-results"
-            aria-expanded="true"
             aria-label="Command palette query"
             className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
             onChange={(event) => onQueryChange(event.target.value)}
@@ -2476,7 +2527,9 @@ function CommandPalette({
                 onActiveIndexChange(items.length ? (activeIndex + 1) % items.length : 0);
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
-                onActiveIndexChange(items.length ? (activeIndex - 1 + items.length) % items.length : 0);
+                onActiveIndexChange(
+                  items.length ? (activeIndex - 1 + items.length) % items.length : 0
+                );
               } else if (event.key === "Enter" && items[activeIndex]) {
                 event.preventDefault();
                 onSelect(items[activeIndex]);
@@ -2487,16 +2540,11 @@ function CommandPalette({
             }}
             placeholder="Search screens, scopes, auth, or provenance…"
             ref={inputRef}
-            role="combobox"
             value={query}
           />
         </div>
 
-        <div
-          className="app-scrollbar overflow-auto p-2"
-          id="command-palette-results"
-          role="listbox"
-        >
+        <div className="app-scrollbar overflow-auto p-2" id="command-palette-results">
           {groupedItems.length === 0 ? (
             <div className="px-3 py-6 text-sm text-secondary">No results.</div>
           ) : (
@@ -2511,7 +2559,6 @@ function CommandPalette({
                     const active = absoluteIndex === activeIndex;
                     return (
                       <button
-                        aria-selected={active}
                         className={cn(
                           "flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors",
                           active ? "bg-accent-soft text-primary" : "text-primary hover:bg-subtle"
@@ -2521,13 +2568,14 @@ function CommandPalette({
                         key={item.id}
                         onClick={() => onSelect(item)}
                         onMouseEnter={() => onActiveIndexChange(absoluteIndex)}
-                        role="option"
                         type="button"
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{item.label}</div>
                           {item.description ? (
-                            <div className="truncate text-xs text-secondary">{item.description}</div>
+                            <div className="truncate text-xs text-secondary">
+                              {item.description}
+                            </div>
                           ) : null}
                         </div>
                         {item.hint ? (

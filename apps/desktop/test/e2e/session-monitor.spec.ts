@@ -2,7 +2,7 @@
  * @file session-monitor.spec.ts
  *
  * Smoke coverage for the Phase 2 milestone 5 Session Monitor screen:
- *  - Tabs nav switches to "Session Monitor" and the screen renders.
+ *  - Sidebar nav switches to "Session Monitor" and the screen renders.
  *  - Seeded SessionRecord shows up in the table with the correct status
  *    badge, role, and auth.
  *  - The Refresh button reloads the table.
@@ -128,7 +128,7 @@ authProfiles:
     const page = await app.firstWindow();
     await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
 
-    await page.getByRole("tab", { name: "Session Monitor" }).click();
+    await page.getByTestId("sidebar-sessions").click();
     await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
 
     // Both seeded session ids show up in the table.

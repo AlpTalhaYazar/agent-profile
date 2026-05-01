@@ -2,7 +2,7 @@
  * @file auth-vault.spec.ts
  *
  * Smoke coverage for the Phase 2 milestone 5 Auth Vault screen:
- *  - Tabs nav switches to "Auth Vault" and the screen renders.
+ *  - Sidebar nav switches to "Auth Vault" and the screen renders.
  *  - Seeded auth profiles from authProfiles.yml are listed.
  *  - The "Add profile" dialog opens (the Main native key-entry step is
  *    deferred to a follow-up spec — covered manually for now).
@@ -86,8 +86,8 @@ env:
     const page = await app.firstWindow();
     await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
 
-    // Switch to the Auth Vault tab.
-    await page.getByRole("tab", { name: "Auth Vault" }).click();
+    // Switch to the Auth Vault screen from the shell sidebar.
+    await page.getByTestId("sidebar-auth-vault").click();
     await expect(page.getByRole("heading", { name: "Auth profiles" })).toBeVisible();
 
     // Seeded profiles appear in the list (the sidebar buttons each include

@@ -2,7 +2,7 @@
  * @file provenance-inspector.spec.ts
  *
  * Smoke coverage for the Phase 2 milestone 6 Provenance Inspector screen:
- *  - Tabs nav switches to "Provenance" and the screen renders.
+ *  - Sidebar nav switches to "Provenance" and the screen renders.
  *  - When a role + auth are selected, the section selector lists the cascade
  *    fields (mcpServers / env / settings).
  *  - Clicking a field surfaces its provenance chain in the detail panel.
@@ -106,8 +106,8 @@ mcpServers:
     // Provenance Inspector reads) is populated.
     await expect(page.getByText("Resolved for backend @ work")).toBeVisible();
 
-    // Switch to the Provenance tab.
-    await page.getByRole("tab", { name: "Provenance" }).click();
+    // Switch to the Provenance screen from the shell sidebar.
+    await page.getByTestId("sidebar-provenance").click();
     await expect(page.getByRole("heading", { name: "Provenance Inspector" })).toBeVisible();
 
     // The section selector lists every cascade field; the seeded MCP servers

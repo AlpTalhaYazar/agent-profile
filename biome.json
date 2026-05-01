@@ -36,6 +36,7 @@
       ".turbo",
       "*.tsbuildinfo",
       "apps/desktop/.vite",
+      "apps/desktop/out",
       "graphify-out",
       ".claude/settings.local.json"
     ]
