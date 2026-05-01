@@ -146,6 +146,7 @@ export function createHandlers(
           displayName: p.displayName ?? "",
           mode: p.mode,
           secrets: p.secrets,
+          ...(p.oauth !== undefined ? { oauth: p.oauth } : {}),
         })),
       };
     }),

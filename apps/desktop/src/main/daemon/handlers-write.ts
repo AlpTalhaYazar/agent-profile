@@ -49,6 +49,7 @@ import {
   type ReqAuthRemoveT,
   type ReqAuthRotateT,
   type ReqAuthSetSecretT,
+  type ReqAuthUpdateMetaT,
   type ReqProfileSaveT,
   type ReqSecretGetT,
   type ReqSecretsMigrateT,
@@ -221,7 +222,11 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       }
       doc.authProfiles[spec.id] = {
         ...(spec.displayName !== undefined ? { displayName: spec.displayName } : {}),
-        anthropic: { mode: spec.anthropic.mode, secretRef: spec.anthropic.secretRef },
+        anthropic: {
+          mode: spec.anthropic.mode,
+          secretRef: spec.anthropic.secretRef,
+          ...(spec.anthropic.oauth !== undefined ? { oauth: spec.anthropic.oauth } : {}),
+        },
         mcpSecretRefs: spec.mcpSecretRefs ?? {},
       };
       saveAuthProfilesSafe(doc, deps.myClaudeHome);
@@ -287,6 +292,34 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       await deps.audit.append({
         kind: "config_change",
         actionKind: "auth.rotate",
+        actor: "daemon",
+        target: authId,
+        diffSha256: null,
+      });
+      return {};
+    }),
+
+    "auth.update-meta": wrap<ReqAuthUpdateMetaT>("auth.update-meta", async (req) => {
+      const { authId, displayName, oauth } = req;
+      const doc = loadAuthProfilesSafe(deps.myClaudeHome);
+      const profile = doc.authProfiles[authId];
+      if (!profile) {
+        throw new IpcError("NOT_FOUND", `auth profile "${authId}" not found`);
+      }
+      if (displayName !== undefined) {
+        if (displayName === "") {
+          delete profile.displayName;
+        } else {
+          profile.displayName = displayName;
+        }
+      }
+      if (oauth !== undefined) {
+        profile.anthropic.oauth = { ...(profile.anthropic.oauth ?? {}), ...oauth };
+      }
+      saveAuthProfilesSafe(doc, deps.myClaudeHome);
+      await deps.audit.append({
+        kind: "config_change",
+        actionKind: "auth.update-meta",
         actor: "daemon",
         target: authId,
         diffSha256: null,
