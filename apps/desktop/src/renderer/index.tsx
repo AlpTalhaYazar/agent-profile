@@ -1,19 +1,18 @@
 import {
+  Badge,
   Button,
   CodeEditor,
   Field,
   Input,
   Select,
   Switch,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   cn,
 } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
+import logoMonoUrl from "./assets/logo-mono.svg";
+import trafficLightsUrl from "./assets/traffic-lights.svg";
 import "./styles/tokens.css";
 import "./global.css";
 import {
@@ -21,6 +20,9 @@ import {
   appErrorAtom,
   authProfilesAtom,
   availableRolesAtom,
+  commandPaletteActiveIndexAtom,
+  commandPaletteOpenAtom,
+  commandPaletteQueryAtom,
   currentScreenAtom,
   cwdAtom,
   draftDocAtom,
@@ -36,11 +38,13 @@ import {
   previewStateAtom,
   scopeEntriesAtom,
   selectedAuthIdAtom,
+  selectedProvenanceFieldAtom,
   selectedRoleAtom,
   selectedScopeAtom,
   selectedScopeLabelAtom,
   selectedScopePathAtom,
   settingsParseErrorAtom,
+  themeAtom,
   settingsTextAtom,
   validationStateAtom,
   versionAtom,
@@ -74,6 +78,7 @@ import type {
   DiffItem,
   EffectiveConfig,
   MergeMode,
+  PreviewState,
   Provenance,
   ScopeDoc,
   ScopeDocPersona,
@@ -81,13 +86,31 @@ import type {
   ScopeKind,
   ScopeListEntry,
   TransportType,
+  ValidationState,
 } from "./lib/types.js";
 import { AuthVaultScreen } from "./screens/auth-vault.js";
 import { PersonaComposerScreen } from "./screens/persona-composer.js";
 import { ProvenanceInspectorScreen } from "./screens/provenance-inspector.js";
 import { SessionMonitorScreen } from "./screens/session-monitor.js";
 
+const THEME_STORAGE_KEY = "agent-profile.theme";
+
+const SCREEN_LABELS: Record<AppScreen, string> = {
+  editor: "Profile Editor",
+  "auth-vault": "Auth Vault",
+  sessions: "Session Monitor",
+  provenance: "Provenance Inspector",
+  persona: "Persona Composer",
+};
+
 function App(): React.ReactElement {
+  const [currentScreen, setCurrentScreen] = useAtom(currentScreenAtom);
+  const [theme, setTheme] = useAtom(themeAtom);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useAtom(commandPaletteOpenAtom);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useAtom(commandPaletteQueryAtom);
+  const [commandPaletteActiveIndex, setCommandPaletteActiveIndex] = useAtom(
+    commandPaletteActiveIndexAtom
+  );
   const [version, setVersion] = useAtom(versionAtom);
   const [authProfiles, setAuthProfiles] = useAtom(authProfilesAtom);
   const [availableRoles, setAvailableRoles] = useAtom(availableRolesAtom);
@@ -109,13 +132,14 @@ function App(): React.ReactElement {
   const [isBootstrapping, setIsBootstrapping] = useAtom(isBootstrappingAtom);
   const [isRefreshing, setIsRefreshing] = useAtom(isRefreshingAtom);
   const [isSaving, setIsSaving] = useAtom(isSavingAtom);
+  const [, setSelectedProvenanceField] = useAtom(selectedProvenanceFieldAtom);
   const selectedScope = useAtomValue(selectedScopeAtom);
   const selectedScopeLabel = useAtomValue(selectedScopeLabelAtom);
   const hasUnsavedChanges = useAtomValue(hasUnsavedChangesAtom);
   const issuesByPath = useAtomValue(issuesByPathAtom);
-  const currentScreen = useAtomValue(currentScreenAtom);
   const previewScrollTargets = React.useRef<Record<string, HTMLElement | null>>({});
   const previewPaneRef = React.useRef<HTMLDivElement | null>(null);
+  const commandPaletteReturnFocusRef = React.useRef<HTMLElement | null>(null);
 
   const hydrateEditor = React.useCallback(
     (nextDoc: ScopeDoc | null) => {
@@ -376,6 +400,76 @@ function App(): React.ReactElement {
     target.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [effectiveState.effective, selectedScope]);
 
+  React.useEffect(() => {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === "dark" || storedTheme === "light") {
+      setTheme(storedTheme);
+    }
+  }, [setTheme]);
+
+  React.useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  const closeCommandPalette = React.useCallback(() => {
+    setCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+    setCommandPaletteActiveIndex(0);
+    window.setTimeout(() => {
+      commandPaletteReturnFocusRef.current?.focus();
+    }, 0);
+  }, [setCommandPaletteActiveIndex, setCommandPaletteOpen, setCommandPaletteQuery]);
+
+  const openCommandPalette = React.useCallback(() => {
+    const activeElement = document.activeElement;
+    commandPaletteReturnFocusRef.current =
+      activeElement instanceof HTMLElement ? activeElement : null;
+    setCommandPaletteOpen(true);
+    setCommandPaletteQuery("");
+    setCommandPaletteActiveIndex(0);
+  }, [setCommandPaletteActiveIndex, setCommandPaletteOpen, setCommandPaletteQuery]);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isModifier = event.metaKey || event.ctrlKey;
+      if (isModifier && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (commandPaletteOpen) {
+          closeCommandPalette();
+        } else {
+          openCommandPalette();
+        }
+        return;
+      }
+
+      if (isModifier && /^[1-5]$/.test(event.key)) {
+        event.preventDefault();
+        const nextScreenMap: Record<string, AppScreen> = {
+          "1": "editor",
+          "2": "auth-vault",
+          "3": "sessions",
+          "4": "provenance",
+          "5": "persona",
+        };
+        const nextScreen = nextScreenMap[event.key];
+        if (!nextScreen) return;
+        setCurrentScreen(nextScreen);
+        return;
+      }
+
+      if (event.key === "Escape" && commandPaletteOpen) {
+        event.preventDefault();
+        closeCommandPalette();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeCommandPalette, commandPaletteOpen, openCommandPalette, setCurrentScreen]);
+
   const updateDraft = React.useCallback(
     (updater: (current: ScopeDoc) => ScopeDoc) => {
       setDraftDoc((current) => {
@@ -465,286 +559,491 @@ function App(): React.ReactElement {
   const previewEffective = previewState.effective ?? effectiveState.effective;
   const editorDisabled = !draftDoc;
   const invalidDraft = Boolean(settingsParseError || jsonState.parseError);
+  const showEditorInspector = currentScreen === "editor";
+  const paletteItems = React.useMemo(() => {
+    const items: CommandPaletteItem[] = [
+      {
+        id: "nav-editor",
+        group: "Navigate",
+        label: "Profile Editor",
+        hint: "Cmd+1",
+        keywords: ["editor", "profile", "scope"],
+        onSelect: () => setCurrentScreen("editor"),
+      },
+      {
+        id: "nav-auth",
+        group: "Navigate",
+        label: "Auth Vault",
+        hint: "Cmd+2",
+        keywords: ["auth", "vault", "profiles"],
+        onSelect: () => setCurrentScreen("auth-vault"),
+      },
+      {
+        id: "nav-sessions",
+        group: "Navigate",
+        label: "Session Monitor",
+        hint: "Cmd+3",
+        keywords: ["sessions", "monitor"],
+        onSelect: () => setCurrentScreen("sessions"),
+      },
+      {
+        id: "nav-provenance",
+        group: "Navigate",
+        label: "Provenance Inspector",
+        hint: "Cmd+4",
+        keywords: ["provenance", "cascade", "inspect"],
+        onSelect: () => setCurrentScreen("provenance"),
+      },
+      {
+        id: "nav-persona",
+        group: "Navigate",
+        label: "Persona Composer",
+        hint: "Cmd+5",
+        keywords: ["persona", "composer", "claude"],
+        onSelect: () => setCurrentScreen("persona"),
+      },
+      ...scopeEntries.map((entry) => ({
+        id: `scope:${entry.path}`,
+        group: "Scope",
+        label: entry.role !== "—" ? `${entry.scope} / ${entry.role}` : entry.scope,
+        description: entry.path,
+        keywords: [entry.scope, entry.role, entry.path],
+        onSelect: () => {
+          setCurrentScreen("editor");
+          setSelectedScopePath(entry.path);
+        },
+      })),
+      ...authProfiles.map((profile) => ({
+        id: `auth:${profile.id}`,
+        group: "Auth",
+        label: profile.displayName || profile.id,
+        description: `${profile.id} · ${profile.mode}`,
+        keywords: [profile.id, profile.displayName, profile.mode],
+        onSelect: () => {
+          setCurrentScreen("editor");
+          setSelectedAuthId(profile.id);
+        },
+      })),
+      {
+        id: "sessions:open",
+        group: "Sessions",
+        label: "Open Session Monitor",
+        description: "Jump to active and recent sessions",
+        keywords: ["sessions", "monitor", "processes"],
+        onSelect: () => setCurrentScreen("sessions"),
+      },
+    ];
+
+    if (effectiveState.provenance) {
+      const provenanceEntries: Array<[string, string]> = [
+        ...Object.keys(effectiveState.provenance.env).map((key) => ["env", key] as [string, string]),
+        ...Object.keys(effectiveState.provenance.settings).map(
+          (key) => ["settings", key] as [string, string]
+        ),
+        ...Object.keys(effectiveState.provenance.mcpServers).map(
+          (key) => ["mcpServers", key] as [string, string]
+        ),
+      ];
+      provenanceEntries.forEach(([section, key]) => {
+        items.push({
+          id: `provenance:${section}:${key}`,
+          group: "Provenance",
+          label: key,
+          description: section,
+          keywords: [section, key, "provenance"],
+          onSelect: () => {
+            setSelectedProvenanceField({
+              section: section as "env" | "settings" | "mcpServers",
+              key,
+            });
+            setCurrentScreen("provenance");
+          },
+        });
+      });
+    }
+
+    const query = commandPaletteQuery.trim().toLowerCase();
+    if (!query) return items;
+    return items.filter((item) =>
+      [item.label, item.description ?? "", ...(item.keywords ?? [])]
+        .join(" ")
+        .toLowerCase()
+        .includes(query)
+    );
+  }, [
+    authProfiles,
+    commandPaletteQuery,
+    effectiveState.provenance,
+    scopeEntries,
+    setCurrentScreen,
+    setSelectedAuthId,
+    setSelectedProvenanceField,
+    setSelectedScopePath,
+  ]);
 
   return (
-    <main className="flex h-full min-h-full flex-col bg-neutral-100 text-neutral-950">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="grid grid-cols-1 gap-3 px-4 py-3 xl:grid-cols-[1.2fr_1fr_1.2fr_auto]">
-          <Field
-            description="Resolve project scopes from this directory."
-            label="Working directory"
-          >
-            <div className="flex gap-2">
-              <Input
-                aria-label="Working directory"
-                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                  setCwd(event.target.value)
-                }
-                value={cwd}
-              />
-              <Button onClick={() => void handlePickDirectory()} type="button" variant="secondary">
-                Browse
-              </Button>
-            </div>
-          </Field>
-          <Field description="Select the role-scoped cascade." label="Role">
-            <Select
-              aria-label="Role"
-              onValueChange={setSelectedRole}
-              options={availableRoles.map((role) => ({ value: role, label: role }))}
-              value={selectedRole}
-            />
-          </Field>
-          <Field description="Auth metadata only; secrets remain in Main." label="Auth profile">
-            <Select
-              aria-label="Auth profile"
-              onValueChange={setSelectedAuthId}
-              options={authProfiles.map((profile) => ({
-                value: profile.id,
-                label: `${profile.displayName || profile.id} (${profile.mode})`,
-              }))}
-              value={selectedAuthId}
-            />
-          </Field>
-          <div className="flex min-w-0 flex-col justify-end gap-1 text-sm text-neutral-500">
-            <span className="truncate">Version {version ?? "loading"}</span>
-            <span className="truncate">
-              {isRefreshing ? "Refreshing scopes" : isBootstrapping ? "Bootstrapping" : "Ready"}
-            </span>
-          </div>
-        </div>
-        {appError ? (
-          <div className="border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
-            {appError}
-          </div>
-        ) : null}
-      </header>
+    <div className="grid h-full min-h-full grid-rows-[52px_minmax(0,1fr)_28px] bg-canvas text-primary">
+      <AppTitlebar
+        currentScreen={currentScreen}
+        isPaletteOpen={commandPaletteOpen}
+        onOpenPalette={() => {
+          if (commandPaletteOpen) {
+            closeCommandPalette();
+            return;
+          }
+          openCommandPalette();
+        }}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        theme={theme}
+      />
 
-      <ScreenTabs />
+      <div className="grid min-h-0 grid-cols-[48px_minmax(0,1fr)] window-medium:grid-cols-[240px_minmax(0,1fr)]">
+        <AppSidebar
+          authCount={authProfiles.length}
+          currentScreen={currentScreen}
+          onSelect={setCurrentScreen}
+          scopeCount={scopeEntries.length}
+        />
 
-      {currentScreen !== "editor" ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {currentScreen === "auth-vault" ? (
-            <AuthVaultScreen />
-          ) : currentScreen === "sessions" ? (
-            <SessionMonitorScreen />
-          ) : currentScreen === "provenance" ? (
-            <ProvenanceInspectorScreen />
-          ) : currentScreen === "persona" ? (
-            <PersonaComposerScreen />
-          ) : null}
-        </div>
-      ) : null}
-
-      <div
-        className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)]"
-        style={{ display: currentScreen === "editor" ? undefined : "none" }}
-      >
-        <aside className="app-scrollbar min-h-0 overflow-auto border-r border-neutral-200 bg-white">
-          <div className="border-b border-neutral-200 px-4 py-3">
-            <h1 className="text-base font-semibold">Profile Explorer</h1>
-            <p className="mt-1 text-sm text-neutral-500">
-              Scope files for{" "}
-              <span className="font-medium text-neutral-700">{selectedRole || "—"}</span>
-            </p>
-          </div>
-          <ScopeTree
-            entries={scopeEntries}
-            onSelect={setSelectedScopePath}
-            selectedPath={selectedScopePath}
-          />
-        </aside>
-
-        <section className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-          <div
-            className="app-scrollbar min-h-0 overflow-auto border-b border-neutral-200 bg-neutral-50 xl:border-b-0 xl:border-r"
-            ref={previewPaneRef}
-          >
-            <div className="border-b border-neutral-200 px-4 py-3">
-              <h2 className="text-base font-semibold">Effective preview</h2>
-              <p className="mt-1 text-sm text-neutral-500">
-                Resolved for {selectedRole || "—"} @ {selectedAuthId || "—"}
-              </p>
-            </div>
-
-            <PreviewSummary
-              effective={previewEffective}
-              setTargetRef={(key, element) => {
-                previewScrollTargets.current[key] = element;
-              }}
-              selectedScope={selectedScope}
-              provenance={effectiveState.provenance}
-            />
-
-            <div className="border-t border-neutral-200 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold">Draft impact</h3>
-                <span className="text-xs text-neutral-500">
-                  {previewState.status === "loading"
-                    ? "Previewing"
-                    : previewState.status === "error"
-                      ? "Preview failed"
-                      : `${previewState.diff.length} changes`}
-                </span>
-              </div>
-              {previewState.errorMessage ? (
-                <p className="mt-2 text-sm text-red-700">{previewState.errorMessage}</p>
-              ) : previewState.diff.length > 0 ? (
-                <ul className="mt-3 grid gap-2 text-sm">
-                  {previewState.diff.slice(0, 16).map((item) => (
-                    <li
-                      className="grid gap-1 rounded-md border border-neutral-200 bg-white px-3 py-2"
-                      key={`${item.section}:${item.key}:${item.change}`}
+        <div
+          className={cn(
+            "grid min-h-0 grid-cols-1",
+            showEditorInspector && "window-medium:grid-cols-[minmax(0,1fr)_320px]"
+          )}
+        >
+          <div className="min-h-0 overflow-hidden bg-canvas">
+            {currentScreen === "editor" ? (
+              <div className="flex h-full min-h-0 flex-col bg-canvas">
+                <header className="border-b border-subtle bg-surface">
+                  <div className="grid grid-cols-1 gap-3 px-4 py-3 window-large:grid-cols-[1.2fr_1fr_1.2fr_auto]">
+                    <Field
+                      description="Resolve project scopes from this directory."
+                      label="Working directory"
                     >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-neutral-900">{item.key}</span>
-                        <span className="text-xs uppercase tracking-wide text-neutral-500">
-                          {item.section}
-                        </span>
-                        <span
-                          className={cn(
-                            "text-xs font-medium",
-                            item.change === "added" && "text-emerald-700",
-                            item.change === "removed" && "text-red-700",
-                            item.change === "changed" && "text-amber-700"
-                          )}
+                      <div className="flex gap-2">
+                        <Input
+                          aria-label="Working directory"
+                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                            setCwd(event.target.value)
+                          }
+                          value={cwd}
+                        />
+                        <Button
+                          onClick={() => void handlePickDirectory()}
+                          type="button"
+                          variant="secondary"
                         >
-                          {item.change}
-                        </span>
+                          Browse
+                        </Button>
                       </div>
-                      {item.before ? (
-                        <span className="font-mono text-xs text-neutral-500">- {item.before}</span>
-                      ) : null}
-                      {item.after ? (
-                        <span className="font-mono text-xs text-neutral-700">+ {item.after}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-neutral-500">
-                  {invalidDraft
-                    ? "Preview waits for valid JSON inputs."
-                    : "No observable effective changes yet."}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="app-scrollbar min-h-0 overflow-auto bg-white">
-            <div className="border-b border-neutral-200 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold">Profile Editor</h2>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    Editing {selectedScopeLabel}
-                    {selectedScope ? ` • ${selectedScope.path}` : ""}
-                  </p>
-                </div>
-                <div className="inline-flex rounded-md bg-neutral-100 p-1">
-                  <button
-                    className={cn(
-                      "inline-flex h-7 items-center justify-center rounded px-3 text-sm font-medium transition-colors",
-                      editorMode === "form"
-                        ? "bg-white text-neutral-950 shadow-sm"
-                        : "text-neutral-600 hover:bg-neutral-200"
-                    )}
-                    onClick={() => setEditorMode("form")}
-                    type="button"
-                  >
-                    Form
-                  </button>
-                  <button
-                    className={cn(
-                      "inline-flex h-7 items-center justify-center rounded px-3 text-sm font-medium transition-colors",
-                      editorMode === "json"
-                        ? "bg-white text-neutral-950 shadow-sm"
-                        : "text-neutral-600 hover:bg-neutral-200"
-                    )}
-                    onClick={() => setEditorMode("json")}
-                    type="button"
-                  >
-                    JSON
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-b border-neutral-200 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  disabled={!hasUnsavedChanges || invalidDraft || isSaving || editorDisabled}
-                  onClick={() => void handleSave()}
-                  type="button"
-                  variant="primary"
-                >
-                  {isSaving ? "Saving" : "Save"}
-                </Button>
-                <Button
-                  disabled={!hasUnsavedChanges || isSaving || editorDisabled}
-                  onClick={handleRevert}
-                  type="button"
-                  variant="secondary"
-                >
-                  Revert
-                </Button>
-                <span className="text-sm text-neutral-500">
-                  {validationState.status === "loading"
-                    ? "Validating"
-                    : validationState.status === "error"
-                      ? "Validation failed"
-                      : validationState.issues.length > 0
-                        ? `${validationState.issues.length} issues`
-                        : hasUnsavedChanges
-                          ? "Ready to save"
-                          : "No changes"}
-                </span>
-              </div>
-
-              {validationState.errorMessage ? (
-                <p className="mt-2 text-sm text-red-700">{validationState.errorMessage}</p>
-              ) : null}
-
-              {validationState.issues.length > 0 || settingsParseError || jsonState.parseError ? (
-                <div className="mt-3 grid gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-                  {settingsParseError ? <div>settings: {settingsParseError}</div> : null}
-                  {jsonState.parseError ? <div>json: {jsonState.parseError}</div> : null}
-                  {validationState.issues.slice(0, 8).map((issue) => (
-                    <div key={`${issue.path}:${issue.message}`}>
-                      <span className="font-medium">{issue.path || "document"}:</span>{" "}
-                      {issue.message}
+                    </Field>
+                    <Field description="Select the role-scoped cascade." label="Role">
+                      <Select
+                        aria-label="Role"
+                        onValueChange={setSelectedRole}
+                        options={availableRoles.map((role) => ({ value: role, label: role }))}
+                        value={selectedRole}
+                      />
+                    </Field>
+                    <Field
+                      description="Auth metadata only; secrets remain in Main."
+                      label="Auth profile"
+                    >
+                      <Select
+                        aria-label="Auth profile"
+                        onValueChange={setSelectedAuthId}
+                        options={authProfiles.map((profile) => ({
+                          value: profile.id,
+                          label: `${profile.displayName || profile.id} (${profile.mode})`,
+                        }))}
+                        value={selectedAuthId}
+                      />
+                    </Field>
+                    <div className="flex min-w-0 flex-col justify-end gap-1 text-sm text-secondary">
+                      <span className="truncate">Version {version ?? "loading"}</span>
+                      <span className="truncate">
+                        {isRefreshing ? "Refreshing scopes" : isBootstrapping ? "Bootstrapping" : "Ready"}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+                  </div>
+                  {appError ? (
+                    <div className="border-t border-status-danger bg-status-danger-soft px-4 py-2 text-sm text-status-danger">
+                      {appError}
+                    </div>
+                  ) : null}
+                </header>
 
-            {editorMode === "form" ? (
-              <FormEditor
-                authBindingValue={authBindingValue}
-                disabled={editorDisabled}
-                doc={draftDoc}
-                envError={envError}
-                settingsError={settingsError}
-                settingsText={settingsText}
-                updateDraft={updateDraft}
-                updateSettingsObject={updateSettingsObject}
-                versionError={versionError}
-              />
+                <div className="grid min-h-0 flex-1 grid-cols-1 window-medium:grid-cols-[320px_minmax(0,1fr)]">
+                  <aside className="app-scrollbar min-h-0 overflow-auto border-r border-default bg-surface">
+                    <div className="border-b border-subtle px-4 py-3">
+                      <h1 className="text-base font-semibold text-primary">Profile Explorer</h1>
+                      <p className="mt-1 text-sm text-secondary">
+                        Scope files for <span className="font-medium text-primary">{selectedRole || "—"}</span>
+                      </p>
+                    </div>
+                    <ScopeTree
+                      entries={scopeEntries}
+                      onSelect={setSelectedScopePath}
+                      selectedPath={selectedScopePath}
+                    />
+                  </aside>
+
+                  <section className="grid min-h-0 grid-cols-1 window-large:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+                    <div
+                      className="app-scrollbar min-h-0 overflow-auto border-b border-default bg-subtle window-large:border-b-0 window-large:border-r"
+                      ref={previewPaneRef}
+                    >
+                      <div className="border-b border-subtle px-4 py-3">
+                        <h2 className="text-base font-semibold text-primary">Effective preview</h2>
+                        <p className="mt-1 text-sm text-secondary">
+                          Resolved for {selectedRole || "—"} @ {selectedAuthId || "—"}
+                        </p>
+                      </div>
+
+                      <PreviewSummary
+                        effective={previewEffective}
+                        setTargetRef={(key, element) => {
+                          previewScrollTargets.current[key] = element;
+                        }}
+                        selectedScope={selectedScope}
+                        provenance={effectiveState.provenance}
+                      />
+
+                      <div className="border-t border-subtle px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="text-sm font-semibold text-primary">Draft impact</h3>
+                          <span className="text-xs text-secondary">
+                            {previewState.status === "loading"
+                              ? "Previewing"
+                              : previewState.status === "error"
+                                ? "Preview failed"
+                                : `${previewState.diff.length} changes`}
+                          </span>
+                        </div>
+                        {previewState.errorMessage ? (
+                          <p className="mt-2 text-sm text-status-danger">{previewState.errorMessage}</p>
+                        ) : previewState.diff.length > 0 ? (
+                          <ul className="mt-3 grid gap-2 text-sm">
+                            {previewState.diff.slice(0, 16).map((item) => (
+                              <li
+                                className="grid gap-1 rounded-md border border-default bg-surface px-3 py-2"
+                                key={`${item.section}:${item.key}:${item.change}`}
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-medium text-primary">{item.key}</span>
+                                  <span className="text-xs uppercase tracking-wide text-secondary">
+                                    {item.section}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "text-xs font-medium",
+                                      item.change === "added" && "text-status-success",
+                                      item.change === "removed" && "text-status-danger",
+                                      item.change === "changed" && "text-status-warning"
+                                    )}
+                                  >
+                                    {item.change}
+                                  </span>
+                                </div>
+                                {item.before ? (
+                                  <span className="font-mono text-xs text-secondary">- {item.before}</span>
+                                ) : null}
+                                {item.after ? (
+                                  <span className="font-mono text-xs text-primary">+ {item.after}</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-2 text-sm text-secondary">
+                            {invalidDraft
+                              ? "Preview waits for valid JSON inputs."
+                              : "No observable effective changes yet."}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="app-scrollbar min-h-0 overflow-auto bg-surface">
+                      <div className="border-b border-subtle px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h2 className="text-base font-semibold text-primary">Profile Editor</h2>
+                            <p className="mt-1 text-sm text-secondary">
+                              Editing {selectedScopeLabel}
+                              {selectedScope ? ` • ${selectedScope.path}` : ""}
+                            </p>
+                          </div>
+                          <div className="inline-flex rounded-md border border-default bg-subtle p-1">
+                            <button
+                              className={cn(
+                                "inline-flex h-7 items-center justify-center rounded px-3 text-sm font-medium transition-colors",
+                                editorMode === "form"
+                                  ? "bg-surface text-primary shadow-xs"
+                                  : "text-secondary hover:bg-elevated"
+                              )}
+                              onClick={() => setEditorMode("form")}
+                              type="button"
+                            >
+                              Form
+                            </button>
+                            <button
+                              className={cn(
+                                "inline-flex h-7 items-center justify-center rounded px-3 text-sm font-medium transition-colors",
+                                editorMode === "json"
+                                  ? "bg-surface text-primary shadow-xs"
+                                  : "text-secondary hover:bg-elevated"
+                              )}
+                              onClick={() => setEditorMode("json")}
+                              type="button"
+                            >
+                              JSON
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-b border-subtle px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            disabled={!hasUnsavedChanges || invalidDraft || isSaving || editorDisabled}
+                            onClick={() => void handleSave()}
+                            type="button"
+                            variant="primary"
+                          >
+                            {isSaving ? "Saving" : "Save"}
+                          </Button>
+                          <Button
+                            disabled={!hasUnsavedChanges || isSaving || editorDisabled}
+                            onClick={handleRevert}
+                            type="button"
+                            variant="secondary"
+                          >
+                            Revert
+                          </Button>
+                          <span className="text-sm text-secondary">
+                            {validationState.status === "loading"
+                              ? "Validating"
+                              : validationState.status === "error"
+                                ? "Validation failed"
+                                : validationState.issues.length > 0
+                                  ? `${validationState.issues.length} issues`
+                                  : hasUnsavedChanges
+                                    ? "Ready to save"
+                                    : "No changes"}
+                          </span>
+                        </div>
+
+                        {validationState.errorMessage ? (
+                          <p className="mt-2 text-sm text-status-danger">{validationState.errorMessage}</p>
+                        ) : null}
+
+                        {validationState.issues.length > 0 || settingsParseError || jsonState.parseError ? (
+                          <div className="mt-3 grid gap-2 rounded-md border border-status-warning bg-status-warning-soft px-3 py-3 text-sm text-status-warning">
+                            {settingsParseError ? <div>settings: {settingsParseError}</div> : null}
+                            {jsonState.parseError ? <div>json: {jsonState.parseError}</div> : null}
+                            {validationState.issues.slice(0, 8).map((issue) => (
+                              <div key={`${issue.path}:${issue.message}`}>
+                                <span className="font-medium">{issue.path || "document"}:</span>{" "}
+                                {issue.message}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {editorMode === "form" ? (
+                        <FormEditor
+                          authBindingValue={authBindingValue}
+                          disabled={editorDisabled}
+                          doc={draftDoc}
+                          envError={envError}
+                          settingsError={settingsError}
+                          settingsText={settingsText}
+                          updateDraft={updateDraft}
+                          updateSettingsObject={updateSettingsObject}
+                          versionError={versionError}
+                        />
+                      ) : (
+                        <div className="h-[calc(100vh-18rem)] min-h-[34rem] p-4">
+                          <CodeEditor
+                            ariaLabel="Profile JSON editor"
+                            height="100%"
+                            onChange={updateJsonMode}
+                            value={jsonState.text}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              </div>
             ) : (
-              <div className="h-[calc(100vh-18rem)] min-h-[34rem] p-4">
-                <CodeEditor
-                  ariaLabel="Profile JSON editor"
-                  height="100%"
-                  onChange={updateJsonMode}
-                  value={jsonState.text}
-                />
+              <div className="flex h-full min-h-0 flex-col bg-canvas">
+                {appError ? (
+                  <div className="border-b border-status-danger bg-status-danger-soft px-4 py-2 text-sm text-status-danger">
+                    {appError}
+                  </div>
+                ) : null}
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {currentScreen === "auth-vault" ? (
+                    <AuthVaultScreen />
+                  ) : currentScreen === "sessions" ? (
+                    <SessionMonitorScreen />
+                  ) : currentScreen === "provenance" ? (
+                    <ProvenanceInspectorScreen />
+                  ) : currentScreen === "persona" ? (
+                    <PersonaComposerScreen />
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
-        </section>
+
+          {showEditorInspector ? (
+            <ProfileEditorInspector
+              appError={appError}
+              hasUnsavedChanges={hasUnsavedChanges}
+              invalidDraft={invalidDraft}
+              isBootstrapping={isBootstrapping}
+              isRefreshing={isRefreshing}
+              previewState={previewState}
+              selectedAuthId={selectedAuthId}
+              selectedRole={selectedRole}
+              selectedScope={selectedScope}
+              theme={theme}
+              validationState={validationState}
+              version={version}
+            />
+          ) : null}
+        </div>
       </div>
-    </main>
+
+      <AppStatusbar
+        appError={appError}
+        currentScreen={currentScreen}
+        cwd={cwd}
+        isBootstrapping={isBootstrapping}
+        isRefreshing={isRefreshing}
+        selectedAuthId={selectedAuthId}
+        selectedRole={selectedRole}
+        version={version}
+      />
+
+      <CommandPalette
+        activeIndex={commandPaletteActiveIndex}
+        isOpen={commandPaletteOpen}
+        items={paletteItems}
+        onActiveIndexChange={setCommandPaletteActiveIndex}
+        onClose={closeCommandPalette}
+        onQueryChange={setCommandPaletteQuery}
+        onSelect={(item) => {
+          item.onSelect();
+          closeCommandPalette();
+        }}
+        query={commandPaletteQuery}
+      />
+    </div>
   );
 }
 
@@ -1849,29 +2148,412 @@ function uniqueServerName(servers: Record<string, ScopeDocServerEntry | null>): 
   return candidate;
 }
 
-function ScreenTabs(): React.ReactElement {
-  const [currentScreen, setCurrentScreen] = useAtom(currentScreenAtom);
+interface CommandPaletteItem {
+  id: string;
+  group: string;
+  label: string;
+  description?: string;
+  hint?: string;
+  keywords?: string[];
+  onSelect: () => void;
+}
+
+function AppTitlebar({
+  currentScreen,
+  isPaletteOpen,
+  onOpenPalette,
+  onToggleTheme,
+  theme,
+}: {
+  currentScreen: AppScreen;
+  isPaletteOpen: boolean;
+  onOpenPalette: () => void;
+  onToggleTheme: () => void;
+  theme: "dark" | "light";
+}): React.ReactElement {
   return (
-    <Tabs
-      value={currentScreen}
-      onValueChange={(v) => setCurrentScreen(v as AppScreen)}
-      className="border-b border-neutral-200 bg-white px-4 py-2"
-    >
-      <TabsList>
-        <TabsTrigger value="editor">Profile Editor</TabsTrigger>
-        <TabsTrigger value="auth-vault">Auth Vault</TabsTrigger>
-        <TabsTrigger value="sessions">Session Monitor</TabsTrigger>
-        <TabsTrigger value="provenance">Provenance</TabsTrigger>
-        <TabsTrigger value="persona">Persona</TabsTrigger>
-      </TabsList>
-      {/* Tab content panels are rendered inside App rather than here so the
-          Profile Editor's existing layout doesn't have to nest under TabsContent. */}
-      <TabsContent value="editor" />
-      <TabsContent value="auth-vault" />
-      <TabsContent value="sessions" />
-      <TabsContent value="provenance" />
-      <TabsContent value="persona" />
-    </Tabs>
+    <header className="grid grid-cols-[78px_minmax(0,1fr)_auto] items-center border-b border-default bg-surface px-3">
+      <div className="flex h-full items-center">
+        <img alt="" className="h-3.5 w-[54px]" src={trafficLightsUrl} />
+      </div>
+      <div className="flex min-w-0 items-center gap-3">
+        <img alt="Agent Profile" className="h-7 w-7 shrink-0" src={logoMonoUrl} />
+        <div className="hidden min-w-0 flex-col window-medium:flex">
+          <span className="truncate text-sm font-semibold text-primary">Agent Profile</span>
+          <span className="truncate text-xs text-tertiary">{SCREEN_LABELS[currentScreen]}</span>
+        </div>
+        <button
+          aria-expanded={isPaletteOpen}
+          aria-label="Open command palette"
+          className="ml-auto flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary transition-colors hover:bg-elevated window-medium:max-w-[420px]"
+          onClick={onOpenPalette}
+          type="button"
+        >
+          <span className="text-base leading-none">⌕</span>
+          <span className="truncate">Jump to profile, session, or scope…</span>
+          <span className="ml-auto rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-secondary">
+            ⌘K
+          </span>
+        </button>
+      </div>
+      <div className="ml-3 flex items-center gap-2">
+        <label className="inline-flex h-8 items-center gap-2 rounded-md border border-default bg-canvas px-3 text-xs font-medium text-secondary">
+          <span>{theme === "dark" ? "Dark" : "Light"}</span>
+          <Switch
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+            checked={theme === "dark"}
+            onCheckedChange={() => onToggleTheme()}
+          />
+        </label>
+      </div>
+    </header>
+  );
+}
+
+function AppSidebar({
+  authCount,
+  currentScreen,
+  onSelect,
+  scopeCount,
+}: {
+  authCount: number;
+  currentScreen: AppScreen;
+  onSelect: (screen: AppScreen) => void;
+  scopeCount: number;
+}): React.ReactElement {
+  const navItems: Array<{
+    id: AppScreen;
+    label: string;
+    icon: string;
+    badge?: string;
+  }> = [
+    { id: "editor", label: "Profile Editor", icon: "⊡", badge: String(scopeCount) },
+    { id: "auth-vault", label: "Auth Vault", icon: "⚿", badge: String(authCount) },
+    { id: "sessions", label: "Session Monitor", icon: "◐" },
+    { id: "provenance", label: "Provenance Inspector", icon: "⊟" },
+    { id: "persona", label: "Persona Composer", icon: "◇" },
+  ];
+
+  return (
+    <aside className="border-r border-default bg-surface px-2 py-3">
+      <nav aria-label="Primary">
+        <ul className="grid gap-1">
+          {navItems.map((item) => {
+            const active = item.id === currentScreen;
+            return (
+              <li key={item.id}>
+                <button
+                  aria-current={active ? "page" : undefined}
+                  aria-label={item.label}
+                  className={cn(
+                    "flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition-colors",
+                    active
+                      ? "bg-elevated text-primary shadow-xs"
+                      : "text-secondary hover:bg-elevated hover:text-primary"
+                  )}
+                  data-testid={`sidebar-${item.id}`}
+                  onClick={() => onSelect(item.id)}
+                  title={item.label}
+                  type="button"
+                >
+                  <span className="w-4 shrink-0 text-center text-base leading-none">{item.icon}</span>
+                  <span className="hidden truncate window-medium:block">{item.label}</span>
+                  {item.badge ? (
+                    <span className="ml-auto hidden font-mono text-[11px] text-tertiary window-medium:block">
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+    </aside>
+  );
+}
+
+function AppStatusbar({
+  appError,
+  currentScreen,
+  cwd,
+  isBootstrapping,
+  isRefreshing,
+  selectedAuthId,
+  selectedRole,
+  version,
+}: {
+  appError: string | null;
+  currentScreen: AppScreen;
+  cwd: string;
+  isBootstrapping: boolean;
+  isRefreshing: boolean;
+  selectedAuthId: string;
+  selectedRole: string;
+  version: string | null;
+}): React.ReactElement {
+  return (
+    <footer className="flex items-center gap-3 border-t border-default bg-surface px-3 text-[11px] font-medium text-tertiary">
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          appError ? "bg-status-danger" : isRefreshing || isBootstrapping ? "bg-status-warning" : "bg-status-success"
+        )}
+      />
+      <span>{appError ? "Error" : isRefreshing ? "Refreshing" : isBootstrapping ? "Bootstrapping" : "Ready"}</span>
+      <span className="text-secondary">·</span>
+      <span>{SCREEN_LABELS[currentScreen]}</span>
+      <span className="text-secondary">·</span>
+      <span className="truncate">{selectedRole || "—"} @ {selectedAuthId || "—"}</span>
+      <span className="text-secondary">·</span>
+      <span className="truncate">{cwd || "No working directory"}</span>
+      <span className="ml-auto">v{version ?? "loading"}</span>
+    </footer>
+  );
+}
+
+function ProfileEditorInspector({
+  appError,
+  hasUnsavedChanges,
+  invalidDraft,
+  isBootstrapping,
+  isRefreshing,
+  previewState,
+  selectedAuthId,
+  selectedRole,
+  selectedScope,
+  theme,
+  validationState,
+  version,
+}: {
+  appError: string | null;
+  hasUnsavedChanges: boolean;
+  invalidDraft: boolean;
+  isBootstrapping: boolean;
+  isRefreshing: boolean;
+  previewState: PreviewState;
+  selectedAuthId: string;
+  selectedRole: string;
+  selectedScope: ScopeListEntry | null;
+  theme: "dark" | "light";
+  validationState: ValidationState;
+  version: string | null;
+}): React.ReactElement {
+  return (
+    <aside className="app-scrollbar hidden min-h-0 overflow-auto border-l border-default bg-surface p-4 window-medium:flex window-medium:flex-col window-medium:gap-4">
+      <div className="space-y-1">
+        <h2 className="text-sm font-semibold text-primary">Inspector</h2>
+        <p className="text-xs text-secondary">Renderer state and draft status</p>
+      </div>
+
+      <div className="rounded-lg border border-default bg-canvas p-3">
+        <dl className="grid gap-2 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-secondary">Theme</dt>
+            <dd className="font-medium text-primary">{theme}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-secondary">Role</dt>
+            <dd className="font-medium text-primary">{selectedRole || "—"}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-secondary">Auth</dt>
+            <dd className="font-medium text-primary">{selectedAuthId || "—"}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-secondary">Scope</dt>
+            <dd className="truncate font-mono text-[11px] text-primary">{selectedScope?.path ?? "—"}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <dt className="text-secondary">Version</dt>
+            <dd className="font-medium text-primary">{version ?? "loading"}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Badge tone={appError ? "danger" : isRefreshing || isBootstrapping ? "warning" : "success"}>
+          {appError ? "error" : isRefreshing ? "refreshing" : isBootstrapping ? "bootstrapping" : "ready"}
+        </Badge>
+        <Badge tone={hasUnsavedChanges ? "warning" : "neutral"}>
+          {hasUnsavedChanges ? "unsaved changes" : "saved"}
+        </Badge>
+        <Badge tone={invalidDraft ? "danger" : "success"}>
+          {invalidDraft ? "invalid draft" : "valid draft"}
+        </Badge>
+      </div>
+
+      <div className="rounded-lg border border-default bg-canvas p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-primary">Validation</span>
+          <Badge tone={validationState.status === "error" ? "danger" : validationState.issues.length > 0 ? "warning" : "success"}>
+            {validationState.status}
+          </Badge>
+        </div>
+        <p className="text-xs text-secondary">
+          {validationState.errorMessage
+            ? validationState.errorMessage
+            : validationState.issues.length > 0
+              ? `${validationState.issues.length} reported issue(s)`
+              : "No validation issues"}
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-default bg-canvas p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs font-semibold text-primary">Preview</span>
+          <Badge tone={previewState.status === "error" ? "danger" : previewState.diff.length > 0 ? "warning" : "neutral"}>
+            {previewState.status}
+          </Badge>
+        </div>
+        <p className="text-xs text-secondary">
+          {previewState.errorMessage
+            ? previewState.errorMessage
+            : previewState.diff.length > 0
+              ? `${previewState.diff.length} change(s) in effective config`
+              : "No effective drift from draft"}
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+function CommandPalette({
+  activeIndex,
+  isOpen,
+  items,
+  onActiveIndexChange,
+  onClose,
+  onQueryChange,
+  onSelect,
+  query,
+}: {
+  activeIndex: number;
+  isOpen: boolean;
+  items: CommandPaletteItem[];
+  onActiveIndexChange: (index: number) => void;
+  onClose: () => void;
+  onQueryChange: (query: string) => void;
+  onSelect: (item: CommandPaletteItem) => void;
+  query: string;
+}): React.ReactElement | null {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const groupedItems = React.useMemo(() => {
+    const groups = new Map<string, CommandPaletteItem[]>();
+    items.forEach((item) => {
+      groups.set(item.group, [...(groups.get(item.group) ?? []), item]);
+    });
+    return Array.from(groups.entries());
+  }, [items]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!items.length) {
+      onActiveIndexChange(0);
+      return;
+    }
+    if (activeIndex >= items.length) {
+      onActiveIndexChange(0);
+    }
+  }, [activeIndex, items, onActiveIndexChange]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-overlay px-4 pt-20" data-testid="command-palette-overlay">
+      <div
+        className="mx-auto flex max-h-[70vh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-default bg-elevated shadow-xl"
+        data-testid="command-palette"
+      >
+        <div className="border-b border-subtle p-3">
+          <Input
+            aria-activedescendant={items[activeIndex] ? `command-palette-item-${items[activeIndex].id}` : undefined}
+            aria-controls="command-palette-results"
+            aria-expanded="true"
+            aria-label="Command palette query"
+            className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                onActiveIndexChange(items.length ? (activeIndex + 1) % items.length : 0);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                onActiveIndexChange(items.length ? (activeIndex - 1 + items.length) % items.length : 0);
+              } else if (event.key === "Enter" && items[activeIndex]) {
+                event.preventDefault();
+                onSelect(items[activeIndex]);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onClose();
+              }
+            }}
+            placeholder="Search screens, scopes, auth, or provenance…"
+            ref={inputRef}
+            role="combobox"
+            value={query}
+          />
+        </div>
+
+        <div
+          className="app-scrollbar overflow-auto p-2"
+          id="command-palette-results"
+          role="listbox"
+        >
+          {groupedItems.length === 0 ? (
+            <div className="px-3 py-6 text-sm text-secondary">No results.</div>
+          ) : (
+            groupedItems.map(([group, groupItems]) => (
+              <section key={group} className="pb-2">
+                <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-tertiary">
+                  {group}
+                </div>
+                <div className="grid gap-1">
+                  {groupItems.map((item) => {
+                    const absoluteIndex = items.findIndex((candidate) => candidate.id === item.id);
+                    const active = absoluteIndex === activeIndex;
+                    return (
+                      <button
+                        aria-selected={active}
+                        className={cn(
+                          "flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors",
+                          active ? "bg-accent-soft text-primary" : "text-primary hover:bg-subtle"
+                        )}
+                        data-testid={`command-palette-item-${item.id}`}
+                        id={`command-palette-item-${item.id}`}
+                        key={item.id}
+                        onClick={() => onSelect(item)}
+                        onMouseEnter={() => onActiveIndexChange(absoluteIndex)}
+                        role="option"
+                        type="button"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{item.label}</div>
+                          {item.description ? (
+                            <div className="truncate text-xs text-secondary">{item.description}</div>
+                          ) : null}
+                        </div>
+                        {item.hint ? (
+                          <span className="rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-tertiary">
+                            {item.hint}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

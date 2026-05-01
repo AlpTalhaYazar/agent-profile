@@ -83,6 +83,10 @@ export const issuesByPathAtom = atom((get) => {
 export type AppScreen = "editor" | "auth-vault" | "sessions" | "provenance" | "persona";
 
 export const currentScreenAtom = atom<AppScreen>("editor");
+export const themeAtom = atom<"dark" | "light">("dark");
+export const commandPaletteOpenAtom = atom(false);
+export const commandPaletteQueryAtom = atom("");
+export const commandPaletteActiveIndexAtom = atom(0);
 
 // ─── Provenance Inspector (Phase 2 milestone 6) ──────────────────────────────
 
