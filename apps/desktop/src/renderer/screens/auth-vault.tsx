@@ -10,6 +10,10 @@
  *    Plaintext lives in component-local `useState` and is reset on submit /
  *    close. It never enters Jotai.
  *  - `Remove profile` → Main native confirm + daemon delegation.
+ *  - Detected Claude Code OAuth credentials surface as a synthetic row at the
+ *    top of the list with an inline "+ Add" affordance that expands an adopt
+ *    form (display name only; profile id is auto-generated) and writes them
+ *    into the vault.
  */
 
 import {
@@ -35,10 +39,12 @@ import {
 } from "@agent-profile/ui";
 import * as React from "react";
 
-interface AuthSecretView {
-  name: string;
-  ref: string;
-  status: "present" | "missing";
+interface OAuthMeta {
+  email?: string;
+  orgName?: string;
+  planType?: string;
+  accessTokenExpiresAt?: string;
+  refreshTokenRef?: string;
 }
 
 interface AuthProfileView {
@@ -47,6 +53,9 @@ interface AuthProfileView {
   mode: string;
   /** Logical secret names (excluding "anthropic"). */
   secrets: string[];
+  oauth?: OAuthMeta;
+  /** True when this is a synthetic row backed by macOS Claude Code keychain only. */
+  detected?: boolean;
 }
 
 const AUTH_MODES = [
@@ -56,6 +65,8 @@ const AUTH_MODES = [
   { value: "gateway", label: "gateway" },
   { value: "oauth", label: "OAuth (Anthropic Login)" },
 ] as const;
+
+const DETECTED_ROW_ID = "claude-code-detected";
 
 function normalizeAuthList(input: unknown): AuthProfileView[] {
   if (input === null || typeof input !== "object") return [];
@@ -72,9 +83,60 @@ function normalizeAuthList(input: unknown): AuthProfileView[] {
       const secrets = Array.isArray(e.secrets)
         ? e.secrets.filter((s): s is string => typeof s === "string")
         : [];
-      return { id, displayName, mode, secrets };
+      const oauthRaw = (e as { oauth?: unknown }).oauth;
+      const oauth =
+        oauthRaw && typeof oauthRaw === "object"
+          ? (oauthRaw as OAuthMeta)
+          : undefined;
+      const view: AuthProfileView = { id, displayName, mode, secrets };
+      if (oauth) view.oauth = oauth;
+      return view;
     })
     .filter((p): p is AuthProfileView => p !== null);
+}
+
+function formatExpiresIn(iso: string | undefined): string | null {
+  if (!iso) return null;
+  const expiresAt = Date.parse(iso);
+  if (Number.isNaN(expiresAt)) return null;
+  const diffMs = expiresAt - Date.now();
+  if (diffMs <= 0) return "expired";
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `expires in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `expires in ${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `expires in ${days}d`;
+}
+
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "profile"
+  );
+}
+
+interface OAuthBridge {
+  start?: (opts: { profileId: string; displayName?: string }) => Promise<unknown>;
+  refresh?: (opts: { authId: string }) => Promise<unknown>;
+  detect?: () => Promise<unknown>;
+  adopt?: (opts: { profileId: string; displayName?: string }) => Promise<unknown>;
+}
+
+function getOAuthBridge(): OAuthBridge | undefined {
+  return window.myclaude?.oauth as OAuthBridge | undefined;
+}
+
+interface AuthBridgeExtras {
+  updateMeta?: (opts: { profileId: string; displayName?: string }) => Promise<unknown>;
+}
+
+type AuthBridge = NonNullable<typeof window.myclaude>["auth"];
+
+function getAuthBridge(): (AuthBridge & AuthBridgeExtras) | undefined {
+  return window.myclaude?.auth as (AuthBridge & AuthBridgeExtras) | undefined;
 }
 
 export function AuthVaultScreen(): React.ReactElement {
@@ -96,23 +158,39 @@ export function AuthVaultScreen(): React.ReactElement {
       const list = await bridge.list();
       const next = normalizeAuthList(list);
 
-      // Detect existing Claude Code OAuth credentials
       try {
-        const detectResult = await window.myclaude?.oauth?.detect();
+        const detectResult = await getOAuthBridge()?.detect?.();
         if (detectResult && (detectResult as { detected?: boolean }).detected) {
           const d = detectResult as {
             detected: boolean;
             planType?: string;
             accessTokenExpiresAt?: string;
+            email?: string;
           };
-          const alreadyAdded = next.some((p) => p.mode === "oauth");
-          if (!alreadyAdded) {
-            next.push({
-              id: "claude-code-detected",
+          // Hide the synthetic row when ANY oauth profile already references the
+          // Claude Code refresh-token keyring path. Detection of that path is the
+          // most reliable way to say "this user has already adopted the local
+          // Claude Code login into their vault".
+          const alreadyAdopted = next.some(
+            (p) =>
+              p.mode === "oauth" &&
+              !!p.oauth?.refreshTokenRef &&
+              p.oauth.refreshTokenRef.includes("anthropic-oauth-refresh"),
+          );
+          if (!alreadyAdopted) {
+            const detectedView: AuthProfileView = {
+              id: DETECTED_ROW_ID,
               displayName: `Claude Code Login${d.planType ? ` (${d.planType})` : ""}`,
               mode: "oauth",
               secrets: [],
-            });
+              detected: true,
+            };
+            const meta: OAuthMeta = {};
+            if (d.email) meta.email = d.email;
+            if (d.planType) meta.planType = d.planType;
+            if (d.accessTokenExpiresAt) meta.accessTokenExpiresAt = d.accessTokenExpiresAt;
+            detectedView.oauth = meta;
+            next.unshift(detectedView);
           }
         }
       } catch {
@@ -136,12 +214,16 @@ export function AuthVaultScreen(): React.ReactElement {
   }, [reload]);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
+  const selectedIsDetected = selected?.detected === true;
+  const selectedIsOAuth = selected?.mode === "oauth";
 
   // Modal control
   const [addProfileOpen, setAddProfileOpen] = React.useState(false);
   const [addSecretOpen, setAddSecretOpen] = React.useState(false);
   const [rotateOpen, setRotateOpen] = React.useState(false);
   const [removeOpen, setRemoveOpen] = React.useState(false);
+  const [renameTarget, setRenameTarget] = React.useState<AuthProfileView | null>(null);
+  const [adoptingId, setAdoptingId] = React.useState<string | null>(null);
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
@@ -161,63 +243,41 @@ export function AuthVaultScreen(): React.ReactElement {
             + Add profile
           </Button>
         </div>
-        <div className="border-b border-subtle px-4 py-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="w-full"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const bridge = window.myclaude?.oauth;
-                if (!bridge) throw new Error("OAuth bridge unavailable");
-                const profileId = `oauth-${Date.now()}`;
-                await bridge.start({ profileId });
-                await reload();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Sign in with Anthropic
-          </Button>
-        </div>
         {loading ? (
           <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
         ) : profiles.length === 0 ? (
           <p className="px-4 py-6 text-sm text-secondary">No auth profiles yet.</p>
         ) : (
           <ul className="divide-y divide-subtle">
-            {profiles.map((p) => {
-              const active = p.id === selectedId;
-              const isDetected = p.id === "claude-code-detected";
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(p.id)}
-                    className={`flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition-colors hover:bg-subtle ${
-                      active ? "bg-elevated" : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-primary">{p.id}</span>
-                      {isDetected ? (
-                        <Badge tone="info">detected</Badge>
-                      ) : null}
-                    </div>
-                    <span className="text-xs text-secondary">
-                      {p.displayName || "(no display name)"} · {p.mode} · {p.secrets.length} secret
-                      {p.secrets.length === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+            {profiles.map((p) => (
+              <SidebarRow
+                key={p.id}
+                profile={p}
+                active={p.id === selectedId}
+                busy={busy}
+                adoptOpen={adoptingId === p.id}
+                onSelect={() => setSelectedId(p.id)}
+                onAdoptToggle={() => setAdoptingId(adoptingId === p.id ? null : p.id)}
+                onAdoptSubmit={async ({ profileId, displayName }) => {
+                  setBusy(true);
+                  try {
+                    const oauth = getOAuthBridge();
+                    if (!oauth?.adopt) throw new Error("OAuth bridge unavailable");
+                    const opts: { profileId: string; displayName?: string } = { profileId };
+                    if (displayName) opts.displayName = displayName;
+                    await oauth.adopt(opts);
+                    setAdoptingId(null);
+                    setSelectedId(profileId);
+                    await reload();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onEdit={() => setRenameTarget(p)}
+              />
+            ))}
           </ul>
         )}
         {error ? (
@@ -231,12 +291,15 @@ export function AuthVaultScreen(): React.ReactElement {
         {selected === null ? (
           <p className="p-6 text-sm text-secondary">Select an auth profile.</p>
         ) : (
-          <div className="space-y-4 p-6">
+          <div className="space-y-6 p-6">
             <header className="flex items-start justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-primary">{selected.id}</h2>
+                <h2 className="text-lg font-semibold text-primary">
+                  {selected.displayName || selected.id}
+                </h2>
                 <p className="text-sm text-secondary">
-                  {selected.displayName || "(no display name)"} · mode {selected.mode}
+                  <span className="font-mono text-xs">{selected.id}</span> · mode {selected.mode}
+                  {selected.oauth?.email ? <> · {selected.oauth.email}</> : null}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -245,57 +308,76 @@ export function AuthVaultScreen(): React.ReactElement {
                   variant="primary"
                   size="sm"
                   onClick={() => setAddSecretOpen(true)}
-                  disabled={busy}
+                  disabled={busy || selectedIsDetected}
                 >
-                  + Add secret
+                  + Add MCP secret
                 </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setRotateOpen(true)}
-                  disabled={busy}
-                >
-                  Rotate Anthropic key
-                </Button>
+                {selectedIsOAuth ? null : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRotateOpen(true)}
+                    disabled={busy || selectedIsDetected}
+                  >
+                    Rotate Anthropic key
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="danger"
                   size="sm"
                   onClick={() => setRemoveOpen(true)}
-                  disabled={busy}
+                  disabled={busy || selectedIsDetected}
                 >
                   Remove profile
                 </Button>
               </div>
             </header>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selected.secrets.length === 0 ? (
+            {selectedIsDetected ? (
+              <div className="rounded-md border border-default bg-elevated px-3 py-2 text-sm text-secondary">
+                This is an existing Claude Code login detected on this machine. Click the{" "}
+                <span className="font-medium text-primary">+ Add</span> button next to it in the
+                sidebar to import it into the vault.
+              </div>
+            ) : null}
+
+            <section className="space-y-2">
+              <header>
+                <h3 className="text-sm font-semibold text-primary">MCP secrets</h3>
+                <p className="text-xs text-secondary">
+                  Third-party API tokens passed to MCP servers (e.g. <code>github.pat</code>,{" "}
+                  <code>postgres.acme</code>). Not the Anthropic key.
+                </p>
+              </header>
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={2} className="text-sm text-secondary">
-                      No MCP secrets. Use “Add secret” to register one.
-                    </TableCell>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
-                ) : (
-                  selected.secrets.map((name) => (
-                    <TableRow key={name}>
-                      <TableCell className="font-mono text-xs">{name}</TableCell>
-                      <TableCell>
-                        <Badge tone="success">present</Badge>
+                </TableHeader>
+                <TableBody>
+                  {selected.secrets.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="text-sm text-secondary">
+                        No MCP secrets registered yet.
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    selected.secrets.map((name) => (
+                      <TableRow key={name}>
+                        <TableCell className="font-mono text-xs">{name}</TableCell>
+                        <TableCell>
+                          <Badge tone="success">present</Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </section>
           </div>
         )}
       </section>
@@ -374,15 +456,15 @@ export function AuthVaultScreen(): React.ReactElement {
         <ConfirmDialog
           open={removeOpen}
           onOpenChange={setRemoveOpen}
-          title={`Remove "${selected.id}"?`}
-          description="This deletes every keychain entry tied to this profile. The action is irreversible."
+          title={`Remove "${selected.displayName || selected.id}"?`}
+          description="This deletes the vault profile and the keychain entries this app stored for it. The detected Claude Code login on this machine is left untouched."
           destructive
           confirmLabel="Remove"
           busy={busy}
           onConfirm={async () => {
             setBusy(true);
             try {
-              await window.myclaude?.auth?.remove({ profileId: selected.id });
+              await window.myclaude?.auth?.remove({ profileId: selected.id, yes: true });
               await reload();
               setRemoveOpen(false);
               setSelectedId(null);
@@ -394,6 +476,208 @@ export function AuthVaultScreen(): React.ReactElement {
           }}
         />
       ) : null}
+
+      {renameTarget !== null ? (
+        <RenameProfileDialog
+          key={`rename-${renameTarget.id}`}
+          open={true}
+          initialDisplayName={renameTarget.displayName}
+          profileId={renameTarget.id}
+          busy={busy}
+          onOpenChange={(o) => {
+            if (!o) setRenameTarget(null);
+          }}
+          onSubmit={async (displayName) => {
+            const target = renameTarget;
+            if (!target) return;
+            setBusy(true);
+            try {
+              const auth = getAuthBridge();
+              if (!auth?.updateMeta) throw new Error("Auth bridge unavailable");
+              await auth.updateMeta({ profileId: target.id, displayName });
+              await reload();
+              setRenameTarget(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Sidebar row ────────────────────────────────────────────────────────────
+
+interface SidebarRowProps {
+  profile: AuthProfileView;
+  active: boolean;
+  busy: boolean;
+  adoptOpen: boolean;
+  onSelect: () => void;
+  onAdoptToggle: () => void;
+  onAdoptSubmit: (input: { profileId: string; displayName?: string }) => Promise<void>;
+  onEdit: () => void;
+}
+
+function SidebarRow({
+  profile,
+  active,
+  busy,
+  adoptOpen,
+  onSelect,
+  onAdoptToggle,
+  onAdoptSubmit,
+  onEdit,
+}: SidebarRowProps): React.ReactElement {
+  const isDetected = profile.detected === true;
+  const expiresLabel = formatExpiresIn(profile.oauth?.accessTokenExpiresAt);
+  const primaryLabel = profile.displayName || profile.id;
+
+  return (
+    <li>
+      <div
+        className={`flex w-full items-center gap-2 px-4 py-3 transition-colors hover:bg-subtle ${
+          active ? "bg-elevated" : ""
+        }`}
+      >
+        <button
+          type="button"
+          onClick={onSelect}
+          className="flex flex-1 flex-col items-start gap-0.5 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-primary">{primaryLabel}</span>
+            {isDetected ? <Badge tone="info">detected</Badge> : null}
+          </div>
+          <span className="text-xs text-tertiary">
+            <span className="text-secondary">{profile.mode}</span>
+            {expiresLabel ? <> · {expiresLabel}</> : null}
+            {!isDetected && profile.displayName && profile.displayName !== profile.id ? (
+              <>
+                {" · "}
+                <span className="font-mono">{profile.id}</span>
+              </>
+            ) : null}
+          </span>
+        </button>
+        {isDetected ? (
+          <Button
+            type="button"
+            variant={adoptOpen ? "ghost" : "primary"}
+            size="sm"
+            disabled={busy}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onAdoptToggle();
+            }}
+          >
+            {adoptOpen ? "Cancel" : "+ Add"}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            aria-label="Edit display name"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onEdit();
+            }}
+          >
+            Edit
+          </Button>
+        )}
+      </div>
+      {isDetected ? (
+        <CollapsibleAdoptForm
+          open={adoptOpen}
+          busy={busy}
+          defaultDisplayName={profile.displayName || "Claude Code Login"}
+          onSubmit={onAdoptSubmit}
+          onCancel={onAdoptToggle}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+// ─── Inline adopt form (slide-down) ─────────────────────────────────────────
+
+interface CollapsibleAdoptFormProps {
+  open: boolean;
+  busy: boolean;
+  defaultDisplayName: string;
+  onSubmit: (input: { profileId: string; displayName?: string }) => Promise<void>;
+  onCancel: () => void;
+}
+
+function CollapsibleAdoptForm({
+  open,
+  busy,
+  defaultDisplayName,
+  onSubmit,
+  onCancel,
+}: CollapsibleAdoptFormProps): React.ReactElement {
+  const [displayName, setDisplayName] = React.useState(defaultDisplayName);
+
+  React.useEffect(() => {
+    if (open) {
+      setDisplayName(defaultDisplayName);
+    }
+  }, [open, defaultDisplayName]);
+
+  const canSubmit = displayName.trim().length > 0 && !busy;
+
+  return (
+    <div
+      className={`grid overflow-hidden bg-subtle transition-[grid-template-rows,opacity] duration-200 ease-out ${
+        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+      }`}
+      aria-hidden={!open}
+    >
+      <div className="min-h-0">
+        <div className="space-y-3 border-b border-subtle px-4 py-3">
+          <Field label="Display name" description="What you'll see in the list">
+            <Input
+              value={displayName}
+              onChange={(ev) => setDisplayName(ev.target.value)}
+              placeholder="Claude Code Login"
+              autoFocus={open}
+              disabled={busy}
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={!canSubmit}
+              onClick={() => {
+                const input: { profileId: string; displayName?: string } = {
+                  profileId: slugify(displayName),
+                };
+                if (displayName) input.displayName = displayName;
+                void onSubmit(input);
+              }}
+            >
+              {busy ? "Adding…" : "Add to vault"}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -420,14 +704,14 @@ function AddProfileDialog({
   onSubmit,
 }: AddProfileDialogProps): React.ReactElement {
   const [localBusy, setLocalBusy] = React.useState(false);
-  const [id, setId] = React.useState("");
   const [displayName, setDisplayName] = React.useState("");
   const [mode, setMode] = React.useState<"apiKey" | "bedrock" | "vertex" | "gateway" | "oauth">("apiKey");
   const [secretRef, setSecretRef] = React.useState("");
 
+  const derivedId = slugify(displayName);
+
   React.useEffect(() => {
     if (!open) {
-      setId("");
       setDisplayName("");
       setMode("apiKey");
       setSecretRef("");
@@ -435,14 +719,14 @@ function AddProfileDialog({
   }, [open]);
 
   React.useEffect(() => {
-    if (id && !secretRef) {
-      setSecretRef(`keyring://anthropic/${id}`);
+    if (derivedId && !secretRef) {
+      setSecretRef(`keyring://anthropic/${derivedId}`);
     }
-  }, [id, secretRef]);
+  }, [derivedId, secretRef]);
 
   const isOAuth = mode === "oauth";
   const effectiveBusy = busy || localBusy;
-  const canSubmit = id.length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
+  const canSubmit = displayName.trim().length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -455,19 +739,12 @@ function AddProfileDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <Field label="Profile id" description="Lowercase identifier (e.g. work, personal)">
-            <Input
-              value={id}
-              onChange={(ev) => setId(ev.target.value)}
-              placeholder="work"
-              autoFocus
-            />
-          </Field>
-          <Field label="Display name" description="Optional human-readable label">
+          <Field label="Display name" description="What you'll see in the list">
             <Input
               value={displayName}
               onChange={(ev) => setDisplayName(ev.target.value)}
               placeholder="Work account"
+              autoFocus
             />
           </Field>
           <Field label="Auth mode">
@@ -497,7 +774,7 @@ function AddProfileDialog({
                 try {
                   const bridge = window.myclaude?.oauth;
                   if (!bridge) throw new Error("OAuth bridge unavailable");
-                  const opts: { profileId: string; displayName?: string } = { profileId: id };
+                  const opts: { profileId: string; displayName?: string } = { profileId: derivedId };
                   if (displayName) opts.displayName = displayName;
                   await bridge.start(opts);
                   onOpenChange(false);
@@ -516,7 +793,7 @@ function AddProfileDialog({
                   secretRef: string;
                 };
               } = {
-                id,
+                id: derivedId,
                 anthropic: { mode, secretRef },
               };
               if (displayName) spec.displayName = displayName;
@@ -549,7 +826,6 @@ function SetSecretDialog({
   onSubmit,
 }: SetSecretDialogProps): React.ReactElement {
   const [name, setName] = React.useState(mode === "rotate" ? "anthropic" : "");
-  // Plaintext lives ONLY in component-local state. Cleared on every close.
   const [value, setValue] = React.useState("");
 
   React.useEffect(() => {
@@ -561,11 +837,11 @@ function SetSecretDialog({
 
   const canSubmit = name.length > 0 && value.length > 0 && !busy;
   const title =
-    mode === "rotate" ? `Rotate Anthropic key for "${profileId}"` : `Add secret to "${profileId}"`;
+    mode === "rotate" ? `Rotate Anthropic key for "${profileId}"` : `Add MCP secret to "${profileId}"`;
   const description =
     mode === "rotate"
       ? "Replaces the stored Anthropic key and revokes every live capability bound to this profile."
-      : "Registers and stores a new MCP secret for this profile.";
+      : "Registers and stores a third-party API token used by an MCP server.";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -603,6 +879,67 @@ function SetSecretDialog({
             }}
           >
             {busy ? "Saving…" : mode === "rotate" ? "Rotate" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface RenameProfileDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  profileId: string;
+  initialDisplayName: string;
+  busy: boolean;
+  onSubmit: (displayName: string) => Promise<void>;
+}
+
+function RenameProfileDialog({
+  open,
+  onOpenChange,
+  profileId,
+  initialDisplayName,
+  busy,
+  onSubmit,
+}: RenameProfileDialogProps): React.ReactElement {
+  const [displayName, setDisplayName] = React.useState(initialDisplayName);
+
+  React.useEffect(() => {
+    if (open) setDisplayName(initialDisplayName);
+  }, [open, initialDisplayName]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename profile</DialogTitle>
+          <DialogDescription>
+            Updates the human-readable label for <span className="font-mono">{profileId}</span>.
+            The profile id and stored secrets are unchanged.
+          </DialogDescription>
+        </DialogHeader>
+        <Field label="Display name">
+          <Input
+            value={displayName}
+            onChange={(ev) => setDisplayName(ev.target.value)}
+            autoFocus
+            disabled={busy}
+          />
+        </Field>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            disabled={busy}
+            onClick={() => {
+              void onSubmit(displayName);
+            }}
+          >
+            {busy ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
