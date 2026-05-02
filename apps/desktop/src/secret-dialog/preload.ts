@@ -18,8 +18,14 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 
-const params = new URLSearchParams(window.location.search);
-const requestId = params.get("requestId") ?? "";
+const searchParams = new URLSearchParams(window.location.search);
+const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+const argvRequestId =
+  process.argv
+    .find((arg) => arg.startsWith("--secret-request-id="))
+    ?.slice("--secret-request-id=".length) ?? null;
+const requestId =
+  argvRequestId ?? searchParams.get("requestId") ?? hashParams.get("requestId") ?? "";
 
 interface SecretDialogBridge {
   submit(value: string): void;
@@ -29,9 +35,15 @@ interface SecretDialogBridge {
 const bridge: SecretDialogBridge = {
   submit(value: string): void {
     ipcRenderer.send(`secret-dialog:submit:${requestId}`, value);
+    if (requestId) {
+      ipcRenderer.send("secret-dialog:submit:", value);
+    }
   },
   cancel(): void {
     ipcRenderer.send(`secret-dialog:cancel:${requestId}`);
+    if (requestId) {
+      ipcRenderer.send("secret-dialog:cancel:");
+    }
   },
 };
 

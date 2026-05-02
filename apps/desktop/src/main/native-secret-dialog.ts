@@ -17,7 +17,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, type IpcMainEvent, ipcMain } from "electron";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -156,18 +156,13 @@ export async function requestSecretInputViaMain(
   const requestId = `${process.pid}-${++nextRequestId}`;
   const submitChannel = `secret-dialog:submit:${requestId}`;
   const cancelChannel = `secret-dialog:cancel:${requestId}`;
+  const fallbackSubmitChannel = "secret-dialog:submit:";
+  const fallbackCancelChannel = "secret-dialog:cancel:";
   const html = renderDialogHtml({ title: opts.title, label: opts.label });
-  const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}?requestId=${encodeURIComponent(requestId)}`;
-  // Append the requestId via the URL search params on a query string after a
-  // hash-like anchor so the preload can read it via `window.location.search`.
+  // Append the requestId in the URL fragment and as an Electron additional
+  // argument. The preload accepts both so this remains stable across data URL
+  // parsing differences.
   const dataUrlWithParams = `data:text/html;charset=utf-8,${encodeURIComponent(html)}#requestId=${encodeURIComponent(requestId)}`;
-  // Note: data: URLs encode everything; preload reads the requestId from the
-  // window's `location` after Electron loads the URL. We pin it via the search
-  // string (Electron supports `?` on data URLs in modern versions). The
-  // preload reads `window.location.search`; if the search is empty (older
-  // platforms), it fails closed with empty requestId and the cancel path
-  // resolves null on window-close.
-  void dataUrl;
 
   return new Promise<string | null>((resolve) => {
     const win = new BrowserWindow({
@@ -181,6 +176,7 @@ export async function requestSecretInputViaMain(
       autoHideMenuBar: true,
       title: opts.title,
       webPreferences: {
+        additionalArguments: [`--secret-request-id=${requestId}`],
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -196,19 +192,26 @@ export async function requestSecretInputViaMain(
       settled = true;
       ipcMain.removeAllListeners(submitChannel);
       ipcMain.removeAllListeners(cancelChannel);
+      ipcMain.removeListener(fallbackSubmitChannel, handleSubmit);
+      ipcMain.removeListener(fallbackCancelChannel, handleCancel);
       if (!win.isDestroyed()) win.close();
       resolve(value);
     };
 
-    ipcMain.once(submitChannel, (event, value: unknown) => {
+    const handleSubmit = (event: IpcMainEvent, value: unknown): void => {
       // Only accept submissions from the dialog's own webContents.
       if (event.sender !== win.webContents) return;
       settle(typeof value === "string" ? value : null);
-    });
-    ipcMain.once(cancelChannel, (event) => {
+    };
+    const handleCancel = (event: IpcMainEvent): void => {
       if (event.sender !== win.webContents) return;
       settle(null);
-    });
+    };
+
+    ipcMain.once(submitChannel, handleSubmit);
+    ipcMain.once(cancelChannel, handleCancel);
+    ipcMain.on(fallbackSubmitChannel, handleSubmit);
+    ipcMain.on(fallbackCancelChannel, handleCancel);
 
     win.on("closed", () => {
       settle(null);

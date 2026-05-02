@@ -42,7 +42,7 @@ const config: ForgeConfig = {
           // Phase 2 milestone 5 hybrid plaintext flow: `auth.add` opens this
           // modal so the Anthropic API key never crosses the Renderer.
           entry: "src/secret-dialog/preload.ts",
-          config: "vite.preload.config.ts",
+          config: "vite.secret-preload.config.ts",
           target: "preload",
         },
       ],
