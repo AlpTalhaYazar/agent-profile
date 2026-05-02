@@ -2,7 +2,7 @@
  * Jotai atom registry for the renderer.
  *
  * Atoms own renderer-side state (selected scope, editor draft, validation
- * status, etc.). The `App` component subscribes to all of them; sub-trees
+ * status, etc.). The `AppShell` component subscribes to all of them; sub-trees
  * pick out specific atoms via `useAtomValue` / `useAtom`.
  */
 
@@ -87,6 +87,18 @@ export const themeAtom = atom<"dark" | "light">("dark");
 export const commandPaletteOpenAtom = atom(false);
 export const commandPaletteQueryAtom = atom("");
 export const commandPaletteActiveIndexAtom = atom(0);
+
+/**
+ * Whether the desktop is on a fresh `~/.myclaude/` install. Sourced from the
+ * `system.bootstrap` IPC response — `true` when `profileCount === 0` and the
+ * `.setup-complete` marker file is missing. The shell reads this to decide
+ * between mounting the first-run wizard and the main application.
+ */
+export const firstRunAtom = atom(false);
+export const wizardStepAtom = atom<"welcome" | "auth" | "role" | "done">("welcome");
+export const wizardDismissedAtom = atom(false);
+export const shortcutsHelpOpenAtom = atom(false);
+export const announceMessageAtom = atom("");
 
 // ─── Provenance Inspector (Phase 2 milestone 6) ──────────────────────────────
 

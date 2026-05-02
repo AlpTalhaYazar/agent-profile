@@ -13,7 +13,7 @@
  */
 import { Badge } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
-import type * as React from "react";
+import * as React from "react";
 import {
   cwdAtom,
   effectiveStateAtom,
@@ -30,6 +30,7 @@ import type {
   ProvenanceSection,
   SelectedProvenanceField,
 } from "../lib/types.js";
+import { useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 
 interface SectionEntry {
   id: ProvenanceSection;
@@ -53,6 +54,9 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
         className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="provenance-empty"
       >
+        <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
+          Provenance Inspector
+        </h1>
         <div className="max-w-md space-y-2 px-6">
           <p className="text-base font-semibold text-primary">No provenance loaded</p>
           <p>
@@ -82,7 +86,9 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="provenance-inspector">
       <header className="border-b border-subtle bg-surface px-4 py-3">
-        <h1 className="text-lg font-semibold text-primary">Provenance Inspector</h1>
+        <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
+          Provenance Inspector
+        </h1>
         <p className="mt-0.5 text-xs text-secondary">
           role={role || "—"} · auth={auth || "—"} · cwd={cwd || "—"}
         </p>
@@ -104,6 +110,31 @@ function FieldSelector({
   selected: SelectedProvenanceField | null;
   onSelect: (field: SelectedProvenanceField | null) => void;
 }): React.ReactElement {
+  const selectorItems = React.useMemo(
+    () =>
+      sections.flatMap((section) =>
+        section.keys.map((key, idx) => ({
+          section: section.id,
+          key,
+          compositeKey: section.id === "persona" ? `${idx}:${key}` : key,
+        }))
+      ),
+    [sections]
+  );
+  const indexByComposite = React.useMemo(
+    () =>
+      new Map(selectorItems.map((item, index) => [`${item.section}:${item.compositeKey}`, index])),
+    [selectorItems]
+  );
+  const { getItemProps } = useRovingTabIndex<HTMLButtonElement>({
+    count: selectorItems.length,
+    orientation: "vertical",
+    onActivate: (index) => {
+      const item = selectorItems[index];
+      if (item) onSelect({ section: item.section, key: item.compositeKey });
+    },
+  });
+
   return (
     <nav
       className="overflow-y-auto border-r border-default bg-subtle"
@@ -119,21 +150,24 @@ function FieldSelector({
           ) : (
             <ul>
               {section.keys.map((key, idx) => {
-                const isSelected = selected?.section === section.id && selected.key === key;
                 // For persona we use idx + key together because two scopes
                 // can theoretically share the same `source` label.
                 const compositeKey = section.id === "persona" ? `${idx}:${key}` : key;
+                const isSelected =
+                  selected?.section === section.id && selected.key === compositeKey;
+                const rovingIndex = indexByComposite.get(`${section.id}:${compositeKey}`) ?? 0;
                 return (
                   <li key={compositeKey}>
                     <button
-                      type="button"
-                      onClick={() => onSelect({ section: section.id, key: compositeKey })}
                       className={`block w-full px-3 py-1.5 text-left text-sm ${
                         isSelected
                           ? "bg-accent-soft text-primary"
                           : "text-primary hover:bg-elevated"
                       }`}
                       data-testid={`provenance-entry-${section.id}-${key}`}
+                      onClick={() => onSelect({ section: section.id, key: compositeKey })}
+                      type="button"
+                      {...getItemProps(rovingIndex)}
                     >
                       {key}
                     </button>

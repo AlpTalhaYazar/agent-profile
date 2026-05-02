@@ -80,6 +80,9 @@ export function PersonaComposerScreen(): React.ReactElement {
         className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="persona-empty"
       >
+        <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
+          Persona Composer
+        </h1>
         <div className="max-w-md space-y-2 px-6">
           <p className="text-base font-semibold text-primary">No selection</p>
           <p>Pick role + auth + cwd in the Profile Editor tab to render the persona.</p>
@@ -89,10 +92,16 @@ export function PersonaComposerScreen(): React.ReactElement {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" data-testid="persona-composer">
+    <div
+      aria-busy={personaState.status === "loading"}
+      className="flex h-full flex-col overflow-hidden"
+      data-testid="persona-composer"
+    >
       <header className="flex items-start justify-between gap-3 border-b border-subtle bg-surface px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Persona Composer</h1>
+          <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
+            Persona Composer
+          </h1>
           <p className="mt-0.5 text-xs text-secondary">
             role={role} · auth={auth} · cwd={cwd}
           </p>

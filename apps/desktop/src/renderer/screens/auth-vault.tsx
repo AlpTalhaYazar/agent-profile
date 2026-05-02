@@ -39,6 +39,8 @@ import {
 } from "@agent-profile/ui";
 import * as React from "react";
 import type { AuthMode, OAuthMeta, SecretBackedAuthMode } from "../../shared/bridge.js";
+import { useAnnounce } from "../components/live-announcer.js";
+import { type RovingItemProps, useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 
 interface AuthProfileView {
   id: string;
@@ -135,6 +137,7 @@ export function AuthVaultScreen(): React.ReactElement {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const announce = useAnnounce();
 
   const reload = React.useCallback(async () => {
     const bridge = window.myclaude?.auth;
@@ -206,6 +209,14 @@ export function AuthVaultScreen(): React.ReactElement {
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
   const selectedIsDetected = selected?.detected === true;
   const selectedIsOAuth = selected?.mode === "oauth";
+  const { getItemProps: getProfileItemProps } = useRovingTabIndex<HTMLButtonElement>({
+    count: profiles.length,
+    orientation: "vertical",
+    onActivate: (index) => {
+      const profile = profiles[index];
+      if (profile) setSelectedId(profile.id);
+    },
+  });
 
   // Modal control
   const [addProfileOpen, setAddProfileOpen] = React.useState(false);
@@ -217,7 +228,13 @@ export function AuthVaultScreen(): React.ReactElement {
   const [editingSecret, setEditingSecret] = React.useState<string | null>(null);
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
+    <div
+      aria-busy={loading || busy}
+      className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]"
+    >
+      <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
+        Auth Vault
+      </h1>
       <aside className="app-scrollbar min-h-0 overflow-auto border-r border-default bg-surface">
         <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
           <div>
@@ -240,7 +257,7 @@ export function AuthVaultScreen(): React.ReactElement {
           <p className="px-4 py-6 text-sm text-secondary">No auth profiles yet.</p>
         ) : (
           <ul className="divide-y divide-subtle">
-            {profiles.map((p) => (
+            {profiles.map((p, index) => (
               <SidebarRow
                 key={p.id}
                 profile={p}
@@ -260,6 +277,7 @@ export function AuthVaultScreen(): React.ReactElement {
                     setAdoptingId(null);
                     setSelectedId(profileId);
                     await reload();
+                    announce("Auth profile added");
                   } catch (err) {
                     setError(err instanceof Error ? err.message : String(err));
                   } finally {
@@ -267,6 +285,7 @@ export function AuthVaultScreen(): React.ReactElement {
                   }
                 }}
                 onEdit={() => setRenameTarget(p)}
+                rovingProps={getProfileItemProps(index)}
               />
             ))}
           </ul>
@@ -295,6 +314,7 @@ export function AuthVaultScreen(): React.ReactElement {
               </div>
               <div className="flex gap-2">
                 <Button
+                  aria-label="Add secret"
                   type="button"
                   variant="primary"
                   size="sm"
@@ -396,6 +416,7 @@ export function AuthVaultScreen(): React.ReactElement {
             await window.myclaude?.auth?.add({ spec });
             await reload();
             setAddProfileOpen(false);
+            announce("Auth profile added");
           } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
           } finally {
@@ -423,6 +444,7 @@ export function AuthVaultScreen(): React.ReactElement {
               });
               await reload();
               setAddSecretOpen(false);
+              announce("Secret added");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -446,6 +468,7 @@ export function AuthVaultScreen(): React.ReactElement {
               await window.myclaude?.auth?.rotate({ profileId: selected.id, value });
               await reload();
               setRotateOpen(false);
+              announce("Anthropic key rotated");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -471,6 +494,7 @@ export function AuthVaultScreen(): React.ReactElement {
               await reload();
               setRemoveOpen(false);
               setSelectedId(null);
+              announce("Auth profile removed");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -500,6 +524,7 @@ export function AuthVaultScreen(): React.ReactElement {
               await auth.updateMeta({ profileId: target.id, displayName });
               await reload();
               setRenameTarget(null);
+              announce("Auth profile renamed");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -530,6 +555,7 @@ export function AuthVaultScreen(): React.ReactElement {
               });
               await reload();
               setEditingSecret(null);
+              announce("Secret updated");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -553,6 +579,7 @@ interface SidebarRowProps {
   onAdoptToggle: () => void;
   onAdoptSubmit: (input: { profileId: string; displayName?: string }) => Promise<void>;
   onEdit: () => void;
+  rovingProps: RovingItemProps<HTMLButtonElement>;
 }
 
 function SidebarRow({
@@ -564,6 +591,7 @@ function SidebarRow({
   onAdoptToggle,
   onAdoptSubmit,
   onEdit,
+  rovingProps,
 }: SidebarRowProps): React.ReactElement {
   const isDetected = profile.detected === true;
   const expiresLabel = formatExpiresIn(profile.oauth?.accessTokenExpiresAt);
@@ -577,9 +605,11 @@ function SidebarRow({
         }`}
       >
         <button
-          type="button"
-          onClick={onSelect}
+          aria-label={`${profile.id} ${primaryLabel}`}
           className="flex flex-1 flex-col items-start gap-0.5 text-left"
+          onClick={onSelect}
+          type="button"
+          {...rovingProps}
         >
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-primary">{primaryLabel}</span>
@@ -716,34 +746,44 @@ interface AddProfileDialogProps {
   onOpenChange: (open: boolean) => void;
   busy: boolean;
   onError?: (error: string) => void;
-  onSubmit: (spec: {
-    id: string;
-    displayName?: string;
-    anthropic: { mode: SecretBackedAuthMode; secretRef: string };
-  }) => Promise<void>;
+  onSubmit: (spec: AddAuthProfileSpec) => Promise<void>;
 }
 
-function AddProfileDialog({
-  open,
-  onOpenChange,
+export interface AddAuthProfileSpec {
+  id: string;
+  displayName?: string;
+  anthropic: { mode: SecretBackedAuthMode; secretRef: string };
+}
+
+export interface AddAuthProfileFormProps {
+  busy: boolean;
+  autoFocus?: boolean;
+  cancelLabel?: string;
+  submitLabel?: string;
+  onCancel?: () => void;
+  onError?: (error: string) => void;
+  onOAuthComplete?: () => void;
+  onSubmit: (spec: AddAuthProfileSpec) => Promise<void>;
+}
+
+export function AddAuthProfileForm({
   busy,
+  autoFocus,
+  cancelLabel,
+  submitLabel,
+  onCancel,
   onError,
+  onOAuthComplete,
   onSubmit,
-}: AddProfileDialogProps): React.ReactElement {
+}: AddAuthProfileFormProps): React.ReactElement {
   const [localBusy, setLocalBusy] = React.useState(false);
   const [displayName, setDisplayName] = React.useState("");
   const [mode, setMode] = React.useState<AuthMode>("apiKey");
   const [secretRef, setSecretRef] = React.useState("");
+  const displayNameId = React.useId();
+  const secretRefId = React.useId();
 
   const derivedId = slugify(displayName);
-
-  React.useEffect(() => {
-    if (!open) {
-      setDisplayName("");
-      setMode("apiKey");
-      setSecretRef("");
-    }
-  }, [open]);
 
   React.useEffect(() => {
     if (derivedId && !secretRef) {
@@ -757,93 +797,116 @@ function AddProfileDialog({
     displayName.trim().length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
 
   return (
+    <div className="grid gap-4">
+      <div className="grid gap-3">
+        <Field
+          description="What you'll see in the list"
+          htmlFor={displayNameId}
+          label="Display name"
+        >
+          <Input
+            autoFocus={autoFocus}
+            id={displayNameId}
+            onChange={(ev) => setDisplayName(ev.target.value)}
+            placeholder="Work account"
+            value={displayName}
+          />
+        </Field>
+        <Field label="Auth mode">
+          <Select
+            aria-label="Auth mode"
+            onValueChange={(v) => setMode(v as AuthMode)}
+            options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            value={mode}
+          />
+        </Field>
+        {isOAuth ? null : (
+          <Field
+            description="Where the key will be stored"
+            htmlFor={secretRefId}
+            label="Anthropic secret ref"
+          >
+            <Input
+              id={secretRefId}
+              onChange={(ev) => setSecretRef(ev.target.value)}
+              value={secretRef}
+            />
+          </Field>
+        )}
+      </div>
+      <div className="flex justify-end gap-2">
+        {onCancel ? (
+          <Button disabled={effectiveBusy} onClick={onCancel} type="button" variant="ghost">
+            {cancelLabel ?? "Cancel"}
+          </Button>
+        ) : null}
+        <Button
+          disabled={!canSubmit}
+          onClick={async () => {
+            if (isOAuth) {
+              setLocalBusy(true);
+              try {
+                const bridge = window.myclaude?.oauth;
+                if (!bridge) throw new Error("OAuth bridge unavailable");
+                const opts: { profileId: string; displayName?: string } = {
+                  profileId: derivedId,
+                };
+                if (displayName) opts.displayName = displayName;
+                await bridge.start(opts);
+                onOAuthComplete?.();
+              } catch (err) {
+                onError?.(err instanceof Error ? err.message : String(err));
+              } finally {
+                setLocalBusy(false);
+              }
+              return;
+            }
+            const spec: AddAuthProfileSpec = {
+              id: derivedId,
+              anthropic: { mode, secretRef },
+            };
+            if (displayName) spec.displayName = displayName;
+            void onSubmit(spec);
+          }}
+          type="button"
+          variant="primary"
+        >
+          {effectiveBusy
+            ? isOAuth
+              ? "Opening browser..."
+              : "Saving..."
+            : (submitLabel ?? (isOAuth ? "Sign in with Anthropic" : "Continue (collect key)"))}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddProfileDialog({
+  open,
+  onOpenChange,
+  busy,
+  onError,
+  onSubmit,
+}: AddProfileDialogProps): React.ReactElement {
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add auth profile</DialogTitle>
           <DialogDescription>
-            The Anthropic API key is collected by a Main-owned dialog after you save — it never
+            The Anthropic API key is collected by a Main-owned dialog after you save. It never
             travels through this window.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <Field label="Display name" description="What you'll see in the list">
-            <Input
-              value={displayName}
-              onChange={(ev) => setDisplayName(ev.target.value)}
-              placeholder="Work account"
-              autoFocus
-            />
-          </Field>
-          <Field label="Auth mode">
-            <Select
-              value={mode}
-              onValueChange={(v) => setMode(v as AuthMode)}
-              options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
-            />
-          </Field>
-          {isOAuth ? null : (
-            <Field label="Anthropic secret ref" description="Where the key will be stored">
-              <Input value={secretRef} onChange={(ev) => setSecretRef(ev.target.value)} />
-            </Field>
-          )}
-        </div>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={effectiveBusy}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={!canSubmit}
-            onClick={async () => {
-              if (isOAuth) {
-                setLocalBusy(true);
-                try {
-                  const bridge = window.myclaude?.oauth;
-                  if (!bridge) throw new Error("OAuth bridge unavailable");
-                  const opts: { profileId: string; displayName?: string } = {
-                    profileId: derivedId,
-                  };
-                  if (displayName) opts.displayName = displayName;
-                  await bridge.start(opts);
-                  onOpenChange(false);
-                } catch (err) {
-                  onError?.(err instanceof Error ? err.message : String(err));
-                } finally {
-                  setLocalBusy(false);
-                }
-                return;
-              }
-              const spec: {
-                id: string;
-                displayName?: string;
-                anthropic: {
-                  mode: SecretBackedAuthMode;
-                  secretRef: string;
-                };
-              } = {
-                id: derivedId,
-                anthropic: { mode, secretRef },
-              };
-              if (displayName) spec.displayName = displayName;
-              void onSubmit(spec);
-            }}
-          >
-            {effectiveBusy
-              ? isOAuth
-                ? "Opening browser…"
-                : "Saving…"
-              : isOAuth
-                ? "Sign in with Anthropic"
-                : "Continue (collect key)"}
-          </Button>
-        </DialogFooter>
+        <AddAuthProfileForm
+          autoFocus
+          busy={busy}
+          onCancel={() => onOpenChange(false)}
+          onOAuthComplete={() => onOpenChange(false)}
+          onSubmit={onSubmit}
+          {...(onError ? { onError } : {})}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -878,9 +941,7 @@ function SetSecretDialog({
 
   const canSubmit = name.length > 0 && value.length > 0 && !busy;
   const title =
-    mode === "rotate"
-      ? `Rotate Anthropic key for "${profileId}"`
-      : `Add MCP secret to "${profileId}"`;
+    mode === "rotate" ? `Rotate Anthropic key for "${profileId}"` : `Add secret to "${profileId}"`;
   const description =
     mode === "rotate"
       ? "Replaces the stored Anthropic key and revokes every live capability bound to this profile."

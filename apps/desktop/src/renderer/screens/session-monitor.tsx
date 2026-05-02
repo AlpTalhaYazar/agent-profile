@@ -25,6 +25,8 @@ import {
 } from "@agent-profile/ui";
 import * as React from "react";
 import type { SessionUpdatePayload } from "../../shared/bridge.js";
+import { useAnnounce } from "../components/live-announcer.js";
+import { useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 
 interface SessionView {
   sessionId: string;
@@ -130,6 +132,7 @@ export function SessionMonitorScreen(): React.ReactElement {
   const [connection, setConnection] = React.useState<"up" | "down" | "polling">("up");
   const [killTarget, setKillTarget] = React.useState<string | null>(null);
   const [relaunchTarget, setRelaunchTarget] = React.useState<string | null>(null);
+  const announce = useAnnounce();
 
   const reload = React.useCallback(async (): Promise<void> => {
     const bridge = window.myclaude?.sessions;
@@ -173,9 +176,11 @@ export function SessionMonitorScreen(): React.ReactElement {
       if (payload.kind === "connection") {
         if (payload.state === "down") {
           setConnection("polling");
+          announce("Session monitor reconnecting");
           startPolling();
         } else if (payload.state === "up") {
           setConnection("up");
+          announce("Session monitor connected");
           stopPolling();
           void reload();
         }
@@ -185,6 +190,7 @@ export function SessionMonitorScreen(): React.ReactElement {
         // Lightweight live update: refresh on every event so derived fields
         // (status, capability, drift) stay coherent without re-implementing
         // the daemon's enrichment logic on the client.
+        announce(`Session ${payload.event.sessionId} ${payload.event.event}`);
         void reload();
       }
     });
@@ -192,10 +198,18 @@ export function SessionMonitorScreen(): React.ReactElement {
       stopPolling();
       dispose();
     };
-  }, [reload]);
+  }, [announce, reload]);
 
   const selected = sessions.find((s) => s.sessionId === selectedId) ?? null;
   const driftFor = selectedId !== null ? drift[selectedId] : undefined;
+  const { getItemProps: getSessionRowProps } = useRovingTabIndex<HTMLTableRowElement>({
+    count: sessions.length,
+    orientation: "vertical",
+    onActivate: (index) => {
+      const session = sessions[index];
+      if (session) setSelectedId(session.sessionId);
+    },
+  });
 
   const handleDrift = async (sessionId: string): Promise<void> => {
     setBusy(true);
@@ -246,11 +260,13 @@ export function SessionMonitorScreen(): React.ReactElement {
   };
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[1fr_auto]">
+    <div aria-busy={loading || busy} className="grid h-full min-h-0 grid-rows-[1fr_auto]">
       <section className="app-scrollbar min-h-0 overflow-auto bg-surface">
         <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
           <div>
-            <h2 className="text-base font-semibold text-primary">Sessions</h2>
+            <h1 className="text-base font-semibold text-primary" id="screen-heading" tabIndex={-1}>
+              Sessions
+            </h1>
             <p className="text-sm text-secondary">
               {connection === "up" ? "Live (push events)" : "Reconnecting (polling)"} ·{" "}
               {sessions.length} record{sessions.length === 1 ? "" : "s"}
@@ -287,10 +303,12 @@ export function SessionMonitorScreen(): React.ReactElement {
                 const active = s.sessionId === selectedId;
                 return (
                   <TableRow
-                    key={s.sessionId}
-                    data-state={active ? "selected" : undefined}
-                    onClick={() => setSelectedId(s.sessionId)}
+                    aria-selected={active}
                     className="cursor-pointer"
+                    data-state={active ? "selected" : undefined}
+                    key={s.sessionId}
+                    onClick={() => setSelectedId(s.sessionId)}
+                    {...getSessionRowProps(sessions.indexOf(s))}
                   >
                     <TableCell className="font-mono text-xs">{s.sessionId}</TableCell>
                     <TableCell>{s.role}</TableCell>

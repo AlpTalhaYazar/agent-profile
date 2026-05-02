@@ -2,3 +2,5 @@ out/
 .vite/
 dist/
 node_modules/
+test-results/
+playwright-report/
