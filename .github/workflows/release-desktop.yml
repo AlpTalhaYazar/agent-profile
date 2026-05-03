@@ -1,0 +1,267 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v* tag to release. Leave empty for a dry-run build from the selected ref."
+        required: false
+        type: string
+      publish_release:
+        description: "Create a draft GitHub release after artifacts pass verification."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Resolve release ref
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      publish_release: ${{ steps.resolve.outputs.publish_release }}
+
+    steps:
+      - name: Resolve release inputs
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF: ${{ github.ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+
+          publish_release="false"
+          release_tag=""
+          checkout_ref="$REF"
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            release_tag="$REF_NAME"
+            publish_release="true"
+            checkout_ref="refs/tags/$release_tag"
+          elif [[ -n "$INPUT_TAG" ]]; then
+            if [[ ! "$INPUT_TAG" =~ ^v[0-9A-Za-z._-]+$ ]]; then
+              echo "Release tag must start with v and contain only letters, numbers, dot, underscore, or hyphen." >&2
+              exit 1
+            fi
+            if [[ "$INPUT_PUBLISH_RELEASE" == "true" ]]; then
+              publish_release="true"
+            fi
+            gh api "repos/$REPOSITORY/git/ref/tags/$INPUT_TAG" >/dev/null
+            release_tag="$INPUT_TAG"
+            checkout_ref="refs/tags/$release_tag"
+          elif [[ "$INPUT_PUBLISH_RELEASE" == "true" ]]; then
+            echo "workflow_dispatch publish_release=true requires a tag input." >&2
+            exit 1
+          fi
+
+          {
+            echo "checkout_ref=$checkout_ref"
+            echo "release_tag=$release_tag"
+            echo "publish_release=$publish_release"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    needs: preflight
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-15-intel-darwin-x64
+            runner: macos-15-intel
+            platform: darwin
+            arch: x64
+            verify_flags: --require-signature --require-notarization
+          - name: macos-15-darwin-arm64
+            runner: macos-15
+            platform: darwin
+            arch: arm64
+            verify_flags: --require-signature --require-notarization
+          - name: windows-2025-win32-x64
+            runner: windows-2025
+            platform: win32
+            arch: x64
+            verify_flags: --require-signature
+          - name: ubuntu-24.04-linux-x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            verify_flags: --unsigned-ok
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.checkout_ref }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Apple signing certificate and API key
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/apple-codesign.p12"
+          API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 -d > "$CERTIFICATE_PATH"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 -d > "$API_KEY_PATH"
+
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          {
+            echo "AGENT_PROFILE_RELEASE=1"
+            echo "APPLE_CODESIGN_IDENTITY=$APPLE_CODESIGN_IDENTITY"
+            echo "APPLE_KEYCHAIN=$KEYCHAIN_PATH"
+            echo "APPLE_API_KEY_PATH=$API_KEY_PATH"
+            echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Windows signing
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD_SECRET: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNTOOL_PATH_VALUE: ${{ vars.WINDOWS_SIGNTOOL_PATH }}
+          WINDOWS_SIGN_WITH_PARAMS_VALUE: ${{ secrets.WINDOWS_SIGN_WITH_PARAMS }}
+          WINDOWS_TIMESTAMP_SERVER_VALUE: ${{ vars.WINDOWS_TIMESTAMP_SERVER }}
+        run: |
+          function Add-GitHubEnvValue {
+            param(
+              [Parameter(Mandatory = $true)][string] $Name,
+              [string] $Value
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Value)) {
+              return
+            }
+
+            $delimiter = [Guid]::NewGuid().ToString()
+            Add-Content -Path $env:GITHUB_ENV -Value "$Name<<$delimiter"
+            Add-Content -Path $env:GITHUB_ENV -Value $Value
+            Add-Content -Path $env:GITHUB_ENV -Value $delimiter
+          }
+
+          Add-GitHubEnvValue -Name "AGENT_PROFILE_RELEASE" -Value "1"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64)) {
+            $certificatePath = Join-Path $env:RUNNER_TEMP "windows-codesign.pfx"
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+            Add-GitHubEnvValue -Name "WINDOWS_CERTIFICATE_FILE" -Value $certificatePath
+            Add-GitHubEnvValue -Name "WINDOWS_CERTIFICATE_PASSWORD" -Value $env:WINDOWS_CERTIFICATE_PASSWORD_SECRET
+          } else {
+            Add-GitHubEnvValue -Name "WINDOWS_SIGNTOOL_PATH" -Value $env:WINDOWS_SIGNTOOL_PATH_VALUE
+            Add-GitHubEnvValue -Name "WINDOWS_SIGN_WITH_PARAMS" -Value $env:WINDOWS_SIGN_WITH_PARAMS_VALUE
+            Add-GitHubEnvValue -Name "WINDOWS_TIMESTAMP_SERVER" -Value $env:WINDOWS_TIMESTAMP_SERVER_VALUE
+          }
+
+      - name: Install Linux maker dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot dpkg rpm
+
+      - name: Package desktop app
+        run: pnpm -C apps/desktop package -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+
+      - name: Make desktop artifacts
+        run: pnpm -C apps/desktop make -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+
+      - name: Verify release artifacts
+        run: pnpm -C apps/desktop verify-release -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} ${{ matrix.verify_flags }}
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: apps/desktop/out/make/**
+          if-no-files-found: error
+
+  publish:
+    name: Publish draft release
+    runs-on: ubuntu-24.04
+    needs:
+      - preflight
+      - build
+    if: needs.preflight.outputs.publish_release == 'true'
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.preflight.outputs.release_tag }}
+
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$TAG" ]]; then
+            echo "A workflow_dispatch tag input is required when publish_release=true." >&2
+            exit 1
+          fi
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create draft GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t files < <(find release-artifacts -type f | sort)
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No release artifacts were downloaded." >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" "${files[@]}" --draft --generate-notes --verify-tag
