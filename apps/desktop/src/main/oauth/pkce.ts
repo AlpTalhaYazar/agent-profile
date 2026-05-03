@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 const CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
 
@@ -6,7 +6,10 @@ export function generateCodeVerifier(length = 43): string {
   const bytes = randomBytes(length);
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += CHARSET[bytes[i]! % CHARSET.length]!;
+    const byte = bytes[i] ?? 0;
+    const char = CHARSET[byte % CHARSET.length];
+    if (char === undefined) throw new Error("PKCE charset lookup failed");
+    result += char;
   }
   return result;
 }

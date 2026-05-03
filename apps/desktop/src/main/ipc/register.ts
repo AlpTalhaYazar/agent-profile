@@ -7,6 +7,7 @@ import { registerPersonaHandlers } from "./persona.js";
 import { registerProfileHandlers } from "./profile.js";
 import type { RendererIpcBaseContext } from "./secure-handler.js";
 import { registerSessionHandlers } from "./sessions.js";
+import { registerSkillsHandlers } from "./skills.js";
 import { registerSystemHandlers } from "./system.js";
 
 export interface RegisterRendererIpcHandlersOpts {
@@ -31,4 +32,5 @@ export function registerRendererIpcHandlers(opts: RegisterRendererIpcHandlersOpt
   registerProfileHandlers(context);
   registerPersonaHandlers(context);
   registerSessionHandlers(context);
+  registerSkillsHandlers(context);
 }

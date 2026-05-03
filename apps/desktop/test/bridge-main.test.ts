@@ -15,6 +15,19 @@ const runOAuthFlow = vi.fn();
 const detectClaudeCodeCredentials = vi.fn();
 const fetchClientMetadata = vi.fn();
 const refreshAccessToken = vi.fn();
+const listNativeClaudeHistory = vi.fn();
+const launchTerminalSession = vi.fn();
+const resumeNativeClaudeSession = vi.fn();
+const openTerminalSession = vi.fn();
+const isTerminalSessionAttachable = vi.fn<(sessionId: string) => boolean>(() => false);
+const writeTerminalSession = vi.fn();
+const resizeTerminalSession = vi.fn();
+const closeTerminalSession = vi.fn();
+const skillsSearch = vi.fn();
+const skillsDetail = vi.fn();
+const skillsAudit = vi.fn();
+const skillsListInstalled = vi.fn();
+const skillsInstall = vi.fn();
 
 vi.mock("electron", () => {
   return {
@@ -58,6 +71,28 @@ vi.mock("../src/main/oauth/token-client.js", () => ({
   refreshAccessToken,
 }));
 
+vi.mock("../src/main/native-claude-history.js", () => ({
+  listNativeClaudeHistory,
+}));
+
+vi.mock("../src/main/session-terminal.js", () => ({
+  closeTerminalSession,
+  isTerminalSessionAttachable,
+  launchTerminalSession,
+  openTerminalSession,
+  resumeNativeClaudeSession,
+  resizeTerminalSession,
+  writeTerminalSession,
+}));
+
+vi.mock("../src/main/skills-service.js", () => ({
+  skillsSearch,
+  skillsDetail,
+  skillsAudit,
+  skillsListInstalled,
+  skillsInstall,
+}));
+
 describe("main renderer IPC bridge", () => {
   beforeEach(() => {
     handlerMap.clear();
@@ -71,6 +106,20 @@ describe("main renderer IPC bridge", () => {
     detectClaudeCodeCredentials.mockReset();
     fetchClientMetadata.mockReset();
     refreshAccessToken.mockReset();
+    listNativeClaudeHistory.mockReset();
+    launchTerminalSession.mockReset();
+    resumeNativeClaudeSession.mockReset();
+    openTerminalSession.mockReset();
+    isTerminalSessionAttachable.mockReset();
+    isTerminalSessionAttachable.mockReturnValue(false);
+    writeTerminalSession.mockReset();
+    resizeTerminalSession.mockReset();
+    closeTerminalSession.mockReset();
+    skillsSearch.mockReset();
+    skillsDetail.mockReset();
+    skillsAudit.mockReset();
+    skillsListInstalled.mockReset();
+    skillsInstall.mockReset();
     vi.resetModules();
   });
 
@@ -236,6 +285,294 @@ describe("main renderer IPC bridge", () => {
       profileSave({ senderFrame: { url: "file:///trusted/index.html" }, sender: {} }, { path: "" })
     ).rejects.toThrow(/invalid payload/);
     expect(connectToSocket).not.toHaveBeenCalled();
+  });
+
+  it("delegates profile.createScope to the daemon", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({
+      id: "c-1",
+      kind: "profile.createScope.ok",
+      created: true,
+      path: "/repo/.myclaude/roles/backend.yml",
+      scope: "project-role",
+      role: "backend",
+      content: { version: 1, mcpServers: {}, env: {}, settings: {}, use: [], disabledServers: [] },
+    });
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+    });
+
+    const profileCreateScope = handlerMap.get("profile.createScope");
+    if (!profileCreateScope) throw new Error("missing profile.createScope handler");
+
+    await expect(
+      profileCreateScope(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        {
+          cwd: "/repo",
+          location: "project",
+          layerType: "role",
+          role: "backend",
+        }
+      )
+    ).resolves.toEqual({
+      created: true,
+      path: "/repo/.myclaude/roles/backend.yml",
+      scope: "project-role",
+      role: "backend",
+      content: { version: 1, mcpServers: {}, env: {}, settings: {}, use: [], disabledServers: [] },
+    });
+    expect(request).toHaveBeenCalledWith("profile.createScope", {
+      cwd: "/repo",
+      location: "project",
+      layerType: "role",
+      role: "backend",
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("composes workspace profile sessions with native Claude history", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({
+      id: "c-1",
+      kind: "sessions.list.ok",
+      sessions: [
+        {
+          sessionId: "profile-1",
+          cwd: "/repo",
+          createdAt: "2026-05-01T10:00:00.000Z",
+          updatedAt: "2026-05-01T10:00:00.000Z",
+          status: "exited",
+          spawn: { command: "claude", args: [] },
+        },
+        {
+          sessionId: "other-1",
+          cwd: "/other",
+          createdAt: "2026-05-01T10:00:00.000Z",
+          updatedAt: "2026-05-01T10:00:00.000Z",
+          status: "exited",
+        },
+      ],
+    });
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+    isTerminalSessionAttachable.mockImplementation((sessionId: string) => sessionId === "native-1");
+    listNativeClaudeHistory.mockResolvedValue([
+      {
+        source: "claude-native",
+        sessionId: "native-1",
+        cwd: "/repo",
+        status: "history",
+        createdAt: "2026-05-01T11:00:00.000Z",
+        updatedAt: "2026-05-01T11:00:00.000Z",
+        attachable: false,
+        resumable: true,
+      },
+    ]);
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+    });
+
+    const sessionsList = handlerMap.get("sessions.list");
+    if (!sessionsList) throw new Error("missing sessions.list handler");
+
+    await expect(
+      sessionsList(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { cwd: "/repo", includeNative: true }
+      )
+    ).resolves.toEqual({
+      sessions: [
+        expect.objectContaining({
+          source: "claude-native",
+          sessionId: "native-1",
+          attachable: true,
+          resumable: false,
+        }),
+        expect.objectContaining({
+          source: "profile",
+          sessionId: "profile-1",
+          attachable: false,
+        }),
+      ],
+    });
+    expect(request).toHaveBeenCalledWith("sessions.list", {});
+    expect(listNativeClaudeHistory).toHaveBeenCalledWith({ cwd: "/repo" });
+  });
+
+  it("delegates terminal session controls and preserves void returns for close/write/resize", async () => {
+    launchTerminalSession.mockResolvedValue({ sessionId: "launched-1" });
+    resumeNativeClaudeSession.mockResolvedValue({ sessionId: "native-1" });
+    openTerminalSession.mockReturnValue({
+      sessionId: "launched-1",
+      attached: true,
+      buffer: "ready",
+    });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    const context = {
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      clientVersion: "0.1.0",
+    };
+    registerRendererIpcHandlers(context);
+
+    const event = { senderFrame: { url: "file:///trusted/index.html" }, sender: {} };
+    const launch = handlerMap.get("sessions.launch");
+    const open = handlerMap.get("sessions.openTerminal");
+    const write = handlerMap.get("sessions.writeTerminal");
+    const resize = handlerMap.get("sessions.resizeTerminal");
+    const closeTerminal = handlerMap.get("sessions.closeTerminal");
+    if (!launch || !open || !write || !resize || !closeTerminal) {
+      throw new Error("missing terminal session handlers");
+    }
+
+    await expect(
+      launch(event, {
+        role: "backend",
+        authProfileId: "work",
+        cwd: "/repo",
+        passthroughArgs: ["--debug"],
+        bare: true,
+        strict: false,
+      })
+    ).resolves.toEqual({ sessionId: "launched-1" });
+    await expect(open(event, { sessionId: "launched-1" })).resolves.toEqual({
+      sessionId: "launched-1",
+      attached: true,
+      buffer: "ready",
+    });
+    await expect(write(event, { sessionId: "launched-1", data: "hello\n" })).resolves.toBe(
+      undefined
+    );
+    await expect(resize(event, { sessionId: "launched-1", cols: 100, rows: 30 })).resolves.toBe(
+      undefined
+    );
+    await expect(closeTerminal(event, { sessionId: "launched-1" })).resolves.toBe(undefined);
+
+    expect(launchTerminalSession).toHaveBeenCalledWith(
+      {
+        role: "backend",
+        authProfileId: "work",
+        cwd: "/repo",
+        passthroughArgs: ["--debug"],
+        bare: true,
+        strict: false,
+      },
+      expect.objectContaining({ myClaudeHome: "/Users/test/.myclaude" })
+    );
+    expect(openTerminalSession).toHaveBeenCalledWith("launched-1");
+    expect(writeTerminalSession).toHaveBeenCalledWith("launched-1", "hello\n");
+    expect(resizeTerminalSession).toHaveBeenCalledWith("launched-1", 100, 30);
+    expect(closeTerminalSession).toHaveBeenCalledWith("launched-1");
+  });
+
+  it("delegates skills catalog IPC locally and validates install payloads before execution", async () => {
+    skillsSearch.mockResolvedValue({
+      skills: [{ id: "postgres", slug: "postgres", name: "Postgres", source: "org/repo" }],
+    });
+    skillsDetail.mockResolvedValue({ id: "postgres", readme: "..." });
+    skillsAudit.mockResolvedValue({ id: "postgres", status: "passed" });
+    skillsListInstalled.mockResolvedValue({ skills: [] });
+    skillsInstall.mockResolvedValue({
+      installed: true,
+      name: "postgres",
+      path: "/Users/test/.claude/skills/postgres",
+    });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+    });
+
+    const event = { senderFrame: { url: "file:///trusted/index.html" }, sender: {} };
+    const skillsSearchHandler = handlerMap.get("skills.search");
+    const skillsDetailHandler = handlerMap.get("skills.detail");
+    const skillsAuditHandler = handlerMap.get("skills.audit");
+    const skillsListInstalledHandler = handlerMap.get("skills.listInstalled");
+    const skillsInstallHandler = handlerMap.get("skills.install");
+    if (
+      !skillsSearchHandler ||
+      !skillsDetailHandler ||
+      !skillsAuditHandler ||
+      !skillsListInstalledHandler ||
+      !skillsInstallHandler
+    ) {
+      throw new Error("missing skills handlers");
+    }
+
+    await expect(skillsSearchHandler(event, { query: "postgres", limit: 5 })).resolves.toEqual(
+      expect.objectContaining({ skills: expect.any(Array) })
+    );
+    expect(skillsSearch).toHaveBeenCalledWith({ query: "postgres", limit: 5 });
+    await expect(skillsDetailHandler(event, { id: "postgres" })).resolves.toEqual({
+      id: "postgres",
+      readme: "...",
+    });
+    await expect(skillsAuditHandler(event, { id: "postgres" })).resolves.toEqual({
+      id: "postgres",
+      status: "passed",
+    });
+    await expect(
+      skillsListInstalledHandler(event, { scope: "global", agent: "claude-code" })
+    ).resolves.toEqual({
+      skills: [],
+    });
+    await expect(
+      skillsInstallHandler(event, {
+        id: "postgres",
+        slug: "postgres",
+        source: "org/repo",
+        installUrl: "https://github.com/org/repo",
+      })
+    ).resolves.toEqual({
+      installed: true,
+      name: "postgres",
+      path: "/Users/test/.claude/skills/postgres",
+    });
+    await expect(
+      skillsInstallHandler(event, {
+        id: "postgres",
+        slug: "",
+        source: "org/repo",
+      })
+    ).rejects.toThrow(/invalid payload/);
+    expect(connectToSocket).not.toHaveBeenCalled();
+  });
+
+  it("delegates native Claude resume to the terminal runtime", async () => {
+    resumeNativeClaudeSession.mockResolvedValue({ sessionId: "native-1" });
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    const context = {
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      clientVersion: "0.1.0",
+    };
+    registerRendererIpcHandlers(context);
+
+    const resumeNative = handlerMap.get("sessions.resumeNative");
+    if (!resumeNative) throw new Error("missing sessions.resumeNative handler");
+
+    await expect(
+      resumeNative(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { sessionId: "native-1", cwd: "/repo" }
+      )
+    ).resolves.toEqual({ sessionId: "native-1" });
+    expect(resumeNativeClaudeSession).toHaveBeenCalledWith(
+      { sessionId: "native-1", cwd: "/repo" },
+      expect.objectContaining({ myClaudeHome: "/Users/test/.myclaude" })
+    );
   });
 
   it("handles system.defaultCwd and system.pickDirectory locally in Main", async () => {

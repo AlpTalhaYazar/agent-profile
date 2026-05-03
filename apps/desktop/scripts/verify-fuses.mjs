@@ -31,6 +31,8 @@ import { FuseV1Options, FuseVersion, getCurrentFuseWire } from "@electron/fuses"
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
+const FUSE_STATE_DISABLE = "0".charCodeAt(0);
+const FUSE_STATE_ENABLE = "1".charCodeAt(0);
 
 /** The expected fuse values, keyed by FuseV1Options. Source of truth: docs/06-security.md. */
 const EXPECTED = /** @type {Record<number, boolean>} */ ({
@@ -110,7 +112,7 @@ async function main() {
   for (const [key, expected] of Object.entries(EXPECTED)) {
     const numeric = Number(key);
     const name = FUSE_NAMES[numeric] ?? `FuseV1Options[${numeric}]`;
-    const actual = wire[numeric];
+    const actual = fuseStateToBoolean(wire[numeric]);
     rows.push({ name, expected, actual, ok: actual === expected });
   }
 
@@ -129,6 +131,16 @@ async function main() {
   }
   console.log("verify-fuses: all fuses match expected values");
   process.exit(0);
+}
+
+/**
+ * `@electron/fuses.getCurrentFuseWire()` returns raw wire states, not
+ * booleans: ASCII `0`/`1` byte values for disabled/enabled fuses.
+ */
+function fuseStateToBoolean(value) {
+  if (value === true || value === FUSE_STATE_ENABLE) return true;
+  if (value === false || value === FUSE_STATE_DISABLE) return false;
+  return undefined;
 }
 
 main().catch((err) => {

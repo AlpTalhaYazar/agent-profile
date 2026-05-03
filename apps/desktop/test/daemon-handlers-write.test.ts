@@ -129,6 +129,46 @@ describe("daemon write handlers", () => {
     expect(await readFile(targetPath, "utf8")).toContain("EDITOR: nvim");
   });
 
+  it("profile.createScope scaffolds project and global layer paths", async () => {
+    const handler = build()["profile.createScope"];
+    if (!handler) throw new Error("missing handler");
+    const projectDir = join(home, "repo");
+
+    const projectRole = await handler(
+      req("profile.createScope", {
+        cwd: projectDir,
+        location: "project",
+        layerType: "role",
+        role: "backend",
+      }),
+      ctx
+    );
+    expect(projectRole).toMatchObject({
+      created: true,
+      path: join(projectDir, ".myclaude", "roles", "backend.yml"),
+      scope: "project-role",
+      role: "backend",
+    });
+    expect(await readFile(join(projectDir, ".myclaude", "roles", "backend.yml"), "utf8")).toContain(
+      "version: 1"
+    );
+
+    const globalShared = await handler(
+      req("profile.createScope", {
+        cwd: projectDir,
+        location: "global",
+        layerType: "shared",
+      }),
+      ctx
+    );
+    expect(globalShared).toMatchObject({
+      created: true,
+      path: join(myClaudeHome, "config", "global", "shared.yml"),
+      scope: "global-shared",
+      role: null,
+    });
+  });
+
   it("auth.add stores the encrypted secret and writes the metadata file", async () => {
     const handler = build()["auth.add"];
     if (!handler) throw new Error("missing handler");

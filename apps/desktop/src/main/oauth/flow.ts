@@ -1,7 +1,7 @@
-import { shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { generatePKCE } from "./pkce.js";
+import { shell } from "electron";
 import { startCallbackServer } from "./callback-server.js";
+import { generatePKCE } from "./pkce.js";
 import { exchangeCodeForTokens, fetchClientMetadata, fetchRoles } from "./token-client.js";
 import type { OAuthResult } from "./types.js";
 
@@ -66,9 +66,7 @@ export async function runOAuthFlow(args: {
     }
 
     // 9. Compute expiry
-    const accessTokenExpiresAt = new Date(
-      Date.now() + tokens.expires_in * 1000
-    ).toISOString();
+    const accessTokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
     // 10. Store tokens in keychain
     const secretKey = `anthropic/${profileId}`;

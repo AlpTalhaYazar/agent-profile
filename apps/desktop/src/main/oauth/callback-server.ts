@@ -1,4 +1,4 @@
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 
 const SUCCESS_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Authentication Complete</title>
@@ -36,7 +36,7 @@ export async function startCallbackServer(): Promise<{
   });
 
   server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? "/", `http://127.0.0.1`);
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
@@ -59,9 +59,10 @@ export async function startCallbackServer(): Promise<{
     }
   });
 
+  const activeServer = server;
   await new Promise<void>((resolve, reject) => {
-    server!.listen(0, "127.0.0.1", () => resolve());
-    server!.on("error", reject);
+    activeServer.listen(0, "127.0.0.1", () => resolve());
+    activeServer.on("error", reject);
   });
 
   const addr = server.address();

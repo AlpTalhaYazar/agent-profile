@@ -25,7 +25,10 @@
     "@agent-profile/persona-deployer": "workspace:*",
     "@agent-profile/secrets": "workspace:*",
     "@agent-profile/ui": "workspace:*",
+    "@homebridge/node-pty-prebuilt-multiarch": "0.13.1",
+    "@xterm/xterm": "^6.0.0",
     "jotai": "^2.10.1",
+    "lucide-react": "^1.14.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

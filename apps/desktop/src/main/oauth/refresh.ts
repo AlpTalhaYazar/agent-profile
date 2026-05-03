@@ -1,4 +1,4 @@
-import { refreshAccessToken, fetchClientMetadata } from "./token-client.js";
+import { fetchClientMetadata, refreshAccessToken } from "./token-client.js";
 
 interface OAuthProfile {
   anthropic: {
@@ -33,9 +33,7 @@ export async function refreshOAuthToken(args: {
   const metadata = await fetchClientMetadata();
   const tokens = await refreshAccessToken(refreshToken, metadata.client_id);
 
-  const accessTokenExpiresAt = new Date(
-    Date.now() + tokens.expires_in * 1000
-  ).toISOString();
+  const accessTokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
   // Store new access token
   const secretKey = profile.anthropic.secretRef.replace("keyring://", "");

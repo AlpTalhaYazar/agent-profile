@@ -15,7 +15,12 @@ export default defineConfig({
       fileName: () => "main.cjs",
     },
     rollupOptions: {
-      external: ["electron", /^node:/, /^@napi-rs\/keyring/],
+      external: [
+        "electron",
+        "@homebridge/node-pty-prebuilt-multiarch",
+        /^node:/,
+        /^@napi-rs\/keyring/,
+      ],
     },
     sourcemap: true,
     target: "node22",

@@ -1,4 +1,5 @@
 import type {
+  RespProfileCreateScopeOkT,
   RespProfileListOkT,
   RespProfilePreviewOkT,
   RespProfileSaveOkT,
@@ -45,6 +46,16 @@ const ProfileSavePayload = z
   .object({
     path: z.string().min(1),
     content: z.unknown(),
+  })
+  .strict();
+
+const ProfileCreateScopePayload = z
+  .object({
+    location: z.enum(["global", "project"]),
+    layerType: z.enum(["shared", "role"]),
+    role: z.string().min(1).optional(),
+    cwd: z.string().min(1),
+    force: z.boolean().optional(),
   })
   .strict();
 
@@ -106,6 +117,23 @@ export function registerProfileHandlers(context: RendererIpcBaseContext): void {
       withDaemonClient(context.myClaudeHome, context.clientVersion, async (client) => {
         const resp = await client.request<RespProfileSaveOkT>("profile.save", parsed);
         return { saved: resp.saved, path: resp.path };
+      }),
+  });
+
+  registerSecureHandler({
+    channel: CHANNELS.profile.createScope,
+    schema: ProfileCreateScopePayload,
+    context,
+    handle: (parsed) =>
+      withDaemonClient(context.myClaudeHome, context.clientVersion, async (client) => {
+        const resp = await client.request<RespProfileCreateScopeOkT>("profile.createScope", parsed);
+        return {
+          created: resp.created,
+          path: resp.path,
+          scope: resp.scope,
+          role: resp.role,
+          content: resp.content,
+        };
       }),
   });
 }

@@ -54,12 +54,25 @@ describe("preload bridge", () => {
     expect(api).toHaveProperty("profile.validate");
     expect(api).toHaveProperty("profile.preview");
     expect(api).toHaveProperty("profile.save");
+    expect(api).toHaveProperty("profile.createScope");
     expect(api).toHaveProperty("persona.render");
+    expect(api).toHaveProperty("skills.search");
+    expect(api).toHaveProperty("skills.detail");
+    expect(api).toHaveProperty("skills.audit");
+    expect(api).toHaveProperty("skills.listInstalled");
+    expect(api).toHaveProperty("skills.install");
     expect(api).toHaveProperty("sessions.list");
     expect(api).toHaveProperty("sessions.kill");
     expect(api).toHaveProperty("sessions.relaunch");
     expect(api).toHaveProperty("sessions.drift");
+    expect(api).toHaveProperty("sessions.launch");
+    expect(api).toHaveProperty("sessions.resumeNative");
+    expect(api).toHaveProperty("sessions.openTerminal");
+    expect(api).toHaveProperty("sessions.writeTerminal");
+    expect(api).toHaveProperty("sessions.resizeTerminal");
+    expect(api).toHaveProperty("sessions.closeTerminal");
     expect(api).toHaveProperty("sessions.onUpdate");
+    expect(api).toHaveProperty("sessions.onTerminalEvent");
   });
 
   it("forwards renderer calls onto the expected ipc channels", async () => {
@@ -98,11 +111,33 @@ describe("preload bridge", () => {
       draft: { path: "/repo/.myclaude/roles/backend.yml", content: { version: 1 } },
     });
     await api.profile.save({ path: "/repo/.myclaude/shared.yml", content: { version: 1 } });
+    await api.profile.createScope({
+      cwd: "/repo",
+      location: "project",
+      layerType: "role",
+      role: "backend",
+    });
     await api.persona.render({ role: "backend", authProfileId: "work", cwd: "/repo" });
-    await api.sessions.list();
+    await api.skills.search({ query: "postgres", limit: 10 });
+    await api.skills.detail({ id: "postgres" });
+    await api.skills.audit({ id: "postgres" });
+    await api.skills.listInstalled({ scope: "global", agent: "claude-code" });
+    await api.skills.install({
+      id: "postgres",
+      slug: "postgres",
+      source: "org/repo",
+      installUrl: "https://github.com/org/repo",
+    });
+    await api.sessions.list({ cwd: "/repo", includeNative: true });
     await api.sessions.kill({ sessionId: "s-1", signal: "SIGKILL" });
     await api.sessions.relaunch({ sessionId: "s-1" });
     await api.sessions.drift({ sessionId: "s-1" });
+    await api.sessions.launch({ role: "backend", authProfileId: "work", cwd: "/repo" });
+    await api.sessions.resumeNative({ sessionId: "native-1", cwd: "/repo" });
+    await api.sessions.openTerminal({ sessionId: "s-2" });
+    await api.sessions.writeTerminal({ sessionId: "s-2", data: "hello\n" });
+    await api.sessions.resizeTerminal({ sessionId: "s-2", cols: 100, rows: 30 });
+    await api.sessions.closeTerminal({ sessionId: "s-2" });
 
     expect(invoke.mock.calls).toEqual([
       ["system.version"],
@@ -139,11 +174,34 @@ describe("preload bridge", () => {
         },
       ],
       ["profile.save", { path: "/repo/.myclaude/shared.yml", content: { version: 1 } }],
+      [
+        "profile.createScope",
+        { cwd: "/repo", location: "project", layerType: "role", role: "backend" },
+      ],
       ["persona.render", { role: "backend", authProfileId: "work", cwd: "/repo" }],
-      ["sessions.list"],
+      ["skills.search", { query: "postgres", limit: 10 }],
+      ["skills.detail", { id: "postgres" }],
+      ["skills.audit", { id: "postgres" }],
+      ["skills.listInstalled", { scope: "global", agent: "claude-code" }],
+      [
+        "skills.install",
+        {
+          id: "postgres",
+          slug: "postgres",
+          source: "org/repo",
+          installUrl: "https://github.com/org/repo",
+        },
+      ],
+      ["sessions.list", { cwd: "/repo", includeNative: true }],
       ["sessions.kill", { sessionId: "s-1", signal: "SIGKILL" }],
       ["sessions.relaunch", { sessionId: "s-1" }],
       ["sessions.drift", { sessionId: "s-1" }],
+      ["sessions.launch", { role: "backend", authProfileId: "work", cwd: "/repo" }],
+      ["sessions.resumeNative", { sessionId: "native-1", cwd: "/repo" }],
+      ["sessions.openTerminal", { sessionId: "s-2" }],
+      ["sessions.writeTerminal", { sessionId: "s-2", data: "hello\n" }],
+      ["sessions.resizeTerminal", { sessionId: "s-2", cols: 100, rows: 30 }],
+      ["sessions.closeTerminal", { sessionId: "s-2" }],
     ]);
   });
 
@@ -162,5 +220,22 @@ describe("preload bridge", () => {
 
     dispose();
     expect(off).toHaveBeenCalledWith("myclaude.sessions.event", listener);
+  });
+
+  it("subscribes and unsubscribes from terminal events", async () => {
+    const api = await loadBridge();
+    const cb = vi.fn();
+
+    const dispose = api.sessions.onTerminalEvent(cb);
+    expect(on).toHaveBeenCalledTimes(1);
+    expect(on.mock.calls[0]?.[0]).toBe("myclaude.sessions.terminal");
+
+    const listener = on.mock.calls[0]?.[1] as (event: unknown, payload: unknown) => void;
+    const payload = { kind: "data", sessionId: "s-1", data: "ready" };
+    listener({}, payload);
+    expect(cb).toHaveBeenCalledWith(payload);
+
+    dispose();
+    expect(off).toHaveBeenCalledWith("myclaude.sessions.terminal", listener);
   });
 });

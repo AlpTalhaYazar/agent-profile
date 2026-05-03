@@ -174,6 +174,7 @@ export class DaemonLifecycle {
         "auth.rotate",
         "auth.remove",
         "profile.save",
+        "profile.createScope",
         "session.start",
         "session.end",
         "secret.get",

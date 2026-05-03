@@ -34,6 +34,7 @@ import {
   driftService,
   listSessionRecords,
   loadAuthProfiles,
+  profileCreateScopeService,
   profileSaveService,
   readSessionRecord,
   saveAuthProfiles,
@@ -51,6 +52,7 @@ import {
   type ReqAuthRotateT,
   type ReqAuthSetSecretT,
   type ReqAuthUpdateMetaT,
+  type ReqProfileCreateScopeT,
   type ReqProfileSaveT,
   type ReqSecretGetT,
   type ReqSecretsMigrateT,
@@ -209,6 +211,24 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
       return { saved: result.saved, path: result.path };
     }),
 
+    "profile.createScope": wrap<ReqProfileCreateScopeT>("profile.createScope", async (req) => {
+      const result = profileCreateScopeService({
+        home: deps.myClaudeHome,
+        cwd: req.cwd,
+        location: req.location,
+        layerType: req.layerType,
+        ...(req.role !== undefined ? { role: req.role } : {}),
+        force: req.force ?? false,
+      });
+      return {
+        created: result.created,
+        path: result.path,
+        scope: result.scope,
+        role: result.role,
+        content: result.content,
+      };
+    }),
+
     "auth.add": wrap<ReqAuthAddT>("auth.add", async (req) => {
       const { spec, anthropicSecretB64, force } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
@@ -304,13 +324,15 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
     "auth.update-meta": wrap<ReqAuthUpdateMetaT>("auth.update-meta", async (req) => {
       const { authId, displayName, oauth } = req;
       const doc = loadAuthProfilesSafe(deps.myClaudeHome);
-      const profile = doc.authProfiles[authId];
+      let profile = doc.authProfiles[authId];
       if (!profile) {
         throw new IpcError("NOT_FOUND", `auth profile "${authId}" not found`);
       }
       if (displayName !== undefined) {
         if (displayName === "") {
-          delete profile.displayName;
+          const { displayName: _displayName, ...profileWithoutDisplayName } = profile;
+          profile = profileWithoutDisplayName;
+          doc.authProfiles[authId] = profile;
         } else {
           profile.displayName = displayName;
         }

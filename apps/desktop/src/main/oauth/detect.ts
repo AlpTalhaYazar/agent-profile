@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { platform } from "node:os";
 import * as os from "node:os";
+import { promisify } from "node:util";
 import type { DetectedCredentials } from "./types.js";
 
 const execFileAsync = promisify(execFile);

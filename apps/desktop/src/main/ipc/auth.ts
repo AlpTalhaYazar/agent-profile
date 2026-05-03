@@ -88,7 +88,7 @@ export function registerAuthHandlers(context: RendererIpcBaseContext): void {
       const parentWindow = BrowserWindow.fromWebContents(event.sender);
       const plaintext = await requestSecretInputViaMain({
         parent: parentWindow,
-        title: `Add auth profile "${parsed.spec.id}"`,
+        title: `Add Claude credential "${parsed.spec.id}"`,
         label: "Anthropic API key",
       });
       if (plaintext === null) {
