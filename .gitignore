@@ -1,9 +1,13 @@
 docs
+!apps/desktop/docs/
+!apps/desktop/docs/*.md
 
 research
+.ai-page-designs/
 
 .agents
 .claude
+.codex
 graphify-out
 design-system
 

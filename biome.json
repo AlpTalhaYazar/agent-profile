@@ -37,7 +37,9 @@
       "*.tsbuildinfo",
       "apps/desktop/.vite",
       "apps/desktop/out",
+      "apps/desktop/test-results",
       "graphify-out",
+      ".claude",
       ".claude/settings.local.json"
     ]
   },
