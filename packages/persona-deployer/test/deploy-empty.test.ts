@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access, mkdir, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -139,5 +139,43 @@ describe("deployPersona — empty persona", () => {
     } finally {
       rmSync(extraDir, { recursive: true, force: true });
     }
+  });
+
+  it("copies directory-backed skills recursively while preserving file-backed skills", async () => {
+    tmpRoot = mkdtempSync(join(tmpdir(), "deploy-skill-dir-test-"));
+    const { sessionDir, claudeConfigDir } = await createSessionDir({ root: tmpRoot });
+    const skillDir = join(tmpRoot, "skills", "graphify");
+    await mkdir(join(skillDir, "references"), { recursive: true });
+    await atomicWrite(join(skillDir, "SKILL.md"), "# Graphify\n");
+    await atomicWrite(join(skillDir, "references", "usage.md"), "usage\n");
+
+    const result = await deployPersona(
+      {
+        claudeMd: [],
+        agents: [],
+        skills: [skillDir, join(FIXTURES, "skill-postgres-query.md")],
+        slashCmds: [],
+        memory: [],
+      },
+      sessionDir,
+      claudeConfigDir
+    );
+
+    expect(await readFile(join(claudeConfigDir, "skills", "graphify", "SKILL.md"), "utf8")).toBe(
+      "# Graphify\n"
+    );
+    expect(
+      await readFile(join(claudeConfigDir, "skills", "graphify", "references", "usage.md"), "utf8")
+    ).toBe("usage\n");
+    expect(
+      await readFile(join(claudeConfigDir, "skills", "skill-postgres-query.md"), "utf8")
+    ).toContain("PostgreSQL");
+    expect(result.writtenFiles).toEqual(
+      expect.arrayContaining([
+        join(claudeConfigDir, "skills", "graphify", "SKILL.md"),
+        join(claudeConfigDir, "skills", "graphify", "references", "usage.md"),
+        join(claudeConfigDir, "skills", "skill-postgres-query.md"),
+      ])
+    );
   });
 });

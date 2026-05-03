@@ -6,6 +6,7 @@ import { eventChannelByKind, responseKindByRequest } from "../src/messages/regis
 describe("message registry", () => {
   it("maps request kinds to ok response kinds", () => {
     expect(responseKindByRequest["auth.oauth.start"]).toBe("auth.oauth.start.ok");
+    expect(responseKindByRequest["profile.createScope"]).toBe("profile.createScope.ok");
     expect(responseKindByRequest["sessions.subscribe"]).toBe("sessions.subscribe.ok");
     expect(responseKindByRequest["persona.render"]).toBe("persona.render.ok");
     expect(responseKindByRequest["system.bootstrap"]).toBe("system.bootstrap.ok");

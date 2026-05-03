@@ -13,6 +13,7 @@ import {
   ReqDaemonStop,
   ReqHello,
   ReqPersonaRender,
+  ReqProfileCreateScope,
   ReqProfileList,
   ReqProfilePreview,
   ReqProfileSave,
@@ -41,6 +42,7 @@ import {
   RespError,
   RespHelloOk,
   RespPersonaRenderOk,
+  RespProfileCreateScopeOk,
   RespProfileListOk,
   RespProfilePreviewOk,
   RespProfileSaveOk,
@@ -273,6 +275,32 @@ describe("Req schemas", () => {
     });
   });
 
+  describe("ReqProfileCreateScope", () => {
+    it("accepts project role create input", () => {
+      const result = ReqProfileCreateScope.safeParse({
+        id: "c-7b",
+        kind: "profile.createScope",
+        cwd: "/repo",
+        location: "project",
+        layerType: "role",
+        role: "backend",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects unknown locations", () => {
+      const result = ReqProfileCreateScope.safeParse({
+        id: "c-7b",
+        kind: "profile.createScope",
+        cwd: "/repo",
+        location: "workspace",
+        layerType: "role",
+        role: "backend",
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe("Req discriminated union", () => {
     it("routes by kind", () => {
       const result = Req.safeParse({
@@ -476,6 +504,21 @@ describe("Resp schemas", () => {
         kind: "profile.save.ok",
         saved: true,
         path: "/repo/.myclaude/shared.yml",
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("RespProfileCreateScopeOk", () => {
+    it("accepts a successful create result", () => {
+      const result = RespProfileCreateScopeOk.safeParse({
+        id: "c-7b",
+        kind: "profile.createScope.ok",
+        created: true,
+        path: "/repo/.myclaude/roles/backend.yml",
+        scope: "project-role",
+        role: "backend",
+        content: { version: 1 },
       });
       expect(result.success).toBe(true);
     });

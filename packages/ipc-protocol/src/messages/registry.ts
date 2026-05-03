@@ -24,11 +24,13 @@ import {
 } from "./auth.js";
 import { ReqPersonaRender, RespPersonaRenderOk } from "./persona.js";
 import {
+  ReqProfileCreateScope,
   ReqProfileList,
   ReqProfilePreview,
   ReqProfileSave,
   ReqProfileShow,
   ReqProfileValidate,
+  RespProfileCreateScopeOk,
   RespProfileListOk,
   RespProfilePreviewOk,
   RespProfileSaveOk,
@@ -153,6 +155,12 @@ export const endpoints = [
     request: ReqProfileSave,
     responseKind: "profile.save.ok",
     response: RespProfileSaveOk,
+  }),
+  endpoint({
+    requestKind: "profile.createScope",
+    request: ReqProfileCreateScope,
+    responseKind: "profile.createScope.ok",
+    response: RespProfileCreateScopeOk,
   }),
   endpoint({
     requestKind: "auth.add",

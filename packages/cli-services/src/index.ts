@@ -47,6 +47,13 @@ export {
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
 export {
+  profileCreateScopeService,
+  type ProfileCreateScopeInput,
+  type ProfileCreateScopeResult,
+  type ProfileScopeLayerType,
+  type ProfileScopeLocation,
+} from "./profile/create-scope.js";
+export {
   profileListService,
   type ProfileListInput,
   type ProfileListResult,

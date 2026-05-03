@@ -10,7 +10,7 @@
  * filename without a collision being reported.
  */
 
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { SourceFileNotFoundError } from "./errors.js";
 import { atomicWrite } from "./utils/atomic-write.js";
@@ -49,6 +49,8 @@ export interface ReadCategoryFilesResult {
     sourcePath: string;
     /** Raw file content (unparsed bytes). */
     content: Buffer;
+    /** Directory-backed skills are deployed recursively; `content` is SKILL.md. */
+    kind: "file" | "directory";
   }>;
   /** Collision log entries produced during the read. */
   collisions: CollisionLogEntry[];
@@ -104,19 +106,43 @@ export async function readCategoryFiles(
   const basenameMap = new Map<string, string>();
 
   for (const srcPath of sources) {
-    const name = basename(srcPath);
-    const targetPath = opts.targetDir !== undefined ? join(opts.targetDir, name) : "";
-
-    let content: Buffer;
+    let sourceStat: Awaited<ReturnType<typeof stat>>;
     try {
-      content = await readFile(srcPath);
+      sourceStat = await stat(srcPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         if (opts.onMissingSource === "skip") {
-          missingSources.push({ category, sourcePath: srcPath, targetPath });
+          missingSources.push({
+            category,
+            sourcePath: srcPath,
+            targetPath: targetPathForSource(srcPath, opts.targetDir),
+          });
           continue;
         }
-        throw new SourceFileNotFoundError(category, srcPath, targetPath);
+        throw new SourceFileNotFoundError(
+          category,
+          srcPath,
+          targetPathForSource(srcPath, opts.targetDir)
+        );
+      }
+      throw err;
+    }
+
+    const isSkillDirectory = category === "skills" && sourceStat.isDirectory();
+    const name = basename(srcPath);
+    const skillEntryPath = isSkillDirectory ? join(srcPath, "SKILL.md") : srcPath;
+    const targetPath = targetPathForSource(srcPath, opts.targetDir, isSkillDirectory);
+
+    let content: Buffer;
+    try {
+      content = await readFile(skillEntryPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        if (opts.onMissingSource === "skip") {
+          missingSources.push({ category, sourcePath: skillEntryPath, targetPath });
+          continue;
+        }
+        throw new SourceFileNotFoundError(category, skillEntryPath, targetPath);
       }
       throw err;
     }
@@ -137,7 +163,12 @@ export async function readCategoryFiles(
 
     // Append every successfully-read entry in order. Callers that only need
     // the winning content per basename should keep the last occurrence.
-    files.push({ basename: name, sourcePath: srcPath, content });
+    files.push({
+      basename: name,
+      sourcePath: srcPath,
+      content,
+      kind: isSkillDirectory ? "directory" : "file",
+    });
   }
 
   return { files, collisions, missingSources };
@@ -183,7 +214,21 @@ export async function copyFiles(
   const writtenFiles: string[] = [];
   const seen = new Set<string>();
   for (const file of readResult.files) {
+    if (file.kind === "directory") {
+      const targetRoot = join(targetDir, file.basename);
+      await rm(targetRoot, { recursive: true, force: true });
+      const copied = await copyDirectoryRecursive(file.sourcePath, targetRoot);
+      for (const targetPath of copied) {
+        if (!seen.has(targetPath)) {
+          writtenFiles.push(targetPath);
+          seen.add(targetPath);
+        }
+      }
+      continue;
+    }
+
     const targetPath = join(targetDir, file.basename);
+    await rm(targetPath, { recursive: true, force: true });
     await atomicWrite(targetPath, file.content);
     if (!seen.has(targetPath)) {
       writtenFiles.push(targetPath);
@@ -196,4 +241,34 @@ export async function copyFiles(
     collisions: readResult.collisions,
     missingSources: readResult.missingSources,
   };
+}
+
+function targetPathForSource(
+  sourcePath: string,
+  targetDir: string | undefined,
+  skillDirectory = false
+): string {
+  if (targetDir === undefined) return "";
+  const name = basename(sourcePath);
+  return skillDirectory ? join(targetDir, name, "SKILL.md") : join(targetDir, name);
+}
+
+async function copyDirectoryRecursive(sourceDir: string, targetDir: string): Promise<string[]> {
+  await mkdir(targetDir, { recursive: true, mode: 0o700 });
+  const writtenFiles: string[] = [];
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = join(sourceDir, entry.name);
+    const targetPath = join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      writtenFiles.push(...(await copyDirectoryRecursive(sourcePath, targetPath)));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    await atomicWrite(targetPath, await readFile(sourcePath));
+    writtenFiles.push(targetPath);
+  }
+
+  return writtenFiles;
 }

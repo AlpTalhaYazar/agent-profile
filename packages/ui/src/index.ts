@@ -16,6 +16,14 @@ export {
 export { Field, type FieldProps } from "./field.js";
 export { Input, type InputProps } from "./input.js";
 export { PasswordInput, type PasswordInputProps } from "./password-input.js";
+export {
+  Popover,
+  PopoverAnchor,
+  PopoverClose,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from "./popover.js";
 export { Select, type SelectOption, type SelectProps } from "./select.js";
 export { Switch, type SwitchProps } from "./switch.js";
 export {

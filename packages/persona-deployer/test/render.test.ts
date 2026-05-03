@@ -6,6 +6,7 @@
  * test can compare deploy and render outputs directly.
  */
 import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -352,6 +353,33 @@ describe("renderPersonaInMemory — full pipeline", () => {
       expect(typeof file.content).toBe("string");
     }
     expect(result.files[3]?.content).toContain("/review Slash Command");
+  });
+
+  it("renders directory-backed skills from SKILL.md while keeping the directory as the source", async () => {
+    scratchDir = mkdtempSync(join(tmpdir(), "render-skill-dir-test-"));
+    const skillDir = join(scratchDir, "graphify");
+    await mkdir(skillDir, { recursive: true });
+    await atomicWrite(join(skillDir, "SKILL.md"), "# Graphify\n");
+
+    const result = await renderPersonaInMemory({
+      effective: {
+        claudeMd: [],
+        agents: [],
+        skills: [skillDir],
+        slashCmds: [],
+        memory: [],
+      },
+      provenanceMap: { [skillDir]: "project-role" },
+    });
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0]).toMatchObject({
+      category: "skills",
+      basename: "graphify",
+      sourcePath: skillDir,
+      originScope: "project-role",
+      content: "# Graphify\n",
+    });
   });
 
   it("combinedContent matches the format deployPersona writes (byte-for-byte for the rendered string)", async () => {

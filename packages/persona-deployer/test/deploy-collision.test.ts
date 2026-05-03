@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -143,5 +143,38 @@ describe("deployPersona — collision detection", () => {
 
     expect(result.collisions).toHaveLength(0);
     expect(result.writtenFiles).toHaveLength(2);
+  });
+
+  it("lets a later file-backed skill replace an earlier directory-backed skill with the same basename", async () => {
+    fixtureDir = mkdtempSync(join(tmpdir(), "skill-dir-file-collision-"));
+    tmpRoot = mkdtempSync(join(tmpdir(), "skill-dir-file-test-"));
+
+    const skillDir = join(fixtureDir, "graphify");
+    mkdirSync(skillDir, { recursive: true });
+    await atomicWrite(join(skillDir, "SKILL.md"), "# Directory skill\n");
+    await atomicWrite(join(skillDir, "notes.md"), "directory asset\n");
+
+    const fileScopeDir = join(fixtureDir, "project");
+    mkdirSync(fileScopeDir, { recursive: true });
+    const skillFile = await makeAgent(fileScopeDir, "graphify", "# File skill wins\n");
+
+    const { sessionDir, claudeConfigDir } = await createSessionDir({ root: tmpRoot });
+
+    const result = await deployPersona(
+      { claudeMd: [], agents: [], skills: [skillDir, skillFile], slashCmds: [], memory: [] },
+      sessionDir,
+      claudeConfigDir
+    );
+
+    expect(result.collisions).toHaveLength(1);
+    expect(result.collisions[0]).toMatchObject({
+      category: "skills",
+      target: "graphify",
+      overriddenSource: skillDir,
+      winningSource: skillFile,
+    });
+
+    const deployed = join(claudeConfigDir, "skills", "graphify");
+    expect(await readFile(deployed, "utf8")).toBe("# File skill wins\n");
   });
 });

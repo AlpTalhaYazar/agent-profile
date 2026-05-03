@@ -28,7 +28,10 @@ export const AuthProfilesDoc = z.object({
             orgName: z.string().optional(),
             planType: z.string().optional(),
             accessTokenExpiresAt: z.string().optional(),
-            refreshTokenRef: z.string().regex(/^keyring:\/\//).optional(),
+            refreshTokenRef: z
+              .string()
+              .regex(/^keyring:\/\//)
+              .optional(),
           })
           .optional(),
       }),

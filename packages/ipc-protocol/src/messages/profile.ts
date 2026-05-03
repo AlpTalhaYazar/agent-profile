@@ -59,6 +59,19 @@ export const ReqProfileSave = z
   })
   .strict();
 
+/** Create an empty, canonical scope document at a supported global/project path. */
+export const ReqProfileCreateScope = z
+  .object({
+    id: NonEmptyString,
+    kind: z.literal("profile.createScope"),
+    location: z.enum(["global", "project"]),
+    layerType: z.enum(["shared", "role"]),
+    role: z.string().min(1).optional(),
+    cwd: NonEmptyString,
+    force: z.boolean().optional(),
+  })
+  .strict();
+
 /**
  * Response to `profile.show`.
  *
@@ -152,6 +165,19 @@ export const RespProfileSaveOk = z
   })
   .strict();
 
+/** Response to `profile.createScope`. */
+export const RespProfileCreateScopeOk = z
+  .object({
+    id: NonEmptyString,
+    kind: z.literal("profile.createScope.ok"),
+    created: z.literal(true),
+    path: NonEmptyString,
+    scope: z.enum(["global-shared", "global-role", "project-shared", "project-role"]),
+    role: z.string().nullable(),
+    content: z.unknown(),
+  })
+  .strict();
+
 /** Static type for `profile.show` requests. */
 export type ReqProfileShowT = z.infer<typeof ReqProfileShow>;
 /** Static type for `profile.list` requests. */
@@ -162,6 +188,8 @@ export type ReqProfileValidateT = z.infer<typeof ReqProfileValidate>;
 export type ReqProfilePreviewT = z.infer<typeof ReqProfilePreview>;
 /** Static type for `profile.save` requests. */
 export type ReqProfileSaveT = z.infer<typeof ReqProfileSave>;
+/** Static type for `profile.createScope` requests. */
+export type ReqProfileCreateScopeT = z.infer<typeof ReqProfileCreateScope>;
 /** Static type for `profile.show.ok` responses. */
 export type RespProfileShowOkT = z.infer<typeof RespProfileShowOk>;
 /** Static type for `profile.list.ok` responses. */
@@ -172,6 +200,8 @@ export type RespProfileValidateOkT = z.infer<typeof RespProfileValidateOk>;
 export type RespProfilePreviewOkT = z.infer<typeof RespProfilePreviewOk>;
 /** Static type for `profile.save.ok` responses. */
 export type RespProfileSaveOkT = z.infer<typeof RespProfileSaveOk>;
+/** Static type for `profile.createScope.ok` responses. */
+export type RespProfileCreateScopeOkT = z.infer<typeof RespProfileCreateScopeOk>;
 /** Static type for a profile validation issue. */
 export type ProfileIssueT = z.infer<typeof ProfileIssue>;
 /** Static type for a discovered scope entry. */
