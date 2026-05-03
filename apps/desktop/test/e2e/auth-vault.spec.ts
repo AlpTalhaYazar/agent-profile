@@ -84,11 +84,11 @@ env:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
-    // Switch to the Auth Vault screen from the shell sidebar.
+    // Switch to the Claude Auth screen from the shell sidebar.
     await page.getByTestId("sidebar-auth-vault").click();
-    await expect(page.getByRole("heading", { name: "Auth profiles" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Claude credentials" })).toBeVisible();
 
     // Seeded profiles appear in the list (the sidebar buttons each include
     // the id and a metadata sub-line). Strict-mode resolution requires us to
@@ -98,15 +98,16 @@ env:
     await expect(list).toBeVisible();
     await expect(page.getByRole("button", { name: /personal\s+Personal/ })).toBeVisible();
 
-    // "Add profile" dialog opens.
-    await page.getByRole("button", { name: /Add profile/ }).click();
-    await expect(page.getByRole("heading", { name: "Add auth profile" })).toBeVisible();
+    // "Connect Claude" dialog opens.
+    await page.getByRole("button", { name: "Connect Claude", exact: true }).first().click();
+    await expect(page.getByRole("heading", { name: "Connect Claude credential" })).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // Selected profile reveals "Add secret" / "Rotate Anthropic key" actions.
+    // Selected profile reveals Claude credential and MCP secret actions.
     await page.getByRole("button", { name: /work\s+Work \(Acme\)/ }).click();
-    await expect(page.getByRole("button", { name: /Add secret/ })).toBeVisible();
-    await page.getByRole("button", { name: /Add secret/ }).click();
+    await expect(page.getByRole("button", { name: /Rotate Claude key/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add or update MCP secret" })).toBeVisible();
+    await page.getByRole("button", { name: "Add or update MCP secret" }).click();
     await expect(page.getByRole("heading", { name: /Add secret to "work"/ })).toBeVisible();
     // Masked input → Show toggle is visible.
     await expect(page.getByRole("button", { name: "Show" })).toBeVisible();

@@ -1,6 +1,8 @@
 import { Button } from "@agent-profile/ui";
 import { useAtomValue, useSetAtom } from "jotai";
+import { CheckCircle2 } from "lucide-react";
 import * as React from "react";
+import { IconFrame } from "../../components/screen-ui.js";
 import { currentScreenAtom, selectedAuthIdAtom, selectedRoleAtom } from "../../lib/atoms.js";
 import { getErrorMessage } from "../../lib/normalize.js";
 
@@ -33,13 +35,16 @@ export function StepDone({
 
   return (
     <section aria-labelledby="wizard-done-title" className="grid gap-5">
-      <div className="grid gap-1">
-        <h1 className="text-xl font-semibold text-primary" id="wizard-done-title">
-          Setup complete
-        </h1>
-        <p className="text-sm text-secondary">
-          Agent Profile will open the editor with this profile and role selected.
-        </p>
+      <div className="flex items-start gap-3">
+        <IconFrame icon={CheckCircle2} tone="success" />
+        <div className="grid gap-1">
+          <h1 className="text-xl font-semibold text-primary" id="wizard-done-title">
+            Setup complete
+          </h1>
+          <p className="text-sm text-secondary">
+            Profile Workspace will open with this credential and role selected.
+          </p>
+        </div>
       </div>
 
       <dl className="grid gap-2 rounded-md border border-default bg-subtle px-3 py-3 text-sm">
@@ -70,7 +75,7 @@ export function StepDone({
           type="button"
           variant="primary"
         >
-          {busy ? "Finishing..." : "Go to Profile Editor"}
+          {busy ? "Finishing..." : "Go to Profile Workspace"}
         </Button>
       </div>
     </section>

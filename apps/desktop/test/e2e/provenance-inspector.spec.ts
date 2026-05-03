@@ -98,17 +98,11 @@ mcpServers:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
-    // Wait for the cascade to resolve. Profile Editor's effective preview
-    // shows "Resolved for <role> @ <auth>" once profile.show returns; that
-    // is the unambiguous signal that effectiveStateAtom (which the
-    // Provenance Inspector reads) is populated.
-    await expect(page.getByText("Resolved for backend @ work")).toBeVisible();
-
-    // Switch to the Provenance screen from the shell sidebar.
-    await page.getByTestId("sidebar-provenance").click();
-    await expect(page.getByRole("heading", { name: "Provenance Inspector" })).toBeVisible();
+    // Provenance now lives under Profile Workspace → Debug.
+    await page.getByRole("button", { name: "Debug" }).click();
+    await page.getByRole("button", { name: "Provenance", exact: true }).click();
 
     // The section selector lists every cascade field; the seeded MCP servers
     // and env vars must appear (filesystem, github, EDITOR, NODE_ENV).

@@ -26,8 +26,17 @@
 
 import { cn } from "@agent-profile/ui";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import {
+  Command,
+  FolderOpen,
+  KeyRound,
+  type LucideIcon,
+  MonitorPlay,
+  Moon,
+  Search,
+  Sun,
+} from "lucide-react";
 import * as React from "react";
-import logoMonoUrl from "../assets/logo-mono.svg";
 import {
   type AppScreen,
   appErrorAtom,
@@ -42,6 +51,8 @@ import {
   firstRunAtom,
   isBootstrappingAtom,
   isRefreshingAtom,
+  profileDebugTabAtom,
+  profileWorkspaceTabAtom,
   scopeEntriesAtom,
   selectedAuthIdAtom,
   selectedProvenanceFieldAtom,
@@ -61,9 +72,7 @@ import {
 } from "../lib/normalize.js";
 import { usePrefersReducedMotion } from "../lib/use-prefers-reduced-motion.js";
 import { AuthVaultScreen } from "../screens/auth-vault.js";
-import { PersonaComposerScreen } from "../screens/persona-composer.js";
-import { ProfileEditorScreen, ProfileEditorScreenInspector } from "../screens/profile-editor.js";
-import { ProvenanceInspectorScreen } from "../screens/provenance-inspector.js";
+import { ProfileEditorScreen } from "../screens/profile-editor.js";
 import { SessionMonitorScreen } from "../screens/session-monitor.js";
 import { WizardShell } from "../screens/wizard/wizard-shell.js";
 import { CommandPalette, type CommandPaletteItem } from "./command-palette.js";
@@ -73,11 +82,9 @@ import { ShortcutsHelp } from "./shortcuts-help.js";
 const THEME_STORAGE_KEY = "agent-profile.theme";
 
 export const SCREEN_LABELS: Record<AppScreen, string> = {
-  editor: "Profile Editor",
-  "auth-vault": "Auth Vault",
-  sessions: "Session Monitor",
-  provenance: "Provenance Inspector",
-  persona: "Persona Composer",
+  editor: "Profile Workspace",
+  "auth-vault": "Claude Auth",
+  sessions: "Sessions",
 };
 
 export function AppShell(): React.ReactElement {
@@ -101,6 +108,8 @@ export function AppShell(): React.ReactElement {
   const setIsBootstrapping = useSetAtom(isBootstrappingAtom);
   const setAppError = useSetAtom(appErrorAtom);
   const setFirstRun = useSetAtom(firstRunAtom);
+  const setProfileWorkspaceTab = useSetAtom(profileWorkspaceTabAtom);
+  const setProfileDebugTab = useSetAtom(profileDebugTabAtom);
   const setSelectedProvenanceField = useSetAtom(selectedProvenanceFieldAtom);
   const authProfiles = useAtomValue(authProfilesAtom);
   const scopeEntries = useAtomValue(scopeEntriesAtom);
@@ -136,7 +145,6 @@ export function AppShell(): React.ReactElement {
         const nextVersion =
           bootstrapResult?.serverVersion ??
           (await bridge?.system?.version?.().catch(() => null)) ??
-          (await bridge?.version?.().catch(() => null)) ??
           "unavailable";
         const nextCwd =
           bootstrapResult?.defaultCwd ??
@@ -295,7 +303,7 @@ export function AppShell(): React.ReactElement {
     setCommandPaletteActiveIndex(0);
   }, [setCommandPaletteActiveIndex, setCommandPaletteOpen, setCommandPaletteQuery]);
 
-  // ─── Global keyboard shortcuts ⌘K + ⌘1–5 + Escape ─────────────────────────
+  // ─── Global keyboard shortcuts ⌘K + ⌘1–3 + Escape ─────────────────────────
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -310,14 +318,12 @@ export function AppShell(): React.ReactElement {
         return;
       }
 
-      if (isModifier && /^[1-5]$/.test(event.key)) {
+      if (isModifier && /^[1-3]$/.test(event.key)) {
         event.preventDefault();
         const nextScreenMap: Record<string, AppScreen> = {
           "1": "editor",
           "2": "auth-vault",
           "3": "sessions",
-          "4": "provenance",
-          "5": "persona",
         };
         const nextScreen = nextScreenMap[event.key];
         if (!nextScreen) return;
@@ -356,42 +362,48 @@ export function AppShell(): React.ReactElement {
       {
         id: "nav-editor",
         group: "Navigate",
-        label: "Profile Editor",
+        label: "Profile Workspace",
         hint: "Cmd+1",
-        keywords: ["editor", "profile", "scope"],
+        keywords: ["workspace", "editor", "profile", "scope", "launch"],
         onSelect: () => setCurrentScreen("editor"),
       },
       {
         id: "nav-auth",
         group: "Navigate",
-        label: "Auth Vault",
+        label: "Claude Auth",
         hint: "Cmd+2",
-        keywords: ["auth", "vault", "profiles"],
+        keywords: ["auth", "claude", "credentials", "profiles"],
         onSelect: () => setCurrentScreen("auth-vault"),
       },
       {
         id: "nav-sessions",
         group: "Navigate",
-        label: "Session Monitor",
+        label: "Sessions",
         hint: "Cmd+3",
         keywords: ["sessions", "monitor"],
         onSelect: () => setCurrentScreen("sessions"),
       },
       {
         id: "nav-provenance",
-        group: "Navigate",
-        label: "Provenance Inspector",
-        hint: "Cmd+4",
+        group: "Debug",
+        label: "Open Provenance",
         keywords: ["provenance", "cascade", "inspect"],
-        onSelect: () => setCurrentScreen("provenance"),
+        onSelect: () => {
+          setCurrentScreen("editor");
+          setProfileWorkspaceTab("debug");
+          setProfileDebugTab("provenance");
+        },
       },
       {
         id: "nav-persona",
-        group: "Navigate",
-        label: "Persona Composer",
-        hint: "Cmd+5",
+        group: "Debug",
+        label: "Open Persona",
         keywords: ["persona", "composer", "claude"],
-        onSelect: () => setCurrentScreen("persona"),
+        onSelect: () => {
+          setCurrentScreen("editor");
+          setProfileWorkspaceTab("debug");
+          setProfileDebugTab("persona");
+        },
       },
       ...scopeEntries.map((entry) => ({
         id: `scope:${entry.path}`,
@@ -401,6 +413,7 @@ export function AppShell(): React.ReactElement {
         keywords: [entry.scope, entry.role, entry.path],
         onSelect: () => {
           setCurrentScreen("editor");
+          setProfileWorkspaceTab("layers");
           setSelectedScopePath(entry.path);
         },
       })),
@@ -412,13 +425,14 @@ export function AppShell(): React.ReactElement {
         keywords: [profile.id, profile.displayName, profile.mode],
         onSelect: () => {
           setCurrentScreen("editor");
+          setProfileWorkspaceTab("overview");
           setSelectedAuthId(profile.id);
         },
       })),
       {
         id: "sessions:open",
         group: "Sessions",
-        label: "Open Session Monitor",
+        label: "Open Sessions",
         description: "Jump to active and recent sessions",
         keywords: ["sessions", "monitor", "processes"],
         onSelect: () => setCurrentScreen("sessions"),
@@ -457,7 +471,9 @@ export function AppShell(): React.ReactElement {
               section: section as "env" | "settings" | "mcpServers",
               key,
             });
-            setCurrentScreen("provenance");
+            setCurrentScreen("editor");
+            setProfileWorkspaceTab("debug");
+            setProfileDebugTab("provenance");
           },
         });
       }
@@ -477,13 +493,13 @@ export function AppShell(): React.ReactElement {
     effectiveState.provenance,
     scopeEntries,
     setCurrentScreen,
+    setProfileDebugTab,
+    setProfileWorkspaceTab,
     setSelectedAuthId,
     setSelectedProvenanceField,
     setSelectedScopePath,
     setShortcutsHelpOpen,
   ]);
-
-  const showEditorInspector = currentScreen === "editor";
 
   React.useEffect(() => {
     if (firstRun && !wizardDismissed) return;
@@ -509,7 +525,7 @@ export function AppShell(): React.ReactElement {
   }
 
   return (
-    <div className="grid h-full min-h-full grid-rows-[52px_minmax(0,1fr)_28px] bg-canvas text-primary">
+    <div className="grid h-full min-h-full min-w-0 grid-rows-[56px_minmax(0,1fr)_28px] overflow-hidden bg-canvas text-primary">
       <a className="skip-nav" href="#main-content">
         Skip to main content
       </a>
@@ -527,49 +543,35 @@ export function AppShell(): React.ReactElement {
         theme={theme}
       />
 
-      <div className="grid min-h-0 grid-cols-[48px_minmax(0,1fr)] window-medium:grid-cols-[240px_minmax(0,1fr)]">
-        <AppSidebar
-          authCount={authProfiles.length}
-          currentScreen={currentScreen}
-          onSelect={setCurrentScreen}
-          scopeCount={scopeEntries.length}
-        />
+      <div className="grid min-h-0 min-w-0 grid-cols-[56px_minmax(0,1fr)] overflow-hidden window-medium:grid-cols-[276px_minmax(0,1fr)]">
+        <AppSidebar currentScreen={currentScreen} onSelect={setCurrentScreen} />
 
         <main
           id="main-content"
           tabIndex={-1}
           aria-busy={isBootstrapping || isRefreshing}
-          className={cn(
-            "grid min-h-0 grid-cols-1",
-            showEditorInspector && "window-medium:grid-cols-[minmax(0,1fr)_320px]"
-          )}
+          className="grid min-h-0 min-w-0 grid-cols-1"
         >
-          <div className="min-h-0 overflow-hidden bg-canvas">
+          <div className="min-h-0 min-w-0 overflow-hidden bg-canvas">
             {currentScreen === "editor" ? (
               <ProfileEditorScreen />
             ) : (
-              <div className="flex h-full min-h-0 flex-col bg-canvas">
+              <div className="flex h-full min-h-0 min-w-0 flex-col bg-canvas">
                 {appError ? (
                   <div className="border-b border-status-danger bg-status-danger-soft px-4 py-2 text-sm text-status-danger">
                     {appError}
                   </div>
                 ) : null}
-                <div className="min-h-0 flex-1 overflow-hidden">
+                <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                   {currentScreen === "auth-vault" ? (
                     <AuthVaultScreen />
                   ) : currentScreen === "sessions" ? (
                     <SessionMonitorScreen />
-                  ) : currentScreen === "provenance" ? (
-                    <ProvenanceInspectorScreen />
-                  ) : currentScreen === "persona" ? (
-                    <PersonaComposerScreen />
                   ) : null}
                 </div>
               </div>
             )}
           </div>
-
-          {showEditorInspector ? <ProfileEditorScreenInspector /> : null}
         </main>
       </div>
 
@@ -631,13 +633,18 @@ function AppTitlebar({
 }: AppTitlebarProps): React.ReactElement {
   return (
     <header
-      className="grid grid-cols-[78px_minmax(0,1fr)_auto] items-center border-b border-default bg-surface px-3"
+      className="grid grid-cols-[72px_minmax(0,1fr)_auto] items-center border-b border-default bg-surface px-3"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       {/* Native traffic lights rendered by macOS via titleBarStyle:"hiddenInset" */}
       <div className="flex h-full items-center" />
       <div className="flex min-w-0 items-center gap-3">
-        <img alt="Agent Profile" className="h-7 w-7 shrink-0" src={logoMonoUrl} />
+        <div
+          aria-hidden="true"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-default bg-canvas text-[11px] font-semibold text-primary shadow-xs"
+        >
+          AP
+        </div>
         <div className="hidden min-w-0 flex-col window-medium:flex">
           <span className="truncate text-sm font-semibold text-primary">Agent Profile</span>
           <span className="truncate text-xs text-tertiary">{SCREEN_LABELS[currentScreen]}</span>
@@ -645,22 +652,22 @@ function AppTitlebar({
         <button
           aria-expanded={isPaletteOpen}
           aria-label="Open command palette"
-          className="ml-auto flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary transition-colors hover:bg-elevated window-medium:max-w-[420px]"
+          className="ml-auto flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary shadow-xs transition-colors hover:bg-elevated window-medium:max-w-[520px]"
           onClick={onOpenPalette}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           type="button"
         >
-          <span className="text-base leading-none">⌕</span>
-          <span className="truncate">Jump to profile, session, or scope…</span>
-          <span className="ml-auto rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-secondary">
-            ⌘K
+          <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">Jump to workspace, credential, session, or scope…</span>
+          <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-secondary">
+            <Command className="h-3 w-3" aria-hidden="true" />K
           </span>
         </button>
       </div>
       <div className="ml-3 flex items-center">
         <button
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          className="theme-orb group relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-default bg-canvas transition-all duration-500 hover:border-strong hover:bg-elevated"
+          className="theme-orb group relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-default bg-canvas transition-all duration-500 hover:border-strong hover:bg-elevated"
           onClick={(e) => onToggleTheme(e)}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -674,19 +681,7 @@ function AppTitlebar({
               transform: theme === "dark" ? "rotate(0deg) scale(1)" : "rotate(-90deg) scale(0.4)",
             }}
           >
-            <svg
-              aria-hidden="true"
-              className="h-4 w-4 text-amber-400"
-              fill="currentColor"
-              focusable="false"
-              viewBox="0 0 20 20"
-            >
-              <path
-                clipRule="evenodd"
-                d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
-                fillRule="evenodd"
-              />
-            </svg>
+            <Sun className="h-4 w-4 text-amber-400" />
           </span>
           <span
             aria-hidden="true"
@@ -696,15 +691,7 @@ function AppTitlebar({
               transform: theme === "light" ? "rotate(0deg) scale(1)" : "rotate(90deg) scale(0.4)",
             }}
           >
-            <svg
-              aria-hidden="true"
-              className="h-4 w-4 text-blue-300"
-              fill="currentColor"
-              focusable="false"
-              viewBox="0 0 20 20"
-            >
-              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-            </svg>
+            <Moon className="h-4 w-4 text-blue-300" />
           </span>
         </button>
       </div>
@@ -713,62 +700,55 @@ function AppTitlebar({
 }
 
 interface AppSidebarProps {
-  authCount: number;
   currentScreen: AppScreen;
   onSelect: (screen: AppScreen) => void;
-  scopeCount: number;
 }
 
-function AppSidebar({
-  authCount,
-  currentScreen,
-  onSelect,
-  scopeCount,
-}: AppSidebarProps): React.ReactElement {
+function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactElement {
   const navItems: Array<{
     id: AppScreen;
     label: string;
-    icon: string;
-    badge?: string;
+    icon: LucideIcon;
   }> = [
-    { id: "editor", label: "Profile Editor", icon: "⊡", badge: String(scopeCount) },
-    { id: "auth-vault", label: "Auth Vault", icon: "⚿", badge: String(authCount) },
-    { id: "sessions", label: "Session Monitor", icon: "◐" },
-    { id: "provenance", label: "Provenance Inspector", icon: "⊟" },
-    { id: "persona", label: "Persona Composer", icon: "◇" },
+    { id: "editor", label: "Profile Workspace", icon: FolderOpen },
+    { id: "auth-vault", label: "Claude Auth", icon: KeyRound },
+    { id: "sessions", label: "Sessions", icon: MonitorPlay },
   ];
 
   return (
-    <aside className="border-r border-default bg-surface px-2 py-3">
+    <aside className="border-r border-default bg-surface px-2 py-4">
       <nav aria-label="Primary">
-        <ul className="grid gap-1">
+        <ul className="grid gap-1.5">
           {navItems.map((item) => {
             const active = item.id === currentScreen;
+            const Icon = item.icon;
             return (
               <li key={item.id}>
                 <button
                   aria-current={active ? "page" : undefined}
                   aria-label={item.label}
                   className={cn(
-                    "flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition-colors",
+                    "flex h-11 w-full items-center gap-3 rounded-md border px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     active
-                      ? "bg-elevated text-primary shadow-xs"
-                      : "text-secondary hover:bg-elevated hover:text-primary"
+                      ? "border-accent bg-accent-soft text-primary shadow-xs"
+                      : "border-transparent bg-transparent text-secondary hover:text-primary"
                   )}
                   data-testid={`sidebar-${item.id}`}
                   onClick={() => onSelect(item.id)}
                   title={item.label}
                   type="button"
                 >
-                  <span className="w-4 shrink-0 text-center text-base leading-none">
-                    {item.icon}
+                  <span
+                    className={cn(
+                      "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border",
+                      active
+                        ? "border-accent bg-accent-solid text-on-accent"
+                        : "border-transparent text-secondary"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <span className="hidden truncate window-medium:block">{item.label}</span>
-                  {item.badge ? (
-                    <span className="ml-auto hidden font-mono text-[11px] text-tertiary window-medium:block">
-                      {item.badge}
-                    </span>
-                  ) : null}
                 </button>
               </li>
             );

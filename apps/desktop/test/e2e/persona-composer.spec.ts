@@ -94,11 +94,11 @@ persona:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
-    // Switch to the Persona screen from the shell sidebar.
-    await page.getByTestId("sidebar-persona").click();
-    await expect(page.getByRole("heading", { name: "Persona Composer" })).toBeVisible();
+    // Persona now lives under Profile Workspace → Debug.
+    await page.getByRole("button", { name: "Debug", exact: true }).click();
+    await page.getByRole("button", { name: "Persona", exact: true }).click();
 
     // Once persona.render resolves, the catalog appears. Wait for the
     // combined-CLAUDE.md entry — it implies the cascade returned a non-null

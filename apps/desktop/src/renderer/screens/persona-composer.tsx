@@ -10,7 +10,9 @@
  */
 import { Badge, Button, CodeEditor } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
+import { FileStack } from "lucide-react";
 import * as React from "react";
+import { EmptyState } from "../components/screen-ui.js";
 import {
   cwdAtom,
   personaStateAtom,
@@ -32,7 +34,11 @@ const CATEGORY_LABELS: Record<PersonaRenderCategory, string> = {
   memory: "Memory seeds",
 };
 
-export function PersonaComposerScreen(): React.ReactElement {
+export function PersonaComposerScreen({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}): React.ReactElement {
   const role = useAtomValue(selectedRoleAtom);
   const auth = useAtomValue(selectedAuthIdAtom);
   const cwd = useAtomValue(cwdAtom);
@@ -80,13 +86,14 @@ export function PersonaComposerScreen(): React.ReactElement {
         className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="persona-empty"
       >
-        <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
-          Persona Composer
-        </h1>
-        <div className="max-w-md space-y-2 px-6">
-          <p className="text-base font-semibold text-primary">No selection</p>
-          <p>Pick role + auth + cwd in the Profile Editor tab to render the persona.</p>
-        </div>
+        {embedded ? null : (
+          <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
+            Persona Composer
+          </h1>
+        )}
+        <EmptyState icon={FileStack} title="No selection">
+          Pick role, Claude credential, and cwd in Profile Workspace to render the persona.
+        </EmptyState>
       </div>
     );
   }
@@ -97,29 +104,31 @@ export function PersonaComposerScreen(): React.ReactElement {
       className="flex h-full flex-col overflow-hidden"
       data-testid="persona-composer"
     >
-      <header className="flex items-start justify-between gap-3 border-b border-subtle bg-surface px-4 py-3">
-        <div>
-          <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
-            Persona Composer
-          </h1>
-          <p className="mt-0.5 text-xs text-secondary">
-            role={role} · auth={auth} · cwd={cwd}
-          </p>
-        </div>
-        <Button
-          data-testid="persona-refresh"
-          onClick={() => void fetchRender()}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          Refresh
-        </Button>
-      </header>
+      {embedded ? null : (
+        <header className="flex items-start justify-between gap-3 border-b border-subtle bg-surface px-4 py-3">
+          <div>
+            <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
+              Persona Composer
+            </h1>
+            <p className="mt-0.5 text-xs text-secondary">
+              role={role} · auth={auth} · cwd={cwd}
+            </p>
+          </div>
+          <Button
+            data-testid="persona-refresh"
+            onClick={() => void fetchRender()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Refresh
+          </Button>
+        </header>
+      )}
 
       <ComposerBanner state={personaState} />
 
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr] overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-[340px_1fr] overflow-hidden">
         <Catalog state={personaState} selected={selectedFile} onSelect={setSelectedFile} />
         <Preview state={personaState} selected={selectedFile} />
       </div>

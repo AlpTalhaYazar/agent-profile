@@ -85,7 +85,22 @@ env:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Working directory/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Role/ }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /Claude credential/ })).toBeVisible();
+    await page.getByRole("button", { name: /Role/ }).first().click();
+    await expect(page.getByRole("button", { name: "New role/layer" }).last()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Manage selected" }).last()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /MCP Servers/ }).click();
+    await expect(page.getByRole("dialog", { name: "Add MCP server" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: /Skills & Persona/ }).click();
+    await expect(page.getByRole("dialog", { name: "Add Skill" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Scope layers" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "global-shared" })).toBeVisible();
     await expect(page.getByText("Effective preview")).toBeVisible();
     await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
@@ -98,7 +113,8 @@ env:
     await expect.poll(async () => readFile(globalSharedPath, "utf8")).toContain("EDITOR: vim");
 
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
     await expect(page.getByPlaceholder("Value").first()).toHaveValue("vim", { timeout: 10_000 });
     await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
   } finally {

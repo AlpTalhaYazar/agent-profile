@@ -13,7 +13,9 @@
  */
 import { Badge } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
+import { GitBranch } from "lucide-react";
 import * as React from "react";
+import { EmptyState } from "../components/screen-ui.js";
 import {
   cwdAtom,
   effectiveStateAtom,
@@ -38,7 +40,11 @@ interface SectionEntry {
   keys: string[];
 }
 
-export function ProvenanceInspectorScreen(): React.ReactElement {
+export function ProvenanceInspectorScreen({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}): React.ReactElement {
   const effectiveState = useAtomValue(effectiveStateAtom);
   const [selected, setSelected] = useAtom(selectedProvenanceFieldAtom);
   const role = useAtomValue(selectedRoleAtom);
@@ -54,16 +60,14 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
         className="flex h-full items-center justify-center text-center text-sm text-secondary"
         data-testid="provenance-empty"
       >
-        <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
-          Provenance Inspector
-        </h1>
-        <div className="max-w-md space-y-2 px-6">
-          <p className="text-base font-semibold text-primary">No provenance loaded</p>
-          <p>
-            Open the Profile Editor tab and pick a role + auth. The cascade resolves once those are
-            set; come back here to inspect each field.
-          </p>
-        </div>
+        {embedded ? null : (
+          <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
+            Provenance Inspector
+          </h1>
+        )}
+        <EmptyState icon={GitBranch} title="No provenance loaded">
+          Pick role, Claude credential, and cwd in Profile Workspace to inspect each field.
+        </EmptyState>
       </div>
     );
   }
@@ -85,15 +89,17 @@ export function ProvenanceInspectorScreen(): React.ReactElement {
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="provenance-inspector">
-      <header className="border-b border-subtle bg-surface px-4 py-3">
-        <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
-          Provenance Inspector
-        </h1>
-        <p className="mt-0.5 text-xs text-secondary">
-          role={role || "—"} · auth={auth || "—"} · cwd={cwd || "—"}
-        </p>
-      </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr] overflow-hidden">
+      {embedded ? null : (
+        <header className="border-b border-subtle bg-surface px-4 py-3">
+          <h1 className="text-lg font-semibold text-primary" id="screen-heading" tabIndex={-1}>
+            Provenance Inspector
+          </h1>
+          <p className="mt-0.5 text-xs text-secondary">
+            role={role || "—"} · auth={auth || "—"} · cwd={cwd || "—"}
+          </p>
+        </header>
+      )}
+      <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] overflow-hidden">
         <FieldSelector sections={sections} selected={selected} onSelect={setSelected} />
         <FieldDetail provenance={provenance} effective={effective} selected={selected} />
       </div>
@@ -137,7 +143,7 @@ function FieldSelector({
 
   return (
     <nav
-      className="overflow-y-auto border-r border-default bg-subtle"
+      className="app-scrollbar overflow-y-auto border-r border-default bg-subtle"
       data-testid="provenance-selector"
     >
       {sections.map((section) => (

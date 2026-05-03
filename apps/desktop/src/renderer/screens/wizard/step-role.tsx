@@ -1,6 +1,8 @@
 import { Button, Field, Input } from "@agent-profile/ui";
 import { useAtom, useAtomValue } from "jotai";
+import { UserRound } from "lucide-react";
 import * as React from "react";
+import { IconFrame } from "../../components/screen-ui.js";
 import { availableRolesAtom, selectedRoleAtom } from "../../lib/atoms.js";
 
 export function StepRole({
@@ -25,13 +27,16 @@ export function StepRole({
 
   return (
     <section aria-labelledby="wizard-role-title" className="grid gap-5">
-      <div className="grid gap-1">
-        <h1 className="text-xl font-semibold text-primary" id="wizard-role-title">
-          Choose a starting role
-        </h1>
-        <p className="text-sm text-secondary">
-          Existing role files appear here. If none exist, setup uses the default role.
-        </p>
+      <div className="flex items-start gap-3">
+        <IconFrame icon={UserRound} />
+        <div className="grid gap-1">
+          <h1 className="text-xl font-semibold text-primary" id="wizard-role-title">
+            Choose a starting role
+          </h1>
+          <p className="text-sm text-secondary">
+            Existing role files appear here. If none exist, setup uses the default role.
+          </p>
+        </div>
       </div>
 
       {roles.length > 0 ? (

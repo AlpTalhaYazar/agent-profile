@@ -37,9 +37,17 @@ import {
   TableHeader,
   TableRow,
 } from "@agent-profile/ui";
+import { KeyRound, Plus, RefreshCw, RotateCw, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import * as React from "react";
 import type { AuthMode, OAuthMeta, SecretBackedAuthMode } from "../../shared/bridge.js";
 import { useAnnounce } from "../components/live-announcer.js";
+import {
+  EmptyState,
+  IconFrame,
+  InfoPanel,
+  ScreenHeader,
+  ScreenSurface,
+} from "../components/screen-ui.js";
 import { type RovingItemProps, useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 
 interface AuthProfileView {
@@ -218,6 +226,25 @@ export function AuthVaultScreen(): React.ReactElement {
     },
   });
 
+  const handleRefreshOAuth = React.useCallback(
+    async (profileId: string) => {
+      setBusy(true);
+      try {
+        const oauth = getOAuthBridge();
+        if (!oauth?.refresh) throw new Error("OAuth refresh bridge unavailable");
+        await oauth.refresh({ authId: profileId });
+        await reload();
+        setError(null);
+        announce("Claude OAuth refreshed");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [announce, reload]
+  );
+
   // Modal control
   const [addProfileOpen, setAddProfileOpen] = React.useState(false);
   const [addSecretOpen, setAddSecretOpen] = React.useState(false);
@@ -228,182 +255,222 @@ export function AuthVaultScreen(): React.ReactElement {
   const [editingSecret, setEditingSecret] = React.useState<string | null>(null);
 
   return (
-    <div
-      aria-busy={loading || busy}
-      className="grid h-full min-h-0 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]"
-    >
-      <h1 className="sr-only" id="screen-heading" tabIndex={-1}>
-        Auth Vault
-      </h1>
-      <aside className="app-scrollbar min-h-0 overflow-auto border-r border-default bg-surface">
-        <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
-          <div>
-            <h2 className="text-base font-semibold text-primary">Auth profiles</h2>
-            <p className="text-sm text-secondary">Metadata only — no secret values</p>
-          </div>
+    <ScreenSurface aria-busy={loading || busy}>
+      <ScreenHeader
+        actions={
           <Button
+            disabled={busy}
+            onClick={() => setAddProfileOpen(true)}
             type="button"
             variant="primary"
-            size="sm"
-            onClick={() => setAddProfileOpen(true)}
-            disabled={busy}
           >
-            + Add profile
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Connect Claude
           </Button>
-        </div>
-        {loading ? (
-          <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
-        ) : profiles.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-secondary">No auth profiles yet.</p>
-        ) : (
-          <ul className="divide-y divide-subtle">
-            {profiles.map((p, index) => (
-              <SidebarRow
-                key={p.id}
-                profile={p}
-                active={p.id === selectedId}
-                busy={busy}
-                adoptOpen={adoptingId === p.id}
-                onSelect={() => setSelectedId(p.id)}
-                onAdoptToggle={() => setAdoptingId(adoptingId === p.id ? null : p.id)}
-                onAdoptSubmit={async ({ profileId, displayName }) => {
-                  setBusy(true);
-                  try {
-                    const oauth = getOAuthBridge();
-                    if (!oauth?.adopt) throw new Error("OAuth bridge unavailable");
-                    const opts: { profileId: string; displayName?: string } = { profileId };
-                    if (displayName) opts.displayName = displayName;
-                    await oauth.adopt(opts);
-                    setAdoptingId(null);
-                    setSelectedId(profileId);
-                    await reload();
-                    announce("Auth profile added");
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : String(err));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                onEdit={() => setRenameTarget(p)}
-                rovingProps={getProfileItemProps(index)}
-              />
-            ))}
-          </ul>
-        )}
-        {error ? (
-          <div className="m-4 rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger">
-            {error}
-          </div>
-        ) : null}
-      </aside>
-
-      <section className="app-scrollbar min-h-0 overflow-auto bg-subtle">
-        {selected === null ? (
-          <p className="p-6 text-sm text-secondary">Select an auth profile.</p>
-        ) : (
-          <div className="space-y-6 p-6">
-            <header className="flex items-start justify-between">
+        }
+        description="Credentials used by Profile Workspace launch"
+        title="Claude Auth"
+      />
+      <div className="grid min-h-0 flex-1 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="app-scrollbar min-h-0 overflow-auto border-r border-default bg-surface">
+          <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
+            <div className="flex items-center gap-3">
+              <IconFrame icon={KeyRound} size="sm" />
               <div>
-                <h2 className="text-lg font-semibold text-primary">
-                  {selected.displayName || selected.id}
-                </h2>
-                <p className="text-sm text-secondary">
-                  <span className="font-mono text-xs">{selected.id}</span> · mode {selected.mode}
-                  {selected.oauth?.email ? <> · {selected.oauth.email}</> : null}
-                </p>
+                <h2 className="text-base font-semibold text-primary">Claude credentials</h2>
+                <p className="text-sm text-secondary">{profiles.length} configured</p>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  aria-label="Add secret"
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setAddSecretOpen(true)}
-                  disabled={busy || selectedIsDetected}
-                >
-                  + Add MCP secret
-                </Button>
-                {selectedIsOAuth ? null : (
+            </div>
+          </div>
+          {loading ? (
+            <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
+          ) : profiles.length === 0 ? (
+            <div className="h-72">
+              <EmptyState icon={KeyRound} title="No Claude credentials">
+                Connect Claude before launching a workspace session.
+              </EmptyState>
+            </div>
+          ) : (
+            <ul className="divide-y divide-subtle">
+              {profiles.map((p, index) => (
+                <SidebarRow
+                  key={p.id}
+                  profile={p}
+                  active={p.id === selectedId}
+                  busy={busy}
+                  adoptOpen={adoptingId === p.id}
+                  onSelect={() => setSelectedId(p.id)}
+                  onAdoptToggle={() => setAdoptingId(adoptingId === p.id ? null : p.id)}
+                  onAdoptSubmit={async ({ profileId, displayName }) => {
+                    setBusy(true);
+                    try {
+                      const oauth = getOAuthBridge();
+                      if (!oauth?.adopt) throw new Error("OAuth bridge unavailable");
+                      const opts: { profileId: string; displayName?: string } = { profileId };
+                      if (displayName) opts.displayName = displayName;
+                      await oauth.adopt(opts);
+                      setAdoptingId(null);
+                      setSelectedId(profileId);
+                      await reload();
+                      announce("Auth profile added");
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  onEdit={() => setRenameTarget(p)}
+                  rovingProps={getProfileItemProps(index)}
+                />
+              ))}
+            </ul>
+          )}
+          {error ? (
+            <div className="m-4 rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger">
+              {error}
+            </div>
+          ) : null}
+        </aside>
+
+        <section className="app-scrollbar min-h-0 overflow-auto bg-subtle">
+          {selected === null ? (
+            <EmptyState icon={KeyRound} title="Select a Claude credential">
+              Choose a credential from the list to inspect its real stored metadata.
+            </EmptyState>
+          ) : (
+            <div className="space-y-6 p-6">
+              <header className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <IconFrame icon={ShieldCheck} />
+                  <div className="min-w-0">
+                    <h2 className="truncate text-xl font-semibold text-primary">
+                      {selected.displayName || selected.id}
+                    </h2>
+                    <p className="truncate text-sm text-secondary">
+                      <span className="font-mono text-xs">{selected.id}</span> · Claude{" "}
+                      {selected.mode}
+                      {selected.oauth?.email ? <> · {selected.oauth.email}</> : null}
+                    </p>
+                  </div>
+                </div>
+                {selectedIsDetected ? null : (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedIsOAuth ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void handleRefreshOAuth(selected.id)}
+                        disabled={busy}
+                      >
+                        <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                        Refresh OAuth
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setRotateOpen(true)}
+                        disabled={busy}
+                      >
+                        <RotateCw className="h-4 w-4" aria-hidden="true" />
+                        Rotate Claude key
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      onClick={() => setRemoveOpen(true)}
+                      disabled={busy}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      Remove profile
+                    </Button>
+                  </div>
+                )}
+              </header>
+
+              {selectedIsDetected ? (
+                <div className="rounded-md border border-default bg-elevated px-3 py-2 text-sm text-secondary">
+                  Detected local Claude Code login. Use{" "}
+                  <span className="font-medium text-primary">+ Add</span> on this row to manage it
+                  here.
+                </div>
+              ) : null}
+
+              <CredentialSummary profile={selected} />
+
+              <InfoPanel
+                actions={
                   <Button
+                    aria-label="Add or update MCP secret"
+                    disabled={busy || selectedIsDetected}
+                    onClick={() => setAddSecretOpen(true)}
+                    size="sm"
                     type="button"
                     variant="secondary"
-                    size="sm"
-                    onClick={() => setRotateOpen(true)}
-                    disabled={busy || selectedIsDetected}
                   >
-                    Rotate Anthropic key
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    Add / update secret
                   </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setRemoveOpen(true)}
-                  disabled={busy || selectedIsDetected}
-                >
-                  Remove profile
-                </Button>
-              </div>
-            </header>
-
-            {selectedIsDetected ? (
-              <div className="rounded-md border border-default bg-elevated px-3 py-2 text-sm text-secondary">
-                This is an existing Claude Code login detected on this machine. Click the{" "}
-                <span className="font-medium text-primary">+ Add</span> button next to it in the
-                sidebar to import it into the vault.
-              </div>
-            ) : null}
-
-            <section className="space-y-2">
-              <header>
-                <h3 className="text-sm font-semibold text-primary">MCP secrets</h3>
-                <p className="text-xs text-secondary">
-                  Third-party API tokens passed to MCP servers (e.g. <code>github.pat</code>,{" "}
-                  <code>postgres.acme</code>). Not the Anthropic key.
+                }
+                icon={Wrench}
+                title="MCP secrets"
+              >
+                <p className="mb-3 text-xs text-secondary">
+                  Tool tokens available to this Claude credential.
                 </p>
-              </header>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selected.secrets.length === 0 ? (
+                <div className="sr-only">
+                  <p className="text-xs text-secondary">
+                    Third-party API tokens passed to MCP servers (e.g. <code>github.pat</code>,{" "}
+                    <code>postgres.acme</code>). Not the Claude key.
+                  </p>
+                </div>
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={3} className="text-sm text-secondary">
-                        No MCP secrets registered yet.
-                      </TableCell>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    selected.secrets.map((name) => (
-                      <TableRow key={name}>
-                        <TableCell className="font-mono text-xs">{name}</TableCell>
-                        <TableCell>
-                          <Badge tone="success">present</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy || selectedIsDetected}
-                            onClick={() => setEditingSecret(name)}
-                          >
-                            Edit
-                          </Button>
+                  </TableHeader>
+                  <TableBody>
+                    {selected.secrets.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-sm text-secondary">
+                          No MCP secrets registered yet.
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </section>
-          </div>
-        )}
-      </section>
+                    ) : (
+                      selected.secrets.map((name) => (
+                        <TableRow key={name}>
+                          <TableCell className="font-mono text-xs">{name}</TableCell>
+                          <TableCell>
+                            <Badge tone="success">present</Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy || selectedIsDetected}
+                              onClick={() => setEditingSecret(name)}
+                            >
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </InfoPanel>
+            </div>
+          )}
+        </section>
+      </div>
 
       <AddProfileDialog
         open={addProfileOpen}
@@ -468,7 +535,7 @@ export function AuthVaultScreen(): React.ReactElement {
               await window.myclaude?.auth?.rotate({ profileId: selected.id, value });
               await reload();
               setRotateOpen(false);
-              announce("Anthropic key rotated");
+              announce("Claude key rotated");
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
             } finally {
@@ -564,7 +631,51 @@ export function AuthVaultScreen(): React.ReactElement {
           }}
         />
       ) : null}
-    </div>
+    </ScreenSurface>
+  );
+}
+
+function CredentialSummary({ profile }: { profile: AuthProfileView }): React.ReactElement {
+  const expiresLabel = formatExpiresIn(profile.oauth?.accessTokenExpiresAt);
+  const rows: Array<{ label: string; value: React.ReactNode }> = [
+    { label: "Mode", value: profile.mode },
+    {
+      label: profile.mode === "oauth" ? "OAuth status" : "Claude secret",
+      value:
+        profile.detected === true ? (
+          <Badge tone="info">Detected</Badge>
+        ) : profile.mode === "oauth" ? (
+          <Badge tone="success">Connected</Badge>
+        ) : (
+          <Badge tone="success">Stored</Badge>
+        ),
+    },
+  ];
+
+  if (profile.oauth?.email) rows.push({ label: "Email", value: profile.oauth.email });
+  if (profile.oauth?.orgName) rows.push({ label: "Organization", value: profile.oauth.orgName });
+  if (profile.oauth?.planType) rows.push({ label: "Plan", value: profile.oauth.planType });
+  if (profile.oauth?.accessTokenExpiresAt) {
+    rows.push({
+      label: "Access token",
+      value: `${profile.oauth.accessTokenExpiresAt}${expiresLabel ? ` (${expiresLabel})` : ""}`,
+    });
+  }
+  if (profile.oauth?.refreshTokenRef) {
+    rows.push({ label: "Refresh token", value: "Stored" });
+  }
+
+  return (
+    <InfoPanel icon={KeyRound} title="Claude credential">
+      <dl className="mt-3 grid gap-3 text-sm window-large:grid-cols-2">
+        {rows.map((row) => (
+          <div className="grid gap-1" key={row.label}>
+            <dt className="text-xs text-secondary">{row.label}</dt>
+            <dd className="min-w-0 truncate text-primary">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </InfoPanel>
   );
 }
 
@@ -600,10 +711,11 @@ function SidebarRow({
   return (
     <li>
       <div
-        className={`flex w-full items-center gap-2 px-4 py-3 transition-colors hover:bg-subtle ${
-          active ? "bg-elevated" : ""
+        className={`flex w-full items-center gap-3 px-4 py-3 transition-colors hover:bg-subtle ${
+          active ? "bg-accent-soft" : ""
         }`}
       >
+        <IconFrame icon={KeyRound} size="sm" tone={isDetected ? "accent" : "neutral"} />
         <button
           aria-label={`${profile.id} ${primaryLabel}`}
           className="flex flex-1 flex-col items-start gap-0.5 text-left"
@@ -812,9 +924,9 @@ export function AddAuthProfileForm({
             value={displayName}
           />
         </Field>
-        <Field label="Auth mode">
+        <Field label="Claude auth mode">
           <Select
-            aria-label="Auth mode"
+            aria-label="Claude auth mode"
             onValueChange={(v) => setMode(v as AuthMode)}
             options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
             value={mode}
@@ -824,7 +936,7 @@ export function AddAuthProfileForm({
           <Field
             description="Where the key will be stored"
             htmlFor={secretRefId}
-            label="Anthropic secret ref"
+            label="Claude secret ref"
           >
             <Input
               id={secretRefId}
@@ -875,7 +987,7 @@ export function AddAuthProfileForm({
             ? isOAuth
               ? "Opening browser..."
               : "Saving..."
-            : (submitLabel ?? (isOAuth ? "Sign in with Anthropic" : "Continue (collect key)"))}
+            : (submitLabel ?? (isOAuth ? "Sign in with Claude" : "Continue (collect key)"))}
         </Button>
       </div>
     </div>
@@ -893,10 +1005,9 @@ function AddProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add auth profile</DialogTitle>
+          <DialogTitle>Connect Claude credential</DialogTitle>
           <DialogDescription>
-            The Anthropic API key is collected by a Main-owned dialog after you save. It never
-            travels through this window.
+            API keys are collected by a Main-owned dialog. OAuth opens the browser sign-in flow.
           </DialogDescription>
         </DialogHeader>
         <AddAuthProfileForm
@@ -941,10 +1052,10 @@ function SetSecretDialog({
 
   const canSubmit = name.length > 0 && value.length > 0 && !busy;
   const title =
-    mode === "rotate" ? `Rotate Anthropic key for "${profileId}"` : `Add secret to "${profileId}"`;
+    mode === "rotate" ? `Rotate Claude key for "${profileId}"` : `Add secret to "${profileId}"`;
   const description =
     mode === "rotate"
-      ? "Replaces the stored Anthropic key and revokes every live capability bound to this profile."
+      ? "Replaces the stored Claude key and revokes every live capability bound to this profile."
       : "Registers and stores a third-party API token used by an MCP server.";
 
   return (

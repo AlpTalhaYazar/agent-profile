@@ -5,7 +5,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@agent-profile/ui";
+import { Keyboard } from "lucide-react";
 import type * as React from "react";
+import { IconFrame } from "./screen-ui.js";
 
 interface ShortcutsHelpProps {
   open: boolean;
@@ -14,7 +16,7 @@ interface ShortcutsHelpProps {
 
 const SHORTCUTS = [
   ["Global", "Cmd/Ctrl K", "Open command palette"],
-  ["Global", "Cmd/Ctrl 1-5", "Switch screens"],
+  ["Global", "Cmd/Ctrl 1-3", "Switch screens"],
   ["Global", "?", "Open keyboard shortcuts"],
   ["Global", "Escape", "Close dialogs and overlays"],
   ["Tree", "Up / Down", "Move between scope entries"],
@@ -30,7 +32,10 @@ export function ShortcutsHelp({ open, onOpenChange }: ShortcutsHelpProps): React
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="shortcuts-help">
         <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <div className="flex items-center gap-3">
+            <IconFrame icon={Keyboard} size="sm" />
+            <DialogTitle>Keyboard shortcuts</DialogTitle>
+          </div>
           <DialogDescription>Common navigation and editor commands.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">

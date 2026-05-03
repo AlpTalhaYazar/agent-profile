@@ -14,6 +14,7 @@
  */
 
 import { Input, cn } from "@agent-profile/ui";
+import { Command, Search } from "lucide-react";
 import * as React from "react";
 
 export interface CommandPaletteItem {
@@ -76,40 +77,52 @@ export function CommandPalette({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-overlay px-4 pt-20" data-testid="command-palette-overlay">
+    <div
+      className="fixed inset-0 z-50 bg-overlay px-4 pt-20 backdrop-blur-sm"
+      data-testid="command-palette-overlay"
+    >
       <div
-        className="mx-auto flex max-h-[70vh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-default bg-elevated shadow-xl"
+        className="mx-auto flex max-h-[70vh] w-full max-w-[760px] flex-col overflow-hidden rounded-md border border-default bg-elevated shadow-xl"
         data-testid="command-palette"
       >
         <div className="border-b border-subtle p-3">
-          <Input
-            aria-label="Command palette query"
-            className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-            onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                onActiveIndexChange(items.length ? (activeIndex + 1) % items.length : 0);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                onActiveIndexChange(
-                  items.length ? (activeIndex - 1 + items.length) % items.length : 0
-                );
-              } else if (event.key === "Enter" && items[activeIndex]) {
-                event.preventDefault();
-                onSelect(items[activeIndex]);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                onClose();
-              }
-            }}
-            placeholder="Search screens, scopes, auth, or provenance…"
-            ref={inputRef}
-            value={query}
-          />
+          <div className="flex h-11 items-center gap-3 rounded-md border border-default bg-canvas px-3">
+            <Search className="h-4 w-4 text-secondary" aria-hidden="true" />
+            <Input
+              aria-label="Command palette query"
+              className="h-9 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  onActiveIndexChange(items.length ? (activeIndex + 1) % items.length : 0);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  onActiveIndexChange(
+                    items.length ? (activeIndex - 1 + items.length) % items.length : 0
+                  );
+                } else if (event.key === "Enter" && items[activeIndex]) {
+                  event.preventDefault();
+                  onSelect(items[activeIndex]);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  onClose();
+                }
+              }}
+              placeholder="Search screens, scopes, auth, or provenance…"
+              ref={inputRef}
+              value={query}
+            />
+            <span className="inline-flex items-center gap-0.5 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-tertiary">
+              <Command className="h-3 w-3" aria-hidden="true" />K
+            </span>
+          </div>
         </div>
 
-        <div className="app-scrollbar overflow-auto p-2" id="command-palette-results">
+        <div
+          className="app-scrollbar min-w-0 overflow-y-auto overflow-x-hidden p-2"
+          id="command-palette-results"
+        >
           {groupedItems.length === 0 ? (
             <div className="px-3 py-6 text-sm text-secondary">No results.</div>
           ) : (
@@ -125,8 +138,10 @@ export function CommandPalette({
                     return (
                       <button
                         className={cn(
-                          "flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors",
-                          active ? "bg-accent-soft text-primary" : "text-primary hover:bg-subtle"
+                          "flex min-h-12 min-w-0 items-center gap-3 rounded-md px-3 py-2 text-left transition-colors",
+                          active
+                            ? "bg-accent-soft text-primary shadow-xs"
+                            : "text-primary hover:bg-subtle"
                         )}
                         data-testid={`command-palette-item-${item.id}`}
                         id={`command-palette-item-${item.id}`}
@@ -144,7 +159,7 @@ export function CommandPalette({
                           ) : null}
                         </div>
                         {item.hint ? (
-                          <span className="rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-tertiary">
+                          <span className="shrink-0 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-tertiary">
                             {item.hint}
                           </span>
                         ) : null}

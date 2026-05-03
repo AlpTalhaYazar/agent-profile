@@ -9,7 +9,7 @@ test("first-run wizard creates setup marker and stays complete after relaunch", 
     const { app, page } = await launchDesktop(fixture);
     await expect(page.getByTestId("first-run-wizard")).toBeVisible();
     await page.getByTestId("wizard-get-started").click();
-    await expect(page.getByRole("heading", { name: "Add an auth profile" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Add a Claude credential" })).toBeVisible();
 
     await page.getByLabel("Display name").fill("Work");
     const secretWindow = app.waitForEvent("window");

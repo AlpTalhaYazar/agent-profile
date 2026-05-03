@@ -30,12 +30,15 @@ test("session monitor tab lists seeded sessions and offers actions", async () =>
   const socketPath = join(root, "myclaude.sock");
   const sessionsRoot = join(myClaudeHome, "sessions");
   const registryDir = join(myClaudeHome, "session-registry");
+  const claudeProjectsDir = join(root, "home", ".claude", "projects");
+  const nativeProjectDir = join(claudeProjectsDir, projectDir.replace(/[\\/]/g, "-"));
 
   await mkdir(join(myClaudeHome, "config", "global", "roles"), { recursive: true });
   await mkdir(join(projectDir, ".myclaude", "roles"), { recursive: true });
   await mkdir(registryDir, { recursive: true });
   await mkdir(join(sessionsRoot, "session-running"), { recursive: true });
   await mkdir(join(sessionsRoot, "session-exited"), { recursive: true });
+  await mkdir(nativeProjectDir, { recursive: true });
 
   await writeFile(
     join(myClaudeHome, "config", "authProfiles.yml"),
@@ -101,6 +104,23 @@ authProfiles:
       exitCode: 0,
     })
   );
+  await writeFile(
+    join(nativeProjectDir, "native-session.jsonl"),
+    [
+      JSON.stringify({
+        type: "custom-title",
+        sessionId: "native-session",
+        customTitle: "Native Claude history",
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "native-session",
+        cwd: projectDir,
+        timestamp: new Date(Date.now() - 30_000).toISOString(),
+        message: { role: "user", content: "hidden" },
+      }),
+    ].join("\n")
+  );
 
   expect(
     existsSync(electronExecutablePath),
@@ -120,31 +140,39 @@ authProfiles:
       ...launchEnv,
       MYCLAUDE_HOME: myClaudeHome,
       MYCLAUDE_SOCKET: socketPath,
+      HOME: join(root, "home"),
       PLAYWRIGHT_HEADLESS: process.env.PLAYWRIGHT_HEADLESS ?? "1",
     },
   });
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Explorer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
     await page.getByTestId("sidebar-sessions").click();
     await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
 
     // Both seeded session ids show up in the table.
-    await expect(page.getByText("session-running")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("session-exited")).toBeVisible();
+    await expect(page.getByText("session-running").first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("session-exited").first()).toBeVisible();
+    await expect(page.getByText("native-session").first()).toBeVisible();
+    await expect(page.getByRole("table").getByText("Claude", { exact: true })).toBeVisible();
     // Status column rendered: exited badge text + running label (with stale qualifier
     // since the seeded PID is 0 / not alive).
     await expect(page.getByText("exit 0")).toBeVisible();
 
     // Refresh button is wired up.
     await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByText("session-running")).toBeVisible();
+    await expect(page.getByText("session-running").first()).toBeVisible();
 
-    // Selecting the running session reveals the Kill action.
+    // Selecting a stale profile session does not offer Kill; it can be run again.
     await page.getByText("session-running").first().click();
-    await expect(page.getByRole("button", { name: "Kill" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run again" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Kill" })).toHaveCount(0);
+
+    await page.getByText("native-session").first().click();
+    await expect(page.getByRole("button", { name: "Resume" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run with current profile" })).toHaveCount(2);
   } finally {
     await app.close();
     await rm(root, { recursive: true, force: true });
