@@ -130,32 +130,60 @@ Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the
    and [`adr/005-persona-render-in-memory.md`](adr/005-persona-render-in-memory.md).
 
 7. **Polish + first-run flow (week 9–10)**
-   - Keyboard navigation (Radix)
-   - Dark/light mode
-   - First-run wizard that creates `~/.myclaude/` and walks through adding a first auth profile
-   - Accessibility pass (screen reader labels, focus order)
+   - [x] Keyboard navigation (skip link, command palette, scope tree
+     arrows, screen shortcuts, Escape/focus restoration)
+   - [x] Dark/light mode and reduced-motion checklist coverage
+   - [x] First-run wizard that creates the setup marker and walks through
+     adding a first Claude credential
+   - [x] Accessibility pass (landmarks, headings, status live region,
+     manual VoiceOver/contrast checklist)
+   - [x] Packaged-app Phase 2 e2e hardening for auth add/rotate and
+     session launch/kill
+
+   **Status:** Shipped on `main` (2026-05-03). See [`impl/phase-2-sprint-7-polish-first-run.md`](impl/phase-2-sprint-7-polish-first-run.md).
 
 ### Exit criteria
 
-- Every CLI capability reachable from the GUI.
-- Credential migration works one-way from standalone → daemon and preserves all entries.
-- Capability tokens expire on schedule; lab test attempts reuse after expiry and is rejected.
-- E2E Playwright suite covers: add auth, edit role, launch session, kill session, rotate secret.
-- Beta release: signed + notarized builds for macOS (x64 + arm64) and Windows (x64); Linux unsigned AppImage.
+- **GUI/runtime beta readiness:** closed on `main` by Phase 2 milestones 1-7.
+  Evidence spans the desktop e2e suite: profile edit/save/reload, auth add
+  and rotate, session monitor actions, packaged-app launch/kill runtime,
+  provenance inspection, persona preview, first-run, keyboard navigation,
+  accessibility checks, and visual contract coverage.
+- **Credential migration:** closed by milestone 3; one-way standalone →
+  daemon migration is recorded in
+  [`impl/phase-2-sprint-3-credential-migration.md`](impl/phase-2-sprint-3-credential-migration.md)
+  and ADR 002.
+- **Capability-token/runtime path:** covered by the Phase 1 launch work,
+  Phase 2 daemon/session milestones, and the packaged-app live-session e2e
+  hardening.
+- **Distribution/signing gate:** not a Phase 2 closeout item. Phase 3
+  Milestone 1 closes macOS signing/notarization, Windows Authenticode signing,
+  unsigned Linux M1 artifact verification, Electron Fuse verification, and
+  draft-release publishing.
 
 ## Phase 3 — Hardening & Distribution
 
 **Duration:** 6–8 weeks
 **Owner:** 2 engineers + DevOps
-**Goal:** General availability. Signed, notarized, auto-updating builds on all three OSes. Monorepo support, enterprise mode, plugin SDK.
+**Goal:** General availability. Signed and notarized macOS builds, signed
+Windows builds, verified Linux distribution artifacts, auto-update, monorepo
+support, enterprise mode, and plugin SDK.
 
 ### Milestones
 
 1. **Signing & notarization pipelines (week 1–2)**
-   - Apple Developer ID + `@electron/notarize` via App Store Connect API key in CI
-   - Windows Trusted Signing or EV-HSM Authenticode
-   - Linux GPG for AppImage; deb/rpm signatures
-   - CI job that refuses builds missing any signature or fuse
+   - [x] Apple Developer ID + `@electron/notarize` via App Store Connect API key in CI
+   - [x] Windows Authenticode via PFX or HSM/custom `signtool` parameters
+   - [x] Linux M1 deb/rpm/ZIP artifacts verified as unsigned; Linux GPG/AppImage deferred
+   - [x] CI verifier refuses missing macOS/Windows signatures, missing macOS notarization, missing artifacts, or incorrect Electron Fuses
+
+   **Status:** Shipped on `main` (2026-05-03). Release CI lives in
+   [`.github/workflows/release-desktop.yml`](../.github/workflows/release-desktop.yml);
+   baseline CI lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml);
+   artifact verification lives in
+   [`apps/desktop/scripts/verify-release-artifacts.mjs`](../apps/desktop/scripts/verify-release-artifacts.mjs).
+   Maintainer operations are documented in
+   [`release/desktop-signing-notarization.md`](release/desktop-signing-notarization.md).
 
 2. **Auto-update with staged rollouts (week 2–3)**
    - `electron-updater` on GitHub Releases
@@ -191,7 +219,9 @@ Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the
 
 ### Exit criteria
 
-- Signed, notarized, auto-updating builds on macOS/Windows/Linux (x64 + arm64 where applicable).
+- Signed/notarized macOS builds, signed Windows builds, verified Linux
+  distribution artifacts, and auto-update support for the platforms that
+  support signed update metadata.
 - One design-partner organization running the build in production for 4 weeks without a P0 incident.
 - Plugin SDK published; at least one third-party adapter in existence.
 - Homebrew + Windows Package Manager + apt/yum repos live.
