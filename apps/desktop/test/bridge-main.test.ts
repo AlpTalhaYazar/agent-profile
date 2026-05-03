@@ -7,7 +7,7 @@ const ipcMainHandle = vi.fn(
   }
 );
 const showOpenDialog = vi.fn();
-const fromWebContents = vi.fn(() => undefined);
+const fromWebContents = vi.fn((): unknown => undefined);
 const connectToSocket = vi.fn();
 const readCookie = vi.fn();
 const defaultSocketPath = vi.fn(() => "/tmp/myclaude.sock");
@@ -28,6 +28,7 @@ const skillsDetail = vi.fn();
 const skillsAudit = vi.fn();
 const skillsListInstalled = vi.fn();
 const skillsInstall = vi.fn();
+const requestSecretInputViaMain = vi.fn();
 
 vi.mock("electron", () => {
   return {
@@ -93,6 +94,10 @@ vi.mock("../src/main/skills-service.js", () => ({
   skillsInstall,
 }));
 
+vi.mock("../src/main/native-secret-dialog.js", () => ({
+  requestSecretInputViaMain,
+}));
+
 describe("main renderer IPC bridge", () => {
   beforeEach(() => {
     handlerMap.clear();
@@ -120,6 +125,7 @@ describe("main renderer IPC bridge", () => {
     skillsAudit.mockReset();
     skillsListInstalled.mockReset();
     skillsInstall.mockReset();
+    requestSecretInputViaMain.mockReset();
     vi.resetModules();
   });
 
@@ -181,6 +187,87 @@ describe("main renderer IPC bridge", () => {
       cwd: "/repo",
     });
     expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  it("delegates auth.add through Main after collecting and encoding the native secret", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({ id: "c-1", kind: "auth.add.ok" });
+    const parentWindow = { id: 99 };
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+    fromWebContents.mockReturnValue(parentWindow);
+    requestSecretInputViaMain.mockResolvedValue("sk-ant-plain");
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      startupCwd: "/repo",
+    });
+
+    const authAdd = handlerMap.get("auth.add");
+    if (!authAdd) throw new Error("missing auth.add handler");
+
+    const event = {
+      senderFrame: { url: "file:///trusted/index.html" },
+      sender: {},
+    };
+    const payload = {
+      spec: {
+        id: "work",
+        displayName: "Work",
+        anthropic: {
+          mode: "apiKey",
+          secretRef: "keyring://anthropic/work",
+        },
+      },
+      force: true,
+    };
+
+    await expect(authAdd(event, payload)).resolves.toEqual({ ok: true });
+
+    expect(requestSecretInputViaMain).toHaveBeenCalledWith({
+      parent: parentWindow,
+      title: 'Add Claude credential "work"',
+      label: "Anthropic API key",
+    });
+    expect(request).toHaveBeenCalledWith("auth.add", {
+      spec: payload.spec,
+      anthropicSecretB64: Buffer.from("sk-ant-plain", "utf8").toString("base64"),
+      force: true,
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects auth.add cancellation before any daemon request is made", async () => {
+    requestSecretInputViaMain.mockResolvedValue(null);
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      startupCwd: "/repo",
+    });
+
+    const authAdd = handlerMap.get("auth.add");
+    if (!authAdd) throw new Error("missing auth.add handler");
+
+    await expect(
+      authAdd(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        {
+          spec: {
+            id: "work",
+            anthropic: {
+              mode: "apiKey",
+              secretRef: "keyring://anthropic/work",
+            },
+          },
+        }
+      )
+    ).rejects.toThrow("auth.add: cancelled");
+
+    expect(connectToSocket).not.toHaveBeenCalled();
   });
 
   it("delegates persona.render to the daemon and forwards the projected wire shape", async () => {

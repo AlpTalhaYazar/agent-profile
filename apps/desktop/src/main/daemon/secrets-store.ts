@@ -45,6 +45,8 @@ export interface BuildSecretsStoreOptions {
   safeStorage: SafeStorageLike;
   /** Override the standard filename for tests. */
   fileName?: string;
+  /** Environment override for tests. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -55,6 +57,15 @@ export interface BuildSecretsStoreOptions {
  */
 export async function buildSecretsStore(opts: BuildSecretsStoreOptions): Promise<SafeStorageStore> {
   const filePath = join(opts.myClaudeHome, opts.fileName ?? "secrets.enc.json");
+  const env = opts.env ?? process.env;
+  if (shouldUsePlaintextStore(opts.safeStorage, env)) {
+    return createSafeStorageStore({
+      encrypt: (plain: string): Buffer => Buffer.from(plain, "utf8"),
+      decrypt: (cipher: Buffer): string => cipher.toString("utf8"),
+      filePath,
+      kind: "basic-text",
+    });
+  }
   const kind = detectStoreKind(opts.safeStorage);
   const storeOpts: SafeStorageStoreOptions = {
     encrypt: (plain: string): Buffer => opts.safeStorage.encryptString(plain),
@@ -63,6 +74,12 @@ export async function buildSecretsStore(opts: BuildSecretsStoreOptions): Promise
     kind,
   };
   return createSafeStorageStore(storeOpts);
+}
+
+function shouldUsePlaintextStore(safeStorage: SafeStorageLike, env: NodeJS.ProcessEnv): boolean {
+  if (env.MYCLAUDE_ALLOW_PLAINTEXT !== "1") return false;
+  if (env.MYCLAUDE_E2E_PLAINTEXT_SECRETS === "1") return true;
+  return safeStorage.isEncryptionAvailable?.() === false;
 }
 
 /**

@@ -98,6 +98,8 @@ export async function launchDesktop(fixture: DesktopFixture): Promise<{
     cwd: fixture.projectDir,
     env: {
       ...launchEnv,
+      MYCLAUDE_ALLOW_PLAINTEXT: "1",
+      MYCLAUDE_E2E_PLAINTEXT_SECRETS: "1",
       MYCLAUDE_HOME: fixture.myClaudeHome,
       MYCLAUDE_SOCKET: fixture.socketPath,
       PLAYWRIGHT_HEADLESS: process.env.PLAYWRIGHT_HEADLESS ?? "1",

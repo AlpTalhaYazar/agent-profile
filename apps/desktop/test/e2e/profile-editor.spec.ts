@@ -77,6 +77,8 @@ env:
     cwd: projectDir,
     env: {
       ...launchEnv,
+      MYCLAUDE_ALLOW_PLAINTEXT: "1",
+      MYCLAUDE_E2E_PLAINTEXT_SECRETS: "1",
       MYCLAUDE_HOME: myClaudeHome,
       MYCLAUDE_SOCKET: socketPath,
       PLAYWRIGHT_HEADLESS: process.env.PLAYWRIGHT_HEADLESS ?? "1",
@@ -117,6 +119,128 @@ env:
     await page.getByRole("button", { name: "Layers", exact: true }).click();
     await expect(page.getByPlaceholder("Value").first()).toHaveValue("vim", { timeout: 10_000 });
     await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
+  } finally {
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("profile editor saves a backend role layer and reloads role-specific env values", async () => {
+  const launchEnv = { ...process.env };
+  launchEnv.ELECTRON_RUN_AS_NODE = undefined;
+
+  const root = await mkdtemp(join(tmpdir(), "agent-profile-e2e-"));
+  const myClaudeHome = join(root, "home", ".myclaude");
+  const projectDir = join(root, "project");
+  const appDir = join(root, "app");
+  const socketPath = join(root, "myclaude.sock");
+  const globalSharedPath = join(myClaudeHome, "config", "global", "shared.yml");
+  const globalRolePath = join(myClaudeHome, "config", "global", "roles", "backend.yml");
+  const projectRolePath = join(projectDir, ".myclaude", "roles", "backend.yml");
+
+  await mkdir(join(myClaudeHome, "config", "global", "roles"), { recursive: true });
+  await mkdir(join(projectDir, ".myclaude", "roles"), { recursive: true });
+
+  await writeFile(
+    join(myClaudeHome, "config", "authProfiles.yml"),
+    `
+version: 1
+authProfiles:
+  work:
+    displayName: Work
+    anthropic:
+      mode: apiKey
+      secretRef: keyring://anthropic/work
+    mcpSecretRefs: {}
+`.trimStart()
+  );
+  await writeFile(
+    globalSharedPath,
+    `
+version: 1
+env:
+  EDITOR: nvim
+settings:
+  theme: dark
+`.trimStart()
+  );
+  await writeFile(
+    globalRolePath,
+    `
+version: 1
+env:
+  NODE_ENV: development
+`.trimStart()
+  );
+  await writeFile(
+    projectRolePath,
+    `
+version: 1
+env:
+  PROJECT_DB_POOL: "20"
+`.trimStart()
+  );
+
+  expect(
+    existsSync(electronExecutablePath),
+    `missing Electron executable at ${electronExecutablePath}`
+  ).toBe(true);
+  await cp(join(process.cwd(), ".vite"), join(appDir, ".vite"), { recursive: true });
+  await writeFile(
+    join(appDir, "package.json"),
+    JSON.stringify({ name: "agent-profile-e2e", version: "0.0.1", main: ".vite/build/main.cjs" })
+  );
+
+  const app = await electron.launch({
+    executablePath: electronExecutablePath,
+    args: [appDir],
+    cwd: projectDir,
+    env: {
+      ...launchEnv,
+      MYCLAUDE_ALLOW_PLAINTEXT: "1",
+      MYCLAUDE_E2E_PLAINTEXT_SECRETS: "1",
+      MYCLAUDE_HOME: myClaudeHome,
+      MYCLAUDE_SOCKET: socketPath,
+      PLAYWRIGHT_HEADLESS: process.env.PLAYWRIGHT_HEADLESS ?? "1",
+    },
+  });
+
+  try {
+    const page = await app.firstWindow();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+
+    await page.getByRole("button", { name: /Role/ }).first().click();
+    await page.getByRole("button", { name: "backend", exact: true }).click();
+
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Scope layers" })).toBeVisible();
+    await page.locator("button").filter({ hasText: projectRolePath }).click();
+
+    await expect(page.locator('input[value="PROJECT_DB_POOL"]')).toBeVisible();
+    await page.getByRole("button", { name: "Add variable" }).click();
+    await page.getByPlaceholder("KEY").last().fill("ROLE_LAYER_ONLY");
+    await page.getByPlaceholder("Value").last().fill("backend-specific");
+
+    await expect(page.getByText("Ready to save")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("No changes")).toBeVisible({ timeout: 10_000 });
+
+    await expect
+      .poll(async () => readFile(projectRolePath, "utf8"))
+      .toContain("ROLE_LAYER_ONLY: backend-specific");
+    await expect
+      .poll(async () => readFile(globalSharedPath, "utf8"))
+      .not.toContain("ROLE_LAYER_ONLY");
+    await expect
+      .poll(async () => readFile(globalRolePath, "utf8"))
+      .not.toContain("ROLE_LAYER_ONLY");
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
+    await page.locator("button").filter({ hasText: projectRolePath }).click();
+    await expect(page.locator('input[value="ROLE_LAYER_ONLY"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('input[value="backend-specific"]')).toBeVisible({ timeout: 10_000 });
   } finally {
     await app.close();
     await rm(root, { recursive: true, force: true });

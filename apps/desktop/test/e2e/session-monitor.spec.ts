@@ -138,6 +138,8 @@ authProfiles:
     cwd: projectDir,
     env: {
       ...launchEnv,
+      MYCLAUDE_ALLOW_PLAINTEXT: "1",
+      MYCLAUDE_E2E_PLAINTEXT_SECRETS: "1",
       MYCLAUDE_HOME: myClaudeHome,
       MYCLAUDE_SOCKET: socketPath,
       HOME: join(root, "home"),
