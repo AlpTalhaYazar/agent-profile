@@ -1,7 +1,7 @@
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cookiePath, readCookie, writeBootCookie } from "../src/cookie.js";
 
 describe("cookie helpers", () => {
@@ -30,6 +30,54 @@ describe("cookie helpers", () => {
 
     const read = await readCookie(home);
     expect(read).toBe(written);
+  });
+
+  it("leaves no temp cookie files after a successful write", async () => {
+    await writeBootCookie(home);
+
+    const entries = await readdir(home);
+    expect(entries.filter((entry) => entry.startsWith("ipc-cookie.tmp-"))).toEqual([]);
+  });
+
+  it("overwrites an existing relaxed-mode cookie with a fresh strict cookie", async () => {
+    const path = cookiePath(home);
+    await writeFile(path, "old-cookie", { mode: 0o600, encoding: "utf8" });
+    await chmod(path, 0o644);
+
+    const written = await writeBootCookie(home);
+
+    expect(written).not.toBe("old-cookie");
+    await expect(readCookie(home)).resolves.toBe(written);
+    const info = await stat(path);
+    expect(info.mode & 0o777).toBe(0o600);
+  });
+
+  it("cleans up the temp cookie when rename fails", async () => {
+    const renameFailure = new Error("rename failed");
+    vi.resetModules();
+    vi.doMock("node:fs/promises", async () => {
+      const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      return {
+        ...actual,
+        rename: vi.fn(async () => {
+          throw renameFailure;
+        }),
+      };
+    });
+
+    try {
+      const { writeBootCookie: writeBootCookieWithRenameFailure } = await import(
+        "../src/cookie.js"
+      );
+      await expect(writeBootCookieWithRenameFailure(home)).rejects.toThrow(renameFailure);
+    } finally {
+      vi.doUnmock("node:fs/promises");
+      vi.resetModules();
+    }
+
+    await expect(stat(cookiePath(home))).rejects.toMatchObject({ code: "ENOENT" });
+    const entries = await readdir(home);
+    expect(entries.filter((entry) => entry.startsWith("ipc-cookie.tmp-"))).toEqual([]);
   });
 
   it("readCookie throws on a relaxed file mode", async () => {

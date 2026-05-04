@@ -19,15 +19,16 @@
  * Security invariants enforced here:
  *
  *  - Parent dir is created with mode `0700`.
- *  - File is written with mode `0600`. We do an explicit `chmod` after write
- *    because some platforms / `umask` configurations ignore the `mode` option
- *    on `writeFile` for files that already exist.
+ *  - File is written atomically via a sibling temp file, then renamed over the
+ *    final path so readers never observe a partial cookie.
+ *  - Temp and final files are chmodded to `0600` because some platforms /
+ *    `umask` configurations ignore the `mode` option on file writes.
  *  - {@link readCookie} refuses to return the value if the file mode is more
  *    permissive than `0600`. A relaxed mode is treated as a tampering signal.
  */
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -65,10 +66,11 @@ export function cookiePath(myClaudeHome: string = defaultMyClaudeHome()): string
  *
  *  1. `mkdir(myClaudeHome, recursive: true, mode: 0o700)` — ensures the
  *     directory exists with strict perms even on first run.
- *  2. `writeFile(path, cookie, mode: 0o600)` — writes the value.
- *  3. `chmod(path, 0o600)` — defensively re-applies the mode in case the file
- *     pre-existed with a relaxed mode (writeFile's `mode` option is only used
- *     when the file is created).
+ *  2. `writeFile(tmpPath, cookie, mode: 0o600)` — writes the value to a
+ *     sibling temp file.
+ *  3. `chmod(tmpPath, 0o600)` — defensively clamps temp-file permissions.
+ *  4. `rename(tmpPath, path)` — atomically replaces the final file.
+ *  5. `chmod(path, 0o600)` — defensively re-applies the final mode.
  *
  * @param myClaudeHome - The `.myclaude` directory; defaults to `~/.myclaude`.
  * @returns The new cookie value (43-char base64url string, 32 random bytes).
@@ -79,10 +81,20 @@ export async function writeBootCookie(
   await mkdir(myClaudeHome, { recursive: true, mode: COOKIE_DIR_MODE });
 
   const path = cookiePath(myClaudeHome);
+  const tmpPath = join(myClaudeHome, `ipc-cookie.tmp-${randomBytes(4).toString("hex")}`);
   const cookie = randomBytes(COOKIE_BYTES).toString("base64url");
-  await writeFile(path, cookie, { mode: COOKIE_FILE_MODE, encoding: "utf8" });
-  // Defensive: re-apply mode regardless of whether the file pre-existed.
-  await chmod(path, COOKIE_FILE_MODE);
+
+  try {
+    await writeFile(tmpPath, cookie, { mode: COOKIE_FILE_MODE, encoding: "utf8" });
+    await chmod(tmpPath, COOKIE_FILE_MODE);
+    await rename(tmpPath, path);
+    await chmod(path, COOKIE_FILE_MODE);
+  } catch (err) {
+    await unlink(tmpPath).catch(() => {
+      // Preserve the original write/chmod/rename error.
+    });
+    throw err;
+  }
 
   return cookie;
 }
