@@ -11,7 +11,7 @@ Agent Profile handles user credentials (Anthropic API keys, GitHub PATs, databas
 | **Spoofing** | Another local user connects to the IPC socket | UDS mode `0600` (POSIX); per-boot handshake cookie; peer-verification hook wired before `hello`. Native `euid(peer) == euid(self)` and explicit Windows pipe DACL enforcement are future hardening items. |
 | **Spoofing** | A malicious local process running as the same user impersonates the CLI | Handshake cookie regenerated per daemon boot; capability tokens are per-session; Anthropic API key never cached outside Main |
 | **Tampering** | Attacker edits ephemeral session files mid-launch | Session dir mode `0600`; content written atomically via temp + rename; session TTL ≤ session lifetime; session records keep rendered paths inspectable |
-| **Tampering** | Attacker replaces `~/.myclaude/ipc-cookie` | File is `0600`; rotated on every daemon boot; stale cookie fails handshake |
+| **Tampering** | Attacker replaces `~/.myclaude/ipc-cookie` | Parent dir is created as `0700`; file is written via sibling temp + rename and clamped to `0600`; rotated on every daemon boot; stale cookie fails handshake |
 | **Tampering** | Attacker replaces signed app binary | ASAR integrity + Electron Fuses (`OnlyLoadAppFromAsar=true`); Phase 3 M1 release verification requires macOS signing/notarization and Windows Authenticode signatures; Linux M1 artifacts are explicitly unsigned |
 | **Repudiation** | "I never launched a session with those credentials" | Append-only JSONL audit log at `~/.myclaude/audit.log` with timestamped launch, secret access, and config-change rows; SQLite storage and SIEM export are deferred |
 | **Info disclosure** | API keys leak via env vars into logs, shell history, process listings | `ANTHROPIC_API_KEY` never exported; `apiKeyHelper.sh` proxies on demand; Main zeros plaintext buffers after encrypting |
@@ -87,7 +87,7 @@ On `accept`, `DaemonServer` runs the desktop-owned `verifyPeer(socket)` hook bef
 
 ### 3. Handshake cookie
 
-A 32-byte random cookie is generated on every daemon boot and written to `~/.myclaude/ipc-cookie` (mode `0600`). The CLI reads this file and sends it as the first message. Main compares against the in-memory cookie and closes on mismatch.
+A 32-byte random cookie is generated on every daemon boot and written to `~/.myclaude/ipc-cookie` via sibling temp file + rename. The parent directory is created with mode `0700`; the temp and final cookie files are clamped to mode `0600`, and readers reject a relaxed final mode. The CLI reads this file and sends it as the first message. Main compares against the in-memory cookie and closes on mismatch.
 
 Current enforcement means an attacker must reach the socket and present the per-boot cookie. On POSIX, owner-only socket permissions are the different-user barrier; true OS peer-credential enforcement remains tracked in [`09-open-questions.md`](09-open-questions.md).
 

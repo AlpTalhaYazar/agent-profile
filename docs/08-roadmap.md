@@ -241,11 +241,19 @@ Phase 3 measurement stays local-only or GitHub-derived.
    requirement; or core handoff usage proves repeated value first.
 
 5. **Error recovery & telemetry gates (week 5–6)**
-   - Next Phase 3 target after the enterprise defer decision
-   - Privacy-safe event taxonomy and opt-in policy reviewed before any telemetry SDK
-   - No Crashpad, Sentry, PostHog, or network upload until redaction tests and kill switches pass
-   - `myclaude doctor` with every known failure mode mapped to a fix suggestion
-   - Partial-write recovery for all on-disk state (journal + atomic rename, Windows retry loop)
+   - [x] Boot-cookie writes now use sibling temp files, `0600` chmod, atomic
+     rename, final-mode clamp, and temp cleanup on failure
+   - [x] Recovery audit confirmed critical session artifacts, persona deployer
+     output, helper manifest, session registry, secrets fallback storage, and
+     activation-state writes already use sibling-temp + rename patterns
+   - [x] `myclaude doctor` reviewed: no new speculative recovery check added
+     because current known failure modes already map to actionable checks
+   - [x] Full telemetry, Sentry, PostHog, Crashpad, runtime analytics, and
+     network upload remain deferred behind the privacy gates in
+     [`open-source-health-metrics.md`](open-source-health-metrics.md)
+   - [ ] Orphan-session sentinel remains deferred to the session
+     manager/registry owner; the current `mtime` orphan fallback and registry
+     retained/running protections remain unchanged
 
 6. **Plugin SDK gate (week 6–8)**
    - Start only if core handoff usage or agent-builder demand justifies platform expansion

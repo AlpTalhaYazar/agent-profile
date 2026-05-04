@@ -211,9 +211,17 @@ Current canonical fields:
 
 **The question:** `packages/persona-deployer`'s `listOrphanedSessions` currently uses the session dir's `mtimeMs` as the age anchor. On Linux, `birthtime` is often unreliable (filesystem-dependent). But `mtime` advances every time a file inside the session is touched — including normal `claude` memory writes — making active sessions look young and potentially skewing GC.
 
-**Working assumption (Phase 1):** `mtime` is acceptable for the 24h default threshold; actively-used sessions that should not be GC'd will naturally have recent `mtime`.
+**Working assumption (Phase 3 recovery closure):** Keep `mtime` as the fallback
+age anchor for unregistered orphan dirs. CLI GC already consults registry
+records first and preserves retained/running sessions before using the orphan
+scan, so this is acceptable until the session manager owns a non-secret launch
+metadata sentinel.
 
-**Revisit signal:** When Sprint 7's session manager ships, write a `session.json` sentinel on `createSessionDir` containing `{ createdAt: <ISO>, sessionId }`. Switch `listOrphanedSessions` to use that timestamp and keep `mtime` only as a tiebreaker.
+**Revisit signal:** When the session manager or registry owns durable launch
+metadata for every session, write a non-secret GC sentinel containing only
+fields needed for recovery (for example `sessionId` and `createdAt`). Switch
+`listOrphanedSessions` to prefer that timestamp and keep `mtime` only as a
+tiebreaker for legacy dirs.
 
 ---
 
@@ -231,9 +239,16 @@ Current canonical fields:
 
 **The question:** Currently `createSessionDir` returns `{ sessionId, sessionDir, claudeConfigDir }` but writes no metadata to disk. A `session.json` at the session root would carry `createdAt`, `sessionId`, and later (Sprint 7) the `(role, authProfileId, cwd)` triple — enabling robust GC, `myclaude sessions list`, and audit-log joins.
 
-**Working assumption:** Add `session.json` in Sprint 7 when the session manager owns the full launch metadata. Sprint 5's persona-deployer only knows about the persona inputs; writing session metadata from there would couple concerns.
+**Working assumption:** Do not add this in `packages/persona-deployer`. The
+current helper-facing `session.json` is owned by the CLI helper path and carries
+capability/auth metadata, so it must not be repurposed as a GC sentinel. Any
+future recovery sentinel should be non-secret, separate from the helper
+manifest, and owned by the session manager or registry layer that already knows
+launch metadata.
 
-**Revisit signal:** If Sprint 6 or 7 needs per-session metadata before the session manager exists (unlikely but possible), we promote the sentinel into `packages/persona-deployer`.
+**Revisit signal:** If orphan cleanup produces false positives/negatives that
+registry metadata cannot explain, design the non-secret sentinel in the session
+manager/registry boundary before changing `createSessionDir`.
 
 ---
 
@@ -259,9 +274,12 @@ Current canonical fields:
 
 **The question:** [`packages/ipc-protocol/src/cookie.ts`](../packages/ipc-protocol/src/cookie.ts) writes `~/.myclaude/ipc-cookie` with `writeFile` followed by `chmod 0600`, not the safer write-tmp + rename pattern that `packages/persona-deployer`'s `atomicWrite` uses.
 
-**Working assumption (Phase 2 milestone 2):** Acceptable in the single-writer-per-boot model. The cookie is rotated at most once per daemon startup and the writer is always Main; the brief window between `writeFile` and `chmod` is not exploitable by a same-user attacker because the parent directory is `0700`.
-
-**Revisit signal:** If multi-writer rotation ever becomes a feature (e.g., daemon restart without a full Main relaunch, or a watchdog re-rotating mid-session), switch to write-tmp + rename to keep the file atomically observable from readers.
+**Resolution (2026-05-04, Phase 3 recovery closure):** Closed. `writeBootCookie`
+now writes `ipc-cookie.tmp-*` as a sibling temp file with mode `0600`, chmods
+the temp file, renames it over the final cookie, chmods the final cookie, and
+best-effort removes the temp file on write/chmod/rename failure. The parent
+directory continues to be created with `0700`, and `readCookie` still rejects a
+relaxed final mode.
 
 ---
 
