@@ -125,6 +125,17 @@ export {
   type DriftServiceResult,
   type GetEffectiveFn,
 } from "./sessions/drift.js";
+export {
+  sessionsHandoffService,
+  type HandoffDriftStatus,
+  type HandoffOutcomeStatus,
+  type HandoffRecordedStatus,
+  type HandoffRuntimeArtifacts,
+  type HandoffSummary,
+  type HandoffVerificationStatus,
+  type SessionsHandoffInput,
+  type SessionsHandoffResult,
+} from "./sessions/handoff.js";
 
 // ─── Daemon ───────────────────────────────────────────────────────────────────
 

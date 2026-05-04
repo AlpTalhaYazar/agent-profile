@@ -1,3 +1,5 @@
+import type { HandoffOutcomeStatus, HandoffVerificationStatus } from "@agent-profile/cli-services";
+
 export interface SessionsBaseOptions {
   sessionsRoot?: string;
   env?: Record<string, string | undefined>;
@@ -44,6 +46,18 @@ export interface SessionsDriftOptions extends SessionsBaseOptions {
 
 export interface SessionsShowOptions extends SessionsBaseOptions {
   sessionId: string;
+}
+
+export interface SessionsHandoffOptions extends SessionsBaseOptions {
+  sessionId: string;
+  /** Override myclaude home directory for drift/provenance resolution. */
+  home?: string;
+  /** Render-time verification status; not persisted to the registry. */
+  verificationStatus?: HandoffVerificationStatus | string;
+  /** Render-time verification command; not persisted to the registry. */
+  verificationCommand?: string;
+  /** Render-time outcome status; not persisted to the registry. */
+  outcome?: HandoffOutcomeStatus | string;
 }
 
 export interface SessionsGcOptions extends SessionsBaseOptions {

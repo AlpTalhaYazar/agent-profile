@@ -10,6 +10,7 @@
 import { defineCommand } from "citty";
 import { sessionsDriftCommand } from "./sessions/drift.js";
 import { sessionsGcCommand } from "./sessions/gc.js";
+import { sessionsHandoffCommand } from "./sessions/handoff.js";
 import { sessionsKillCommand } from "./sessions/kill.js";
 import { sessionsListCommand } from "./sessions/list.js";
 import { sessionsRelaunchCommand } from "./sessions/relaunch.js";
@@ -20,6 +21,7 @@ export type {
   SessionsDriftOptions,
   SessionsGcOptions,
   SessionsGcResult,
+  SessionsHandoffOptions,
   SessionsKillOptions,
   SessionsListOptions,
   SessionsRelaunchOptions,
@@ -28,6 +30,7 @@ export type {
 
 export { runSessionsDrift } from "./sessions/drift.js";
 export { runSessionsGc } from "./sessions/gc.js";
+export { runSessionsHandoff } from "./sessions/handoff.js";
 export { runSessionsKill } from "./sessions/kill.js";
 export { runSessionsList } from "./sessions/list.js";
 export { runSessionsRelaunch } from "./sessions/relaunch.js";
@@ -43,6 +46,7 @@ export const sessionsCommand = defineCommand({
     kill: sessionsKillCommand,
     relaunch: sessionsRelaunchCommand,
     drift: sessionsDriftCommand,
+    handoff: sessionsHandoffCommand,
     show: sessionsShowCommand,
     gc: sessionsGcCommand,
   },
