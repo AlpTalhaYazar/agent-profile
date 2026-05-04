@@ -1,20 +1,22 @@
 /**
  * Tests for `myclaude doctor`.
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { SchemaError, loadScopeFile } from "@agent-profile/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DoctorCheck } from "../../src/commands/doctor.js";
 import {
+  checkClaudeBinary,
+  checkDaemonReachability,
   checkKeychainBackend,
   checkNodeVersion,
   checkScopeFiles,
   checkVersions,
-  deferredChecks,
   renderCheck,
 } from "../../src/commands/doctor.js";
+import { CliError, EXIT_DAEMON_UNREACHABLE } from "../../src/errors.js";
 import { green, red, yellow } from "../../src/output/colors.js";
 import { MockBackend } from "../helpers/mock-backend.js";
 
@@ -25,6 +27,16 @@ function makeTempDir(): string {
   const dir = join(tmpdir(), `myclaude-test-${Math.random().toString(36).slice(2)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function makeExecutableClaude(): { root: string; bin: string; command: string } {
+  const root = makeTempDir();
+  const bin = join(root, "bin");
+  const command = join(bin, "claude");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(command, "#!/bin/sh\nexit 0\n");
+  chmodSync(command, 0o755);
+  return { root, bin, command };
 }
 
 describe("checkNodeVersion", () => {
@@ -112,22 +124,120 @@ describe("checkScopeFiles", () => {
   });
 });
 
-describe("deferredChecks", () => {
-  it("returns at least two deferred checks", () => {
-    const results = deferredChecks();
-    expect(results.length).toBeGreaterThanOrEqual(2);
-    for (const result of results) {
-      expect(result.status).toBe("deferred");
+describe("checkClaudeBinary", () => {
+  it("passes when claude is executable on PATH and version is readable", async () => {
+    const fixture = makeExecutableClaude();
+    try {
+      const result = await checkClaudeBinary({
+        env: { PATH: fixture.bin },
+        versionProbe: async ({ commandPath }) => {
+          expect(commandPath).toBe(fixture.command);
+          return "claude 2.1.61";
+        },
+      });
+      expect(result).toEqual({
+        name: "claude-binary",
+        status: "pass",
+        message: `Claude binary found: ${fixture.command} (claude 2.1.61)`,
+      });
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 
-  it("includes claude-binary and daemon checks", () => {
-    const results = deferredChecks();
-    const names = results.map((r) => r.name);
-    expect(names).toContain("claude-binary");
-    expect(names).toContain("daemon");
-    // keychain is now live (Sprint 4), no longer deferred
-    expect(names).not.toContain("keychain");
+  it("warns when claude is executable but version cannot be read", async () => {
+    const fixture = makeExecutableClaude();
+    try {
+      const result = await checkClaudeBinary({
+        env: { PATH: fixture.bin },
+        versionProbe: async () => null,
+      });
+      expect(result.name).toBe("claude-binary");
+      expect(result.status).toBe("warn");
+      expect(result.message).toBe(
+        `Claude binary found: ${fixture.command}, but version could not be read`
+      );
+      expect(result.hint).toContain("--version");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when claude is not executable on PATH", async () => {
+    const result = await checkClaudeBinary({
+      env: { PATH: "" },
+      versionProbe: async () => "claude 2.1.61",
+    });
+    expect(result.name).toBe("claude-binary");
+    expect(result.status).toBe("fail");
+    expect(result.message).toBe('Claude binary not found: expected executable "claude" on PATH');
+    expect(result.hint).toContain("Install Claude Code");
+  });
+});
+
+describe("checkDaemonReachability", () => {
+  it("passes when daemon status is returned through the probe", async () => {
+    const result = await checkDaemonReachability({
+      home: "/tmp/myclaude",
+      statusProbe: async ({ home }) => {
+        expect(home).toBe("/tmp/myclaude");
+        return {
+          pid: 123,
+          socketPath: "/tmp/myclaude.sock",
+          uptimeMs: 1000,
+          sessionCounts: { active: 2, total: 5 },
+        };
+      },
+    });
+    expect(result).toEqual({
+      name: "daemon",
+      status: "pass",
+      message: "Daemon reachable: pid 123, socket /tmp/myclaude.sock, sessions 2 active / 5 recent",
+    });
+  });
+
+  it("warns when daemon is unreachable", async () => {
+    const result = await checkDaemonReachability({
+      statusProbe: async () => {
+        throw new CliError(
+          "Daemon unreachable: connect ENOENT",
+          EXIT_DAEMON_UNREACHABLE,
+          "Start it with `myclaude daemon start`."
+        );
+      },
+    });
+    expect(result.name).toBe("daemon");
+    expect(result.status).toBe("warn");
+    expect(result.message).toBe(
+      "Daemon unreachable; standalone fallback will be used where supported"
+    );
+    expect(result.hint).toBe("Start it with `myclaude daemon start`.");
+  });
+
+  it("warns and skips the probe when standalone mode is forced", async () => {
+    const statusProbe = vi.fn();
+    const result = await checkDaemonReachability({
+      env: { MYCLAUDE_FORCE_STANDALONE: "1" },
+      statusProbe,
+    });
+    expect(statusProbe).not.toHaveBeenCalled();
+    expect(result.name).toBe("daemon");
+    expect(result.status).toBe("warn");
+    expect(result.message).toBe("Daemon check skipped: MYCLAUDE_FORCE_STANDALONE=1");
+  });
+
+  it("fails when daemon status probe reaches a daemon but status fails", async () => {
+    const result = await checkDaemonReachability({
+      statusProbe: async () => {
+        throw new Error("daemon.status returned malformed response");
+      },
+    });
+    expect(result.name).toBe("daemon");
+    expect(result.status).toBe("fail");
+    expect(result.message).toBe(
+      "Daemon status probe failed: daemon.status returned malformed response"
+    );
+    expect(result.hint).toContain("myclaude daemon status");
   });
 });
 
@@ -256,23 +366,6 @@ describe("renderCheck", () => {
     expect(output).toContain("Fix: Fix it now");
   });
 
-  it("renders [ ] for deferred status", () => {
-    const captured: string[] = [];
-    const origWrite = process.stdout.write.bind(process.stdout);
-    process.stdout.write = (chunk: unknown) => {
-      if (typeof chunk === "string") captured.push(chunk);
-      return true;
-    };
-    try {
-      renderCheck({ name: "test", status: "deferred", message: "Not yet" });
-    } finally {
-      process.stdout.write = origWrite;
-    }
-    const output = captured.join("");
-    expect(output).toContain("[ ]");
-    expect(output).toContain("Not yet");
-  });
-
   it("does not render hint for pass status", () => {
     const captured: string[] = [];
     const origWrite = process.stdout.write.bind(process.stdout);
@@ -366,7 +459,7 @@ describe("JSON output structure", () => {
     const checks: DoctorCheck[] = [
       { name: "check1", status: "pass", message: "OK" },
       { name: "check2", status: "warn", message: "Warning" },
-      { name: "check3", status: "deferred", message: "Deferred" },
+      { name: "check3", status: "warn", message: "Warning" },
     ];
     const hasFailures = checks.some((c) => c.status === "fail");
     expect(hasFailures).toBe(false);

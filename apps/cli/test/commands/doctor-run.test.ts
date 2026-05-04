@@ -1,11 +1,12 @@
 /**
  * Tests for `doctorCommand.run` to cover the command wrapper.
  */
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { doctorCommand } from "../../src/commands/doctor.js";
+import { describe, expect, it, vi } from "vitest";
+import { type RunDoctorOptions, runDoctor } from "../../src/commands/doctor.js";
+import { MockBackend } from "../helpers/mock-backend.js";
 
 const FIXTURES_HOME = resolve(new URL("../fixtures/home/.myclaude", import.meta.url).pathname);
 
@@ -45,29 +46,56 @@ function captureOutput(
   return Promise.resolve({ stdout: outChunks.join(""), stderr: errChunks.join("") });
 }
 
-// Helper to build a valid citty CommandContext with required `_` field
-// biome-ignore lint/suspicious/noExplicitAny: citty CommandContext arg not publicly typed
-function ctx(args: Record<string, unknown>, cmd: unknown): any {
-  return { args: { _: [], ...args }, cmd, rawArgs: [], subCommand: undefined };
+function makeExecutableClaude(): { root: string; bin: string; command: string } {
+  const root = join(
+    tmpdir(),
+    `doctor-run-claude-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  const bin = join(root, "bin");
+  const command = join(bin, "claude");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(command, "#!/bin/sh\nexit 0\n");
+  chmodSync(command, 0o755);
+  return { root, bin, command };
 }
 
-describe("doctorCommand.run", () => {
+const daemonStatusProbe = async () => ({
+  pid: 321,
+  socketPath: "/tmp/myclaude-test.sock",
+  uptimeMs: 1000,
+  sessionCounts: { active: 0, total: 1 },
+});
+
+async function runDeterministicDoctor(
+  args: { json?: boolean; pretty?: boolean; home?: string; cwd?: string } = {}
+): Promise<void> {
+  const fixture = makeExecutableClaude();
+  try {
+    const runOptions: RunDoctorOptions = {
+      home: args.home ?? FIXTURES_HOME,
+      cwd: args.cwd ?? FIXTURES_HOME,
+      backend: new MockBackend("keychain-macos"),
+      env: { PATH: fixture.bin },
+      claudeVersionProbe: async () => "claude 2.1.61",
+      daemonStatusProbe,
+    };
+    if (args.json !== undefined) runOptions.json = args.json;
+    if (args.pretty !== undefined) runOptions.pretty = args.pretty;
+    await runDoctor(runOptions);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}
+
+describe("runDoctor", () => {
   it("runs in human mode with fixture home", async () => {
-    const { stdout } = await captureOutput(() =>
-      doctorCommand.run?.(
-        ctx({ json: false, home: FIXTURES_HOME, cwd: FIXTURES_HOME }, doctorCommand)
-      )
-    );
+    const { stdout } = await captureOutput(() => runDeterministicDoctor({ json: false }));
     // Should contain check markers
     expect(stdout).toMatch(/\[.+\]/);
   });
 
   it("runs in JSON mode with fixture home", async () => {
-    const { stdout } = await captureOutput(() =>
-      doctorCommand.run?.(
-        ctx({ json: true, home: FIXTURES_HOME, cwd: FIXTURES_HOME }, doctorCommand)
-      )
-    );
+    const { stdout } = await captureOutput(() => runDeterministicDoctor({ json: true }));
     const parsed = JSON.parse(stdout) as { checks: unknown[]; healthy: boolean };
     expect(parsed).toHaveProperty("checks");
     expect(parsed).toHaveProperty("healthy");
@@ -75,28 +103,15 @@ describe("doctorCommand.run", () => {
     expect(parsed.healthy).toBe(true);
   });
 
-  it("JSON output includes node-version check", async () => {
-    const { stdout } = await captureOutput(() =>
-      doctorCommand.run?.(
-        ctx({ json: true, home: FIXTURES_HOME, cwd: FIXTURES_HOME }, doctorCommand)
-      )
-    );
+  it("JSON output includes node, claude, and daemon checks", async () => {
+    const { stdout } = await captureOutput(() => runDeterministicDoctor({ json: true }));
     const parsed = JSON.parse(stdout) as { checks: Array<{ name: string }> };
     const names = parsed.checks.map((c) => c.name);
     expect(names).toContain("node-version");
     expect(names).toContain("cli-version");
     expect(names).toContain("core-version");
-  });
-
-  it("includes deferred checks in output", async () => {
-    const { stdout } = await captureOutput(() =>
-      doctorCommand.run?.(
-        ctx({ json: true, home: FIXTURES_HOME, cwd: FIXTURES_HOME }, doctorCommand)
-      )
-    );
-    const parsed = JSON.parse(stdout) as { checks: Array<{ name: string; status: string }> };
-    const deferred = parsed.checks.filter((c) => c.status === "deferred");
-    expect(deferred.length).toBeGreaterThan(0);
+    expect(names).toContain("claude-binary");
+    expect(names).toContain("daemon");
   });
 
   it("non-JSON mode with failures writes diagnostic message and calls process.exit(1)", async () => {
@@ -127,7 +142,7 @@ describe("doctorCommand.run", () => {
 
     try {
       await expect(
-        doctorCommand.run?.(ctx({ json: false, home: tempHome, cwd: tempHome }, doctorCommand))
+        runDeterministicDoctor({ json: false, home: tempHome, cwd: tempHome })
       ).rejects.toThrow("process.exit called");
     } finally {
       process.stdout.write = origWrite;

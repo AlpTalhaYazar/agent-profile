@@ -10,17 +10,31 @@
  * - All discovered scope files pass Zod validation.
  * - Keychain backend probe (Sprint 4).
  * - MYCLAUDE_ALLOW_PLAINTEXT warning (Sprint 4).
+ * - Claude Code binary availability/version probe.
+ * - Daemon reachability/status probe.
  */
+import { execFile } from "node:child_process";
+import { constants } from "node:fs";
+import { access } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { delimiter, join } from "node:path";
+import { promisify } from "node:util";
 import { loadScopeFile } from "@agent-profile/core";
 import type { Backend } from "@agent-profile/secrets";
 import { getBackend } from "@agent-profile/secrets";
 import { defineCommand } from "citty";
+import { CliError, EXIT_DAEMON_UNREACHABLE } from "../errors.js";
 import { green, red, yellow } from "../output/colors.js";
 import { writeJson } from "../output/json.js";
+import { getTransport } from "../transport/index.js";
+import type { TransportDaemonStatusResult } from "../transport/types.js";
 import { discoverScopes } from "../utils/scope-discovery.js";
 
 const _require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
+
+const DEFAULT_CLAUDE_VERSION_TIMEOUT_MS = 2000;
+const DEFAULT_DAEMON_ATTEMPT_TIMEOUT_MS = 1000;
 
 /**
  * A single doctor check result.
@@ -28,12 +42,80 @@ const _require = createRequire(import.meta.url);
 export interface DoctorCheck {
   /** Short name of the check. */
   name: string;
-  /** `"pass"` | `"warn"` | `"fail"` | `"deferred"` */
-  status: "pass" | "warn" | "fail" | "deferred";
+  /** `"pass"` | `"warn"` | `"fail"` */
+  status: "pass" | "warn" | "fail";
   /** Human-readable message. */
   message: string;
   /** Optional fix hint. */
   hint?: string;
+}
+
+/** Inputs for the injectable Claude version probe. */
+export interface ClaudeVersionProbeInput {
+  /** Resolved executable path. */
+  commandPath: string;
+  /** Environment passed to the subprocess. */
+  env: NodeJS.ProcessEnv;
+  /** Probe timeout in milliseconds. */
+  timeoutMs: number;
+}
+
+/** Injectable surface for `claude --version`. */
+export type ClaudeVersionProbe = (input: ClaudeVersionProbeInput) => Promise<string | null>;
+
+/** Options for {@link checkClaudeBinary}. */
+export interface CheckClaudeBinaryOptions {
+  /** Environment used for PATH resolution and version probing. */
+  env?: NodeJS.ProcessEnv;
+  /** Injectable version probe for deterministic tests. */
+  versionProbe?: ClaudeVersionProbe;
+  /** Timeout for the default `claude --version` probe. */
+  versionTimeoutMs?: number;
+}
+
+/** Inputs for the injectable daemon status probe. */
+export interface DaemonStatusProbeInput {
+  /** Override myclaude home directory. */
+  home?: string;
+  /** Timeout for daemon connection attempts. */
+  attemptTimeoutMs?: number;
+}
+
+/** Injectable surface for daemon reachability/status. */
+export type DaemonStatusProbe = (
+  input: DaemonStatusProbeInput
+) => Promise<TransportDaemonStatusResult>;
+
+/** Options for {@link checkDaemonReachability}. */
+export interface CheckDaemonReachabilityOptions {
+  /** Override myclaude home directory. */
+  home?: string;
+  /** Environment used to honor forced standalone mode. */
+  env?: NodeJS.ProcessEnv;
+  /** Injectable status probe for deterministic tests. */
+  statusProbe?: DaemonStatusProbe;
+  /** Timeout for the default daemon connection probe. */
+  attemptTimeoutMs?: number;
+}
+
+/** Options for running and rendering all doctor checks. */
+export interface RunDoctorOptions {
+  /** Emit structured JSON. */
+  json?: boolean;
+  /** Pretty-print JSON output (implies json). */
+  pretty?: boolean;
+  /** Override myclaude home directory. */
+  home?: string;
+  /** Override working directory. */
+  cwd?: string;
+  /** Injectable keychain backend for tests. */
+  backend?: Backend;
+  /** Injectable environment for tests. */
+  env?: NodeJS.ProcessEnv;
+  /** Injectable Claude version probe for tests. */
+  claudeVersionProbe?: ClaudeVersionProbe;
+  /** Injectable daemon status probe for tests. */
+  daemonStatusProbe?: DaemonStatusProbe;
 }
 
 /**
@@ -144,7 +226,10 @@ export function checkScopeFiles(home?: string, cwd?: string): DoctorCheck[] {
  *
  * @param backend - Optional injected backend (for tests).
  */
-export async function checkKeychainBackend(backend?: Backend): Promise<DoctorCheck[]> {
+export async function checkKeychainBackend(
+  backend?: Backend,
+  env: NodeJS.ProcessEnv = process.env
+): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
 
   let b: Backend;
@@ -189,7 +274,7 @@ export async function checkKeychainBackend(backend?: Backend): Promise<DoctorChe
   }
 
   // Warn if MYCLAUDE_ALLOW_PLAINTEXT is set.
-  if (process.env.MYCLAUDE_ALLOW_PLAINTEXT === "1") {
+  if (env.MYCLAUDE_ALLOW_PLAINTEXT === "1") {
     checks.push({
       name: "allow-plaintext",
       status: "warn",
@@ -202,21 +287,88 @@ export async function checkKeychainBackend(backend?: Backend): Promise<DoctorChe
 }
 
 /**
- * Stub checks that are deferred to later sprints.
+ * Checks that the CLI's default `claude` command is executable and reports a version.
  */
-export function deferredChecks(): DoctorCheck[] {
-  return [
-    {
+export async function checkClaudeBinary(opts: CheckClaudeBinaryOptions = {}): Promise<DoctorCheck> {
+  const env = opts.env ?? process.env;
+  const commandPath = await findExecutableOnPath("claude", env);
+
+  if (!commandPath) {
+    return {
       name: "claude-binary",
-      status: "deferred",
-      message: "claude binary check (deferred — Sprint 3)",
-    },
-    {
+      status: "fail",
+      message: 'Claude binary not found: expected executable "claude" on PATH',
+      hint: "Install Claude Code and ensure `claude` is on PATH before running `myclaude launch`.",
+    };
+  }
+
+  const version = await (opts.versionProbe ?? defaultClaudeVersionProbe)({
+    commandPath,
+    env,
+    timeoutMs: opts.versionTimeoutMs ?? DEFAULT_CLAUDE_VERSION_TIMEOUT_MS,
+  });
+
+  if (!version) {
+    return {
+      name: "claude-binary",
+      status: "warn",
+      message: `Claude binary found: ${commandPath}, but version could not be read`,
+      hint: "Run `claude --version` directly to verify the installed Claude Code binary.",
+    };
+  }
+
+  return {
+    name: "claude-binary",
+    status: "pass",
+    message: `Claude binary found: ${commandPath} (${version})`,
+  };
+}
+
+/**
+ * Checks whether a daemon can be reached and can answer `daemon.status`.
+ */
+export async function checkDaemonReachability(
+  opts: CheckDaemonReachabilityOptions = {}
+): Promise<DoctorCheck> {
+  const env = opts.env ?? process.env;
+
+  if (env.MYCLAUDE_FORCE_STANDALONE === "1") {
+    return {
       name: "daemon",
-      status: "deferred",
-      message: "Daemon reachability check (deferred — Phase 2)",
-    },
-  ];
+      status: "warn",
+      message: "Daemon check skipped: MYCLAUDE_FORCE_STANDALONE=1",
+      hint: "Unset MYCLAUDE_FORCE_STANDALONE to let doctor probe the daemon.",
+    };
+  }
+
+  try {
+    const probeInput: DaemonStatusProbeInput = {
+      attemptTimeoutMs: opts.attemptTimeoutMs ?? DEFAULT_DAEMON_ATTEMPT_TIMEOUT_MS,
+    };
+    if (opts.home !== undefined) probeInput.home = opts.home;
+    const status = await (opts.statusProbe ?? defaultDaemonStatusProbe)(probeInput);
+    return {
+      name: "daemon",
+      status: "pass",
+      message: `Daemon reachable: pid ${status.pid}, socket ${status.socketPath}, sessions ${status.sessionCounts.active} active / ${status.sessionCounts.total} recent`,
+    };
+  } catch (err) {
+    if (err instanceof CliError && err.exitCode === EXIT_DAEMON_UNREACHABLE) {
+      return {
+        name: "daemon",
+        status: "warn",
+        message: "Daemon unreachable; standalone fallback will be used where supported",
+        hint: err.hint ?? "Start it with `myclaude daemon start`.",
+      };
+    }
+
+    return {
+      name: "daemon",
+      status: "fail",
+      message: `Daemon status probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      hint: "Run `myclaude daemon status` for the daemon-specific error.",
+    };
+  }
 }
 
 /**
@@ -234,13 +386,52 @@ export function renderCheck(check: DoctorCheck): void {
     case "fail":
       prefix = red("[✗]");
       break;
-    case "deferred":
-      prefix = "[ ]";
-      break;
   }
   process.stdout.write(`${prefix} ${check.message}\n`);
   if (check.hint && (check.status === "fail" || check.status === "warn")) {
     process.stdout.write(`    Fix: ${check.hint}\n`);
+  }
+}
+
+/**
+ * Runs all doctor checks and emits either human or JSON output.
+ */
+export async function runDoctor(opts: RunDoctorOptions = {}): Promise<void> {
+  const env = opts.env ?? process.env;
+  const keychainChecks = await checkKeychainBackend(opts.backend, env);
+  const claudeBinaryOptions: CheckClaudeBinaryOptions = { env };
+  if (opts.claudeVersionProbe !== undefined) {
+    claudeBinaryOptions.versionProbe = opts.claudeVersionProbe;
+  }
+  const daemonOptions: CheckDaemonReachabilityOptions = { env };
+  if (opts.home !== undefined) daemonOptions.home = opts.home;
+  if (opts.daemonStatusProbe !== undefined) {
+    daemonOptions.statusProbe = opts.daemonStatusProbe;
+  }
+  const checks: DoctorCheck[] = [
+    checkNodeVersion(),
+    ...checkVersions(),
+    ...checkScopeFiles(opts.home, opts.cwd),
+    ...keychainChecks,
+    await checkClaudeBinary(claudeBinaryOptions),
+    await checkDaemonReachability(daemonOptions),
+  ];
+
+  const hasFailures = checks.some((c) => c.status === "fail");
+
+  if (opts.json || opts.pretty) {
+    writeJson({ checks, healthy: !hasFailures }, Boolean(opts.pretty));
+    if (hasFailures) process.exit(1);
+    return;
+  }
+
+  for (const check of checks) {
+    renderCheck(check);
+  }
+
+  if (hasFailures) {
+    process.stdout.write("\nDiagnostics found issues. Run with --json for structured output.\n");
+    process.exit(1);
   }
 }
 
@@ -274,30 +465,70 @@ export const doctorCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const keychainChecks = await checkKeychainBackend();
-    const checks: DoctorCheck[] = [
-      checkNodeVersion(),
-      ...checkVersions(),
-      ...checkScopeFiles(args.home, args.cwd),
-      ...keychainChecks,
-      ...deferredChecks(),
-    ];
-
-    const hasFailures = checks.some((c) => c.status === "fail");
-
-    if (args.json || args.pretty) {
-      writeJson({ checks, healthy: !hasFailures }, Boolean(args.pretty));
-      if (hasFailures) process.exit(1);
-      return;
-    }
-
-    for (const check of checks) {
-      renderCheck(check);
-    }
-
-    if (hasFailures) {
-      process.stdout.write("\nDiagnostics found issues. Run with --json for structured output.\n");
-      process.exit(1);
-    }
+    const runOptions: RunDoctorOptions = {
+      json: Boolean(args.json),
+      pretty: Boolean(args.pretty),
+    };
+    if (typeof args.home === "string") runOptions.home = args.home;
+    if (typeof args.cwd === "string") runOptions.cwd = args.cwd;
+    await runDoctor(runOptions);
   },
 });
+
+async function defaultClaudeVersionProbe(input: ClaudeVersionProbeInput): Promise<string | null> {
+  try {
+    const { stdout, stderr } = await execFileAsync(input.commandPath, ["--version"], {
+      env: input.env,
+      timeout: input.timeoutMs,
+      windowsHide: true,
+    });
+    const output = [stdout, stderr]
+      .map((chunk) => String(chunk).trim())
+      .filter(Boolean)
+      .join("\n");
+    return output.split(/\r?\n/).find(Boolean) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function defaultDaemonStatusProbe(
+  input: DaemonStatusProbeInput
+): Promise<TransportDaemonStatusResult> {
+  const transportOptions: Parameters<typeof getTransport>[0] = { requireDaemon: true };
+  if (input.home !== undefined) transportOptions.home = input.home;
+  if (input.attemptTimeoutMs !== undefined)
+    transportOptions.attemptTimeoutMs = input.attemptTimeoutMs;
+
+  const transport = await getTransport(transportOptions);
+  try {
+    return await transport.daemonStatus();
+  } finally {
+    await transport.close();
+  }
+}
+
+async function findExecutableOnPath(
+  command: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const pathValue = env.PATH;
+  if (!pathValue) return null;
+
+  for (const dir of pathValue.split(delimiter)) {
+    if (!dir) continue;
+    const candidate = join(dir, command);
+    if (await isExecutable(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+async function isExecutable(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -15,21 +15,32 @@
  *   1. `--pretty` produces multi-line / indented JSON (contains "\n  ").
  *   2. `--pretty` alone (without `--json`) still emits JSON — it implies `--json`.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAuthList } from "../../src/commands/auth/list.js";
-import { doctorCommand } from "../../src/commands/doctor.js";
+import { runDoctor } from "../../src/commands/doctor.js";
 import { runCreate } from "../../src/commands/profile/create.js";
 import { profileListCommand } from "../../src/commands/profile/list.js";
 import { profileValidateCommand } from "../../src/commands/profile/validate.js";
 import { versionCommand } from "../../src/commands/version.js";
+import { MockBackend } from "../helpers/mock-backend.js";
 
 const FIXTURES_HOME = resolve(new URL("../fixtures/home/.myclaude", import.meta.url).pathname);
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "myclaude-pretty-"));
+}
+
+function makeExecutableClaude(): { root: string; bin: string } {
+  const root = makeTempDir();
+  const bin = join(root, "bin");
+  const command = join(bin, "claude");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(command, "#!/bin/sh\nexit 0\n");
+  chmodSync(command, 0o755);
+  return { root, bin };
 }
 
 function ctx(args: Record<string, unknown>, cmd: unknown): unknown {
@@ -68,15 +79,22 @@ describe("--pretty implies --json and produces indented JSON", () => {
   });
 
   it("doctor --pretty emits indented JSON", async () => {
-    await doctorCommand.run?.(
-      ctx(
-        { json: false, pretty: true, home: FIXTURES_HOME, cwd: FIXTURES_HOME },
-        doctorCommand
-      ) as Parameters<NonNullable<typeof doctorCommand.run>>[0]
-    );
-    expect(stdout).toContain('"checks"');
-    expect(stdout).toContain("\n  ");
-    expect(() => JSON.parse(stdout)).not.toThrow();
+    const fixture = makeExecutableClaude();
+    try {
+      await runDoctor({
+        pretty: true,
+        home: FIXTURES_HOME,
+        cwd: FIXTURES_HOME,
+        backend: new MockBackend("keychain-macos"),
+        env: { PATH: fixture.bin, MYCLAUDE_FORCE_STANDALONE: "1" },
+        claudeVersionProbe: async () => "claude 2.1.61",
+      });
+      expect(stdout).toContain('"checks"');
+      expect(stdout).toContain("\n  ");
+      expect(() => JSON.parse(stdout)).not.toThrow();
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("profile list --pretty emits indented JSON", async () => {
