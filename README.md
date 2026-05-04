@@ -126,10 +126,10 @@ Shipped in the current repo:
 - safeStorage/keychain-backed credential handling.
 - IPC cookie authentication plus the wired peer-verification hook.
 - Desktop release signing/notarization pipeline for macOS and Windows, with Linux M1 unsigned artifact verification.
+- Auto-update staged rollout for packaged macOS and Windows releases, gated by `MYCLAUDE_UPDATES` and release rollout metadata.
 
 Next or deferred:
 
-- Auto-update staged rollout.
 - Monorepo workspace detection and project-chain UX.
 - Enterprise mode and managed configuration.
 - Plugin SDK and first-party editor adapters.

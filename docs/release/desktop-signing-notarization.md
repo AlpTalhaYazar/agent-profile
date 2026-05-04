@@ -1,21 +1,22 @@
 # Desktop Signing and Notarization Runbook
 
-This runbook covers the Phase 3 Milestone 1 desktop release path for
-maintainers. The release workflow builds Electron Forge artifacts, verifies
-fuses and platform signing expectations, and can publish a draft GitHub
-Release from an existing `v*` tag.
+This runbook covers the Phase 3 desktop release path for maintainers. The
+release workflow builds Electron Forge artifacts, verifies fuses, platform
+signing expectations, and update metadata where supported, and can publish a
+draft GitHub Release from an existing `v*` tag.
 
 ## Current artifact matrix
 
 | Platform | Runner | Arch | Makers | Signing state | Verification |
 |---|---|---:|---|---|---|
-| macOS | `macos-15-intel` | `x64` | ZIP, DMG | Developer ID signed and notarized | signature + notarization required |
-| macOS | `macos-15` | `arm64` | ZIP, DMG | Developer ID signed and notarized | signature + notarization required |
-| Windows | `windows-2025` | `x64` | Squirrel | Authenticode signed | signature required |
+| macOS | `macos-15-intel` | `x64` | ZIP, DMG | Developer ID signed and notarized | signature + notarization + updater ZIP required |
+| macOS | `macos-15` | `arm64` | ZIP, DMG | Developer ID signed and notarized | signature + notarization + updater ZIP required |
+| Windows | `windows-2025` | `x64` | Squirrel | Authenticode signed | signature + Squirrel update metadata required |
 | Linux | `ubuntu-24.04` | `x64` | deb, rpm, ZIP | unsigned in Phase 3 M1 | unsigned artifacts allowed |
 
 There is no AppImage maker in Phase 3 M1. Linux GPG signing and AppImage
-distribution remain outside this milestone.
+distribution remain outside this milestone. Linux auto-update is also deferred
+to a future signed Linux distribution strategy.
 
 ## Release gate
 
@@ -113,6 +114,35 @@ Use the release workflow manually without publishing a GitHub Release:
 The workflow will package, make, verify, and upload artifacts as workflow
 artifacts. It will not create a GitHub Release.
 
+## Auto-update staged rollout
+
+Packaged macOS and Windows builds use the public GitHub update path through
+`update.electronjs.org`. The app checks updates only in packaged release builds
+after local policy gates pass. Dev, test, Vitest, unpackaged builds, Linux,
+Windows Squirrel first-run, and `MYCLAUDE_UPDATES=0` do not check the network.
+Headless daemon mode is also disabled by default unless `MYCLAUDE_UPDATES=1` is
+set explicitly.
+
+Publishing creates a release asset named `agent-profile-rollout.json`:
+
+```json
+{
+  "version": "0.0.1",
+  "channel": "stable",
+  "stagingPercentage": 5
+}
+```
+
+The default workflow value is `5`. Maintainers can ramp to `25` and `100` by
+replacing this JSON asset on the draft/published release. The staged rollout is
+client-side and deterministic: Main stores a random local install id and hashes
+it with the target version. This is not telemetry and does not upload machine,
+user, repo, profile, session, or secret data.
+
+There is no signed `latest.yml` in the current Forge pipeline. Do not describe
+update metadata as cryptographically signed; the signed artifacts are the app
+bundles/installers verified by this runbook.
+
 ## Tag publish
 
 Publishing always uses an existing `v*` tag. The workflow validates the tag for
@@ -137,9 +167,9 @@ Run these after `pnpm -C apps/desktop package` and
 `pnpm -C apps/desktop make` for the target platform and architecture:
 
 ```sh
-pnpm -C apps/desktop verify-release -- --platform darwin --arch x64 --require-signature --require-notarization
-pnpm -C apps/desktop verify-release -- --platform darwin --arch arm64 --require-signature --require-notarization
-pnpm -C apps/desktop verify-release -- --platform win32 --arch x64 --require-signature
+pnpm -C apps/desktop verify-release -- --platform darwin --arch x64 --require-signature --require-notarization --require-update-artifacts
+pnpm -C apps/desktop verify-release -- --platform darwin --arch arm64 --require-signature --require-notarization --require-update-artifacts
+pnpm -C apps/desktop verify-release -- --platform win32 --arch x64 --require-signature --require-update-artifacts
 pnpm -C apps/desktop verify-release -- --platform linux --arch x64 --unsigned-ok
 ```
 
@@ -205,3 +235,14 @@ rpm.
 
 Run both package and make for the same platform and architecture. The verifier
 looks under `apps/desktop/out/make/` and filters artifacts by architecture.
+
+### Missing update artifacts
+
+Symptom: `verify-release --require-update-artifacts` reports a missing macOS
+updater ZIP, Windows Squirrel `RELEASES`, or Windows `.nupkg`.
+
+For macOS, confirm the ZIP maker produced an architecture-specific ZIP under
+`apps/desktop/out/make/zip/darwin/<arch>/`. For Windows, confirm the Squirrel
+maker produced `RELEASES` and a `.nupkg` under the matching architecture
+directory. Linux does not support `--require-update-artifacts` in this
+milestone.

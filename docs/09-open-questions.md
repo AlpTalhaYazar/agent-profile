@@ -69,10 +69,16 @@ rush.json → package.json with "workspaces" field → git root
 
 **The question:** Offer `stable` / `beta` / `nightly`?
 
-**Working assumption:**
+**Decision (2026-05-04):** Phase 3 Milestone 2 ships `stable` only. Packaged
+macOS and Windows release builds use the public GitHub update path and a
+release asset named `agent-profile-rollout.json` for deterministic staged
+rollout. There is no `myclaude update --channel beta` command in this slice.
+
+**Working assumption for future channels:**
 
 - `stable` — default, signed releases, weekly cadence.
-- `beta` — opt-in via `myclaude update --channel beta`, bi-weekly cadence, same signing.
+- `beta` — deferred until there is clear demand; it needs an explicit channel
+  design before implementation.
 - No `nightly` in v1 — reduces CI cost and attack surface.
 
 **Revisit signal:** Community requests for rapid iteration on MCP client adapters.

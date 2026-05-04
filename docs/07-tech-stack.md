@@ -18,7 +18,7 @@ Citty for the CLI, Zod v4 for schemas, defu for merging, Electron Forge + plugin
 | Process spawn (one-shot) | **execa** | native `child_process`, `zx` | Ergonomic errors, reliable kill trees, promise-first |
 | Process spawn (interactive) | **node-pty** | native PTY, `@lydell/node-pty` | The maintained fork/current-origin lineage; PTY required for `claude`'s interactive UX |
 | Electron packaging | **Electron Forge** + `plugin-vite` + `plugin-fuses` | electron-builder | Forge ships first-class Fuses + Vite integration; builder is an acceptable fallback for heavy auto-update matrices |
-| Auto-update (future Phase 3) | **electron-updater** | builder's native update, Squirrel | Mature, staged rollouts, signed `latest.yml` once updater metadata ships |
+| Auto-update | **update-electron-app** + deterministic rollout manifest | electron-updater, update servers | Matches the current Forge + Squirrel maker path for public GitHub releases; electron-updater would require a larger metadata/packaging migration |
 | React | **React 19** | Vue, Svelte, SolidJS | Team familiarity, shadcn component library coverage |
 | UI kit | **shadcn/ui** + **Radix** | MUI, Mantine, Chakra | Tree/editor components, form primitives, accessibility by default |
 | State | **Jotai** (atomic) + **Zustand** (stores) | Redux Toolkit, MobX | Jotai for scope-tree atoms; Zustand for session/auth stores; small, typed, no boilerplate |
@@ -73,9 +73,10 @@ electron-builder is the historical market leader with the biggest feature surfac
 - **Vite plugin.** `@electron-forge/plugin-vite` scaffolds Renderer + Main + preload with HMR. Faster dev loop than builder's webpack config.
 - **Maintained by the Electron team.** Feature alignment with Electron releases is tighter.
 
-Future auto-update work is expected to use `electron-updater` from the builder
-ecosystem because it is the most battle-tested. Forge's updater story is
-acceptable, but builder's updater remains the reference implementation.
+Auto-update uses `update-electron-app` with `update.electronjs.org` for the
+current public GitHub release path. `electron-updater` remains a future option
+only if the project migrates the packaging metadata story; the current
+Squirrel.Windows maker path does not produce signed `latest.yml` metadata.
 
 ## Version constraints
 
@@ -156,16 +157,18 @@ The release verifier is
 [`apps/desktop/scripts/verify-release-artifacts.mjs`](../apps/desktop/scripts/verify-release-artifacts.mjs):
 
 ```sh
-pnpm -C apps/desktop verify-release -- --platform darwin --arch x64 --require-signature --require-notarization
-pnpm -C apps/desktop verify-release -- --platform darwin --arch arm64 --require-signature --require-notarization
-pnpm -C apps/desktop verify-release -- --platform win32 --arch x64 --require-signature
+pnpm -C apps/desktop verify-release -- --platform darwin --arch x64 --require-signature --require-notarization --require-update-artifacts
+pnpm -C apps/desktop verify-release -- --platform darwin --arch arm64 --require-signature --require-notarization --require-update-artifacts
+pnpm -C apps/desktop verify-release -- --platform win32 --arch x64 --require-signature --require-update-artifacts
 pnpm -C apps/desktop verify-release -- --platform linux --arch x64 --unsigned-ok
 ```
 
 Manual publish runs validate that `publish_release=true` includes an existing
 `v*` tag. Publish jobs create draft releases with
 `gh release create "$TAG" ... --draft --generate-notes --verify-tag`.
-Auto-update metadata and SBOM generation remain future release-hardening work.
+Auto-update rollout metadata is published as `agent-profile-rollout.json` on
+draft release publish runs. SBOM generation remains future release-hardening
+work.
 
 ## Related documents
 

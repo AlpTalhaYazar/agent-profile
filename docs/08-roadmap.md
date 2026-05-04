@@ -191,10 +191,16 @@ Phase 3 measurement stays local-only or GitHub-derived.
    [`release/desktop-signing-notarization.md`](release/desktop-signing-notarization.md).
 
 2. **Auto-update with staged rollouts (week 2–3)**
-   - `electron-updater` on GitHub Releases
-   - Signed `latest.yml`
-   - Monotonic version enforcement; downgrade-attack smoke tests
-   - Rollout percentages (`stagingPercentage: 5` → `25` → `100`)
+   - [x] Forge-native macOS/Windows auto-update checks through
+     `update.electronjs.org` for packaged release builds
+   - [x] Explicit kill switch (`MYCLAUDE_UPDATES=0`), dev/test/package gates,
+     headless default-off behavior, and Windows Squirrel first-run skip
+   - [x] Deterministic local staged rollout from
+     `agent-profile-rollout.json` (`stagingPercentage: 5` → `25` → `100`)
+   - [x] Release verifier checks macOS updater ZIP and Windows Squirrel
+     `RELEASES`/`.nupkg` metadata before publishing
+   - [ ] Signed `latest.yml` / electron-builder metadata is not part of the
+     current Forge path; Linux auto-update remains deferred
 
 3. **Monorepo support (week 3–4)**
    - `identify-monorepo-root` + pnpm-workspace / turbo / nx / lerna detection

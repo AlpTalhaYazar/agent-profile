@@ -199,9 +199,31 @@ Release workflow signing inputs are documented in
 
 ### Auto-update
 
-Auto-update is future Phase 3 work. The M1 signing pipeline does not ship
-`electron-updater` metadata, signed `latest.yml` files, staged rollout
-configuration, or downgrade-attack smoke tests.
+Phase 3 Milestone 2 ships packaged-release auto-update checks for macOS and
+Windows through Electron Forge's public GitHub update path
+(`update.electronjs.org`). The app does not use `electron-updater` in this
+milestone because the current Windows maker is Squirrel.Windows, while
+`electron-updater`'s simplified Windows path expects electron-builder metadata
+and does not support Squirrel.Windows.
+
+Auto-update checks are disabled when `MYCLAUDE_UPDATES=0`, in dev/test/Vitest,
+for unpackaged builds, on Linux, and during Windows `--squirrel-firstrun`.
+Headless daemon mode also defaults to disabled unless `MYCLAUDE_UPDATES=1` is
+set explicitly.
+
+Staged rollout is client-side. The release publishes
+`agent-profile-rollout.json` with `{ version, channel: "stable",
+stagingPercentage }`; Main stores a random local install id under Electron's
+user data directory, hashes it with the target version, and only starts the
+updater when the bucket is within the rollout percentage. The id is random and
+local-only; it is not derived from machine ids, usernames, repo paths, profile
+ids, session ids, or secret data.
+
+This milestone does not claim signed update metadata. There are no signed
+`latest.yml` files in the current Forge pipeline. Trust rests on HTTPS, GitHub
+Release permissions, and signed/notarized application artifacts for supported
+platforms. Linux auto-update remains deferred to a future signed Linux
+distribution strategy.
 
 ## Audit log
 
