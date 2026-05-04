@@ -14,7 +14,7 @@ const makeDir = join(outDir, "make");
 function usageError(message) {
   console.error(`verify-release: ${message}`);
   console.error(
-    "Usage: node ./scripts/verify-release-artifacts.mjs --platform darwin|win32|linux --arch x64|arm64 [--require-signature] [--require-notarization] [--unsigned-ok]"
+    "Usage: node ./scripts/verify-release-artifacts.mjs --platform darwin|win32|linux --arch x64|arm64 [--require-signature] [--require-notarization] [--unsigned-ok] [--require-update-artifacts]"
   );
   process.exit(2);
 }
@@ -31,6 +31,7 @@ function parseArgs(argv) {
     requireSignature: false,
     requireNotarization: false,
     unsignedOk: false,
+    requireUpdateArtifacts: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -47,6 +48,8 @@ function parseArgs(argv) {
       args.requireNotarization = true;
     } else if (arg === "--unsigned-ok") {
       args.unsignedOk = true;
+    } else if (arg === "--require-update-artifacts") {
+      args.requireUpdateArtifacts = true;
     } else {
       usageError(`unknown argument: ${arg}`);
     }
@@ -66,6 +69,9 @@ function parseArgs(argv) {
   }
   if (args.platform === "linux" && args.requireSignature) {
     usageError("Linux signing is not supported yet; use --unsigned-ok for Linux release artifacts");
+  }
+  if (args.platform === "linux" && args.requireUpdateArtifacts) {
+    usageError("Linux auto-update artifacts are not supported yet");
   }
 
   return args;
@@ -153,7 +159,7 @@ function verifyMac({ app, requireSignature, requireNotarization }) {
   }
 }
 
-function verifyMacArtifacts(arch) {
+function verifyMacArtifacts(arch, { requireUpdateArtifacts }) {
   const files = makeFilesForArch(arch);
   if (!files.some((file) => file.toLowerCase().endsWith(".dmg"))) {
     fail(`missing macOS DMG artifact for ${arch} under ${makeDir}`);
@@ -165,7 +171,8 @@ function verifyMacArtifacts(arch) {
         file.split(sep).join("/").includes(`/darwin/${arch}/`)
     )
   ) {
-    fail(`missing macOS ZIP artifact for ${arch} under ${makeDir}`);
+    const artifact = requireUpdateArtifacts ? "updater ZIP" : "ZIP";
+    fail(`missing macOS ${artifact} artifact for ${arch} under ${makeDir}`);
   }
 }
 
@@ -194,6 +201,17 @@ function verifyWindowsArtifacts(arch) {
   }
 
   return installers;
+}
+
+function verifyWindowsUpdateArtifacts(arch) {
+  const files = makeFilesForArch(arch);
+
+  if (!files.some((file) => basename(file) === "RELEASES")) {
+    fail(`missing Windows Squirrel RELEASES artifact for ${arch} under ${makeDir}`);
+  }
+  if (!files.some((file) => file.toLowerCase().endsWith(".nupkg"))) {
+    fail(`missing Windows Squirrel nupkg artifact for ${arch} under ${makeDir}`);
+  }
 }
 
 function verifyWindowsSignatures(packagedDir, installers) {
@@ -234,12 +252,15 @@ function main() {
   runFuses(paths.binary);
 
   if (args.platform === "darwin") {
-    verifyMacArtifacts(args.arch);
+    verifyMacArtifacts(args.arch, args);
     verifyMac({ ...paths, ...args });
   } else if (args.platform === "linux") {
     verifyLinuxArtifacts(args.arch);
   } else if (args.platform === "win32") {
     const installers = verifyWindowsArtifacts(args.arch);
+    if (args.requireUpdateArtifacts) {
+      verifyWindowsUpdateArtifacts(args.arch);
+    }
     if (args.requireSignature) {
       verifyWindowsSignatures(paths.packagedDir, installers);
     }

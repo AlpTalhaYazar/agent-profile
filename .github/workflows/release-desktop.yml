@@ -15,6 +15,11 @@ on:
         required: true
         default: false
         type: boolean
+      staging_percentage:
+        description: "Initial staged rollout percentage written to agent-profile-rollout.json when publishing."
+        required: true
+        default: "5"
+        type: string
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
       checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       publish_release: ${{ steps.resolve.outputs.publish_release }}
+      staging_percentage: ${{ steps.resolve.outputs.staging_percentage }}
 
     steps:
       - name: Resolve release inputs
@@ -42,12 +48,19 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          INPUT_STAGING_PERCENTAGE: ${{ inputs.staging_percentage }}
         run: |
           set -euo pipefail
 
           publish_release="false"
           release_tag=""
           checkout_ref="$REF"
+          staging_percentage="${INPUT_STAGING_PERCENTAGE:-5}"
+
+          if [[ ! "$staging_percentage" =~ ^[0-9]+$ ]] || (( staging_percentage < 0 || staging_percentage > 100 )); then
+            echo "staging_percentage must be an integer from 0 to 100." >&2
+            exit 1
+          fi
 
           if [[ "$EVENT_NAME" == "push" ]]; then
             release_tag="$REF_NAME"
@@ -73,6 +86,7 @@ jobs:
             echo "checkout_ref=$checkout_ref"
             echo "release_tag=$release_tag"
             echo "publish_release=$publish_release"
+            echo "staging_percentage=$staging_percentage"
           } >> "$GITHUB_OUTPUT"
 
   build:
@@ -90,21 +104,25 @@ jobs:
             platform: darwin
             arch: x64
             verify_flags: --require-signature --require-notarization
+            update_verify_flags: --require-update-artifacts
           - name: macos-15-darwin-arm64
             runner: macos-15
             platform: darwin
             arch: arm64
             verify_flags: --require-signature --require-notarization
+            update_verify_flags: --require-update-artifacts
           - name: windows-2025-win32-x64
             runner: windows-2025
             platform: win32
             arch: x64
             verify_flags: --require-signature
+            update_verify_flags: --require-update-artifacts
           - name: ubuntu-24.04-linux-x64
             runner: ubuntu-24.04
             platform: linux
             arch: x64
             verify_flags: --unsigned-ok
+            update_verify_flags: ""
 
     steps:
       - name: Checkout repository
@@ -125,6 +143,31 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        if: needs.preflight.outputs.release_tag != ''
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const tag = process.env.RELEASE_TAG;
+          const version = tag.replace(/^v/, "");
+          const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+          const desktopPackage = JSON.parse(readFileSync("apps/desktop/package.json", "utf8"));
+
+          if (!semverPattern.test(version)) {
+            throw new Error(`Release tag ${tag} must be a valid SemVer tag such as v1.2.3.`);
+          }
+          if (desktopPackage.version !== version) {
+            throw new Error(
+              `Release tag ${tag} does not match apps/desktop/package.json version ${desktopPackage.version}.`
+            );
+          }
+          NODE
 
       - name: Import Apple signing certificate and API key
         if: matrix.platform == 'darwin'
@@ -214,7 +257,7 @@ jobs:
         run: pnpm -C apps/desktop make -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
 
       - name: Verify release artifacts
-        run: pnpm -C apps/desktop verify-release -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} ${{ matrix.verify_flags }}
+        run: pnpm -C apps/desktop verify-release -- --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} ${{ matrix.verify_flags }} ${{ matrix.update_verify_flags }}
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
@@ -234,6 +277,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ needs.preflight.outputs.release_tag }}
+      STAGING_PERCENTAGE: ${{ needs.preflight.outputs.staging_percentage }}
 
     steps:
       - name: Validate release tag
@@ -250,6 +294,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+
+      - name: Create rollout manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          cat > release-artifacts/agent-profile-rollout.json <<EOF
+          {
+            "version": "$version",
+            "channel": "stable",
+            "stagingPercentage": $STAGING_PERCENTAGE
+          }
+          EOF
 
       - name: Create draft GitHub release
         shell: bash

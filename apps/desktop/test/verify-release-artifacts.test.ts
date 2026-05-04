@@ -78,9 +78,15 @@ describe("scripts/verify-release-artifacts.mjs", () => {
     mkdirSync(dirname(binary), { recursive: true });
     writeFileSync(binary, "fake binary");
 
-    mkdirSync(join(desktopRoot, "out", "make", "deb", "x64"), { recursive: true });
-    mkdirSync(join(desktopRoot, "out", "make", "rpm", "x64"), { recursive: true });
-    mkdirSync(join(desktopRoot, "out", "make", "zip", "linux", "x64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "deb", "x64"), {
+      recursive: true,
+    });
+    mkdirSync(join(desktopRoot, "out", "make", "rpm", "x64"), {
+      recursive: true,
+    });
+    mkdirSync(join(desktopRoot, "out", "make", "zip", "linux", "x64"), {
+      recursive: true,
+    });
     writeFileSync(join(desktopRoot, "out", "make", "deb", "x64", "agent-profile.deb"), "");
     writeFileSync(join(desktopRoot, "out", "make", "rpm", "x64", "agent-profile.rpm"), "");
     writeFileSync(join(desktopRoot, "out", "make", "zip", "linux", "x64", "agent-profile.zip"), "");
@@ -101,8 +107,12 @@ describe("scripts/verify-release-artifacts.mjs", () => {
     const binary = join(desktopRoot, "out", "AgentProfile-linux-arm64", "AgentProfile");
     mkdirSync(dirname(binary), { recursive: true });
     writeFileSync(binary, "fake binary");
-    mkdirSync(join(desktopRoot, "out", "make", "deb", "arm64"), { recursive: true });
-    mkdirSync(join(desktopRoot, "out", "make", "zip", "linux", "arm64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "deb", "arm64"), {
+      recursive: true,
+    });
+    mkdirSync(join(desktopRoot, "out", "make", "zip", "linux", "arm64"), {
+      recursive: true,
+    });
     writeFileSync(join(desktopRoot, "out", "make", "deb", "arm64", "agent-profile.deb"), "");
     writeFileSync(
       join(desktopRoot, "out", "make", "zip", "linux", "arm64", "agent-profile.zip"),
@@ -123,9 +133,15 @@ describe("scripts/verify-release-artifacts.mjs", () => {
     const binary = join(desktopRoot, "out", "AgentProfile-linux-x64", "AgentProfile");
     mkdirSync(dirname(binary), { recursive: true });
     writeFileSync(binary, "fake binary");
-    mkdirSync(join(desktopRoot, "out", "make", "deb", "x64"), { recursive: true });
-    mkdirSync(join(desktopRoot, "out", "make", "rpm", "x64"), { recursive: true });
-    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "x64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "deb", "x64"), {
+      recursive: true,
+    });
+    mkdirSync(join(desktopRoot, "out", "make", "rpm", "x64"), {
+      recursive: true,
+    });
+    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "x64"), {
+      recursive: true,
+    });
     writeFileSync(join(desktopRoot, "out", "make", "deb", "x64", "agent-profile.deb"), "");
     writeFileSync(join(desktopRoot, "out", "make", "rpm", "x64", "agent-profile.rpm"), "");
     writeFileSync(
@@ -163,7 +179,9 @@ describe("scripts/verify-release-artifacts.mjs", () => {
     const binary = join(app, "Contents", "MacOS", "AgentProfile");
     mkdirSync(dirname(binary), { recursive: true });
     writeFileSync(binary, "fake binary");
-    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "x64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "x64"), {
+      recursive: true,
+    });
     writeFileSync(join(desktopRoot, "out", "make", "AgentProfile-0.0.1-x64.dmg"), "");
     writeFileSync(
       join(desktopRoot, "out", "make", "zip", "darwin", "x64", "AgentProfile-darwin-x64.zip"),
@@ -179,7 +197,9 @@ describe("scripts/verify-release-artifacts.mjs", () => {
       /missing macOS DMG artifact for arm64/i
     );
 
-    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "arm64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "zip", "darwin", "arm64"), {
+      recursive: true,
+    });
     writeFileSync(join(desktopRoot, "out", "make", "AgentProfile-0.0.1-arm64.dmg"), "");
     writeFileSync(
       join(desktopRoot, "out", "make", "zip", "darwin", "arm64", "AgentProfile-darwin-arm64.zip"),
@@ -191,6 +211,24 @@ describe("scripts/verify-release-artifacts.mjs", () => {
       desktopRoot
     );
     expect(result.status).toBe(0);
+  });
+
+  it("requires a macOS updater ZIP when update artifacts are required", () => {
+    const desktopRoot = makeDesktopRoot();
+    const app = join(desktopRoot, "out", "AgentProfile-darwin-x64", "AgentProfile.app");
+    const binary = join(app, "Contents", "MacOS", "AgentProfile");
+    mkdirSync(dirname(binary), { recursive: true });
+    writeFileSync(binary, "fake binary");
+    mkdirSync(join(desktopRoot, "out", "make"), { recursive: true });
+    writeFileSync(join(desktopRoot, "out", "make", "AgentProfile-0.0.1-x64.dmg"), "");
+
+    const result = runVerifier(
+      ["--platform", "darwin", "--arch", "x64", "--unsigned-ok", "--require-update-artifacts"],
+      desktopRoot
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/missing macOS updater ZIP/i);
   });
 
   it("requires a Windows Setup.exe artifact even when unsigned artifacts are allowed", () => {
@@ -215,7 +253,9 @@ describe("scripts/verify-release-artifacts.mjs", () => {
     const binary = join(desktopRoot, "out", "AgentProfile-win32-arm64", "AgentProfile.exe");
     mkdirSync(dirname(binary), { recursive: true });
     writeFileSync(binary, "fake binary");
-    mkdirSync(join(desktopRoot, "out", "make", "squirrel.windows", "arm64"), { recursive: true });
+    mkdirSync(join(desktopRoot, "out", "make", "squirrel.windows", "arm64"), {
+      recursive: true,
+    });
     writeFileSync(
       join(desktopRoot, "out", "make", "squirrel.windows", "arm64", "AgentProfileSetup.exe"),
       ""
@@ -228,5 +268,47 @@ describe("scripts/verify-release-artifacts.mjs", () => {
 
     expect(result.status).toBe(0);
     expect(existsSync(binary)).toBe(true);
+  });
+
+  it("requires Windows Squirrel RELEASES and nupkg when update artifacts are required", () => {
+    const desktopRoot = makeDesktopRoot();
+    const binary = join(desktopRoot, "out", "AgentProfile-win32-x64", "AgentProfile.exe");
+    const makePath = join(desktopRoot, "out", "make", "squirrel.windows", "x64");
+    mkdirSync(dirname(binary), { recursive: true });
+    writeFileSync(binary, "fake binary");
+    mkdirSync(makePath, { recursive: true });
+    writeFileSync(join(makePath, "AgentProfileSetup.exe"), "");
+
+    const missingUpdateMetadata = runVerifier(
+      ["--platform", "win32", "--arch", "x64", "--unsigned-ok", "--require-update-artifacts"],
+      desktopRoot
+    );
+    expect(missingUpdateMetadata.status).not.toBe(0);
+    expect(`${missingUpdateMetadata.stdout}\n${missingUpdateMetadata.stderr}`).toMatch(
+      /missing Windows Squirrel RELEASES/i
+    );
+
+    writeFileSync(join(makePath, "RELEASES"), "");
+    writeFileSync(join(makePath, "AgentProfile-0.0.1-full.nupkg"), "");
+
+    const result = runVerifier(
+      ["--platform", "win32", "--arch", "x64", "--unsigned-ok", "--require-update-artifacts"],
+      desktopRoot
+    );
+    expect(result.status).toBe(0);
+  });
+
+  it("rejects update artifact requirements on Linux until Linux auto-update is supported", () => {
+    const result = runVerifier([
+      "--platform",
+      "linux",
+      "--arch",
+      "x64",
+      "--unsigned-ok",
+      "--require-update-artifacts",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/Linux auto-update artifacts/i);
   });
 });
