@@ -36,6 +36,7 @@ import { join } from "node:path";
 import { DaemonServer, type EvtT, type HandlerMap } from "@agent-profile/ipc-protocol";
 import type { WriteHandlerDeps } from "./handlers-write.js";
 import { type LifecycleHandle, createHandlers } from "./handlers.js";
+import { verifyPeer } from "./peer-auth.js";
 
 /** Local mirror of `sessionsRootDefault()` parameterised by home. */
 function sessionsRootFor(home: string): string {
@@ -193,6 +194,7 @@ export class DaemonLifecycle {
       serverVersion: opts.serverVersion,
       features,
       handlers,
+      verifyPeer,
     });
 
     await this.server.start();

@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectToSocket } from "../src/client.js";
 import { IpcError } from "../src/errors.js";
 import type { EvtSessionsEventT } from "../src/messages.js";
-import { DaemonServer, type Handler } from "../src/server.js";
+import { DaemonServer, type Handler, type PeerVerifier } from "../src/server.js";
 
 const skipOnWindows = process.platform === "win32";
 
@@ -76,6 +76,61 @@ describe.skipIf(skipOnWindows)("DaemonClient + DaemonServer over UDS", () => {
     } finally {
       client.close();
     }
+  });
+
+  it("runs peer verification before accepting the handshake", async () => {
+    const verifyPeer = vi.fn<PeerVerifier>(() => ({ ok: true as const }));
+
+    server = new DaemonServer({
+      socketPath,
+      cookie: "ck",
+      serverVersion: "0.1.0",
+      handlers: {},
+      verifyPeer,
+    });
+    await server.start();
+
+    const client = await connectToSocket({
+      socketPath,
+      clientVersion: "0.1.0",
+      cookie: "ck",
+    });
+    try {
+      expect(verifyPeer).toHaveBeenCalledTimes(1);
+      expect(verifyPeer.mock.calls[0]?.[0]).toBeDefined();
+    } finally {
+      client.close();
+    }
+  });
+
+  it("closes the socket before handshake data when peer verification denies", async () => {
+    const verifyPeer = vi.fn<PeerVerifier>(() => ({ ok: false as const, reason: "uid mismatch" }));
+    const onClientConnected = vi.fn();
+    const handler: Handler = vi.fn(async () => ({
+      pid: 1,
+      socketPath,
+      startedAtMs: 1,
+      sessionsRoot: "/tmp/sessions",
+    }));
+
+    server = new DaemonServer({
+      socketPath,
+      cookie: "ck",
+      serverVersion: "0.1.0",
+      handlers: { "daemon.status": handler },
+      verifyPeer,
+      onClientConnected,
+    });
+    await server.start();
+
+    await expect(
+      connectToSocket({ socketPath, clientVersion: "0.1.0", cookie: "ck" })
+    ).rejects.toMatchObject({ code: "DISCONNECTED" });
+    await new Promise((r) => setImmediate(r));
+
+    expect(verifyPeer).toHaveBeenCalledTimes(1);
+    expect(onClientConnected).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it("rejects a connection presenting a bad cookie", async () => {

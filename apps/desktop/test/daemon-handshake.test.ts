@@ -10,7 +10,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DaemonServer, type RespAuthListOkT, connectToSocket } from "@agent-profile/ipc-protocol";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type LifecycleHandle, createHandlers } from "../src/main/daemon/handlers.js";
 
 const skipOnWindows = process.platform === "win32";
@@ -122,5 +122,36 @@ authProfiles:
     await expect(
       connectToSocket({ socketPath, clientVersion: "0.1.0", cookie: "wrong" })
     ).rejects.toMatchObject({ code: "BAD_COOKIE" });
+  });
+
+  it("wires desktop peer verification into lifecycle-owned daemon servers", async () => {
+    const verifyPeer = vi.fn(() => ({ ok: false as const, reason: "blocked peer" }));
+    vi.resetModules();
+    vi.doMock("../src/main/daemon/peer-auth.js", () => ({ verifyPeer }));
+    const { DaemonLifecycle } = await import("../src/main/daemon/lifecycle.js");
+    const lifecycle = new DaemonLifecycle();
+
+    try {
+      await lifecycle.start({
+        socketPath,
+        cookie: "ck",
+        serverVersion: "0.1.0",
+        home,
+        pid: 123,
+        nowMs: 1,
+        requestShutdown: () => {
+          /* noop */
+        },
+      });
+
+      await expect(
+        connectToSocket({ socketPath, clientVersion: "0.1.0", cookie: "ck" })
+      ).rejects.toMatchObject({ code: "DISCONNECTED" });
+      expect(verifyPeer).toHaveBeenCalledTimes(1);
+    } finally {
+      await lifecycle.drainAndClose(500);
+      vi.doUnmock("../src/main/daemon/peer-auth.js");
+      vi.resetModules();
+    }
   });
 });

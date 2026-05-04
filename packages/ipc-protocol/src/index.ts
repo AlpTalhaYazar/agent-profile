@@ -76,4 +76,6 @@ export {
   type HandlerMap,
   type HandlerContext,
   type BroadcastPredicate,
+  type PeerVerificationResult,
+  type PeerVerifier,
 } from "./server.js";

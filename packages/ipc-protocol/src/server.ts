@@ -17,14 +17,13 @@
  *  - Tracks in-flight handlers so {@link DaemonServer.drainAndClose} can wait
  *    for them to finish before tearing down the listener.
  *
- * The server is **not** a complete daemon — peer-credential checks
- * (`SO_PEERCRED` / `LOCAL_PEEREID`) are the responsibility of the daemon host
- * (`apps/desktop`). The server here owns the wire-format and handshake-cookie
- * layer; the host wraps it with peer-auth, lifecycle, and capability tokens.
+ * The server is **not** a complete daemon — OS peer-credential inspection
+ * (`SO_PEERCRED` / `LOCAL_PEEREID`) is the responsibility of the daemon host.
+ * The server here owns the wire-format and handshake-cookie layer, and exposes
+ * a host-supplied peer-verification hook that runs before handshake data is read.
  */
 
-import { unlink } from "node:fs/promises";
-import { chmod } from "node:fs/promises";
+import { chmod, unlink } from "node:fs/promises";
 import * as net from "node:net";
 import { MessageDecoder, encodeMessage } from "./codec.js";
 import { IpcError } from "./errors.js";
@@ -77,6 +76,22 @@ export type Handler<TReq extends ReqT = ReqT> = (
  */
 export type HandlerMap = Partial<Record<ReqT["kind"], Handler>>;
 
+/** Host-owned peer verification result, evaluated before handshake data is read. */
+export type PeerVerificationResult =
+  | {
+      ok: true;
+      uid?: number | undefined;
+      pid?: number | undefined;
+      sid?: string | undefined;
+    }
+  | {
+      ok: false;
+      reason: string;
+    };
+
+/** Host-owned peer verification hook for newly accepted sockets. */
+export type PeerVerifier = (socket: net.Socket) => PeerVerificationResult;
+
 /** Constructor options for {@link DaemonServer}. */
 export interface DaemonServerOptions {
   /** Filesystem socket path (POSIX) or `\\.\pipe\...` (Windows). */
@@ -89,6 +104,8 @@ export interface DaemonServerOptions {
   features?: string[];
   /** Per-kind handler map. `hello` is handled internally and ignored if present. */
   handlers: HandlerMap;
+  /** Optional host-owned peer verifier. Denied peers are dropped before `hello`. */
+  verifyPeer?: PeerVerifier;
   /** Optional callback fired after a successful handshake on a new connection. */
   onClientConnected?: (socket: net.Socket) => void;
   /** Optional callback fired when a connection is fully closed. */
@@ -136,6 +153,10 @@ export class DaemonServer {
   constructor(opts: DaemonServerOptions) {
     this.opts = opts;
     this.server = net.createServer((socket) => {
+      if (!this.verifyAcceptedPeer(socket)) {
+        socket.destroy();
+        return;
+      }
       this.handleConnection(socket);
     });
   }
@@ -297,6 +318,15 @@ export class DaemonServer {
       }
       this.opts.onClientDisconnected?.(socket);
     });
+  }
+
+  private verifyAcceptedPeer(socket: net.Socket): boolean {
+    if (!this.opts.verifyPeer) return true;
+    try {
+      return this.opts.verifyPeer(socket).ok;
+    } catch {
+      return false;
+    }
   }
 
   // ─── Internal accessors used by ConnectionState ─────────────────────────────

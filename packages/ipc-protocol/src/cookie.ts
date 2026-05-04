@@ -7,8 +7,9 @@
  * persisted to `<myClaudeHome>/ipc-cookie` (canonically `~/.myclaude/ipc-cookie`)
  * with mode `0600`. The CLI reads it on connect and sends it as the first
  * message of the handshake; the daemon compares against its in-memory copy.
- * See `docs/06-security.md` "IPC authentication" for the full triple-gate
- * (filesystem perms + euid + cookie) rationale.
+ * See `docs/06-security.md` "IPC authentication" for the daemon IPC
+ * rationale. This helper enforces the boot-cookie file layer; peer credential
+ * enforcement is host-owned.
  *
  * Path-arg convention: every helper here takes the **myclaude dir itself**
  * (e.g. `/Users/x/.myclaude`), matching the project-wide `myClaudeHome()`
