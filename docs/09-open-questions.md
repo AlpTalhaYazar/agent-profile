@@ -34,14 +34,19 @@ Similarly for agents/skills/commands: **copy (working)** vs symlink (Windows-hos
 
 ### 3. Monorepo detection fallback order
 
-**The question:** When `identify-monorepo-root` returns nothing, what's the walk order for marker files?
+**The question:** What is the walk order for monorepo marker files?
 
-**Working assumption:**
+**Decision (2026-05-04):** Phase 3 Milestone 3 ships manual marker detection
+without adding `identify-monorepo-root`. The detection order is:
 
 ```
 pnpm-workspace.yaml → nx.json → turbo.json → lerna.json →
 rush.json → package.json with "workspaces" field → git root
 ```
+
+Only the current root-to-`cwd` chain is surfaced as workspace candidates in
+v1. Marker-only directories do not become cascade scopes unless they contain
+`.myclaude/`, and lockfiles are not treated as workspace markers.
 
 **Risk:** Custom monorepos (yarn v1 workspaces, hand-rolled setups) may not hit any marker.
 

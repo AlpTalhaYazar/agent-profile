@@ -127,10 +127,11 @@ Shipped in the current repo:
 - IPC cookie authentication plus the wired peer-verification hook.
 - Desktop release signing/notarization pipeline for macOS and Windows, with Linux M1 unsigned artifact verification.
 - Auto-update staged rollout for packaged macOS and Windows releases, gated by `MYCLAUDE_UPDATES` and release rollout metadata.
+- Monorepo workspace detection for the current root-to-package chain, plus a compact desktop `cwd` candidate picker.
 
 Next or deferred:
 
-- Monorepo workspace detection and project-chain UX.
+- Sibling workspace glob expansion and broader monorepo management UX.
 - Enterprise mode and managed configuration.
 - Plugin SDK and first-party editor adapters.
 - Full telemetry/Sentry, deferred until privacy-safe event taxonomy, opt-in policy, and telemetry gates are complete.

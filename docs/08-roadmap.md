@@ -203,10 +203,18 @@ Phase 3 measurement stays local-only or GitHub-derived.
      current Forge path; Linux auto-update remains deferred
 
 3. **Monorepo support (week 3–4)**
-   - `identify-monorepo-root` + pnpm-workspace / turbo / nx / lerna detection
-   - Project chain resolution (root → deepest package)
-   - UI: picker for "which workspace should `cwd` count as?"
-   - Test repo with 3 levels of nested packages
+   - [x] Manual `pnpm-workspace.yaml` / `nx.json` / `turbo.json` /
+     `lerna.json` / `rush.json` / `package.json#workspaces` / git fallback
+     detection
+   - [x] Project chain resolution stays root → deepest package for `.myclaude`
+     layers
+   - [x] UI: compact desktop picker for "which workspace should `cwd` count
+     as?"
+   - [x] Temp test repo fixture with nested package levels
+
+   **Status:** Shipped on `main` (2026-05-04). V1 detects the current
+   root-to-`cwd` candidate chain; sibling workspace glob expansion remains
+   deferred.
 
 4. **Enterprise mode gate (week 4–5)**
    - Confirm whether any design-partner organization needs managed config or audit export
