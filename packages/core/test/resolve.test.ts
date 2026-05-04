@@ -305,4 +305,50 @@ describe("resolve() end-to-end", () => {
 
     expect(result.effective.auth?.profileId).toBe("work");
   });
+
+  it("applies monorepo .myclaude layers from root to deepest package", () => {
+    const tmpDir = join(tmpdir(), `resolve-monorepo-test-${Date.now()}`);
+    const globalDir = join(tmpDir, "config");
+    const fragmentsDir = join(globalDir, "fragments");
+    const repoDir = join(tmpDir, "repo");
+    const packageDir = join(repoDir, "apps", "web");
+    const cwd = join(packageDir, "src");
+
+    mkdirSync(join(globalDir, "global"), { recursive: true });
+    mkdirSync(fragmentsDir, { recursive: true });
+    mkdirSync(join(repoDir, ".myclaude"), { recursive: true });
+    mkdirSync(join(packageDir, ".myclaude"), { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(repoDir, "pnpm-workspace.yaml"), 'packages:\n  - "apps/*"\n');
+    writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "web" }));
+    writeFileSync(
+      join(repoDir, ".myclaude", "shared.yml"),
+      `version: 1
+env:
+  CHAIN_VALUE: root
+  ROOT_ONLY: yes
+`
+    );
+    writeFileSync(
+      join(packageDir, ".myclaude", "shared.yml"),
+      `version: 1
+env:
+  CHAIN_VALUE: package
+  PACKAGE_ONLY: yes
+`
+    );
+
+    const result = resolve({
+      role: "backend",
+      cwd,
+      globalConfigDir: globalDir,
+      fragmentDirs: [fragmentsDir],
+    });
+
+    expect(result.effective.env).toMatchObject({
+      CHAIN_VALUE: "package",
+      ROOT_ONLY: "yes",
+      PACKAGE_ONLY: "yes",
+    });
+  });
 });

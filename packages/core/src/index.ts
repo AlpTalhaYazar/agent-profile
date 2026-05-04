@@ -69,3 +69,11 @@ export { CascadeError, SchemaError, FragmentNotFoundError, CoreError } from "./e
 
 export { loadScopeFile, loadYamlAs, readYamlFile } from "./utils/load-yaml.js";
 export { findProjectChain } from "./utils/project-chain.js";
+export {
+  MONOREPO_MARKER_ORDER,
+  findMonorepoRoot,
+  findWorkspaceCandidates,
+  type MonorepoMarker,
+  type MonorepoRoot,
+  type WorkspaceCandidate,
+} from "./utils/monorepo.js";

@@ -124,4 +124,20 @@ describe("profileCreateScopeService", () => {
       })
     ).toThrow(/Role name must match/);
   });
+
+  it("keeps project scope creation pinned to the explicit cwd", () => {
+    const repoDir = join(root, "monorepo");
+    const packageDir = join(repoDir, "apps", "web");
+    mkdirSync(packageDir, { recursive: true });
+
+    const result = profileCreateScopeService({
+      home,
+      cwd: packageDir,
+      location: "project",
+      layerType: "shared",
+    });
+
+    expect(result.path).toBe(join(packageDir, ".myclaude", "shared.yml"));
+    expect(readFileSync(result.path, "utf8")).toContain("version: 1");
+  });
 });

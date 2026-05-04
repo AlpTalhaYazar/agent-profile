@@ -77,6 +77,18 @@ describe("use and unuse commands", () => {
     expect(existsSync(join(markerDir, "auth"))).toBe(false);
   });
 
+  it("use does not write activation state to marker-only monorepo roots", () => {
+    const repoDir = join(tempDir, "repo");
+    const packageDir = join(repoDir, "apps", "web");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(join(repoDir, "pnpm-workspace.yaml"), 'packages:\n  - "apps/*"\n');
+
+    runUse({ role: "backend", cwd: packageDir });
+
+    expect(existsSync(join(repoDir, ".myclaude"))).toBe(false);
+    expect(readFileSync(join(packageDir, ".myclaude", "role"), "utf8")).toBe("backend\n");
+  });
+
   it("use rejects blank role and blank auth values", () => {
     expect(() => runUse({ role: "  ", cwd: tempDir })).toThrow(CliError);
     expect(() => runUse({ role: "backend", auth: "  ", cwd: tempDir })).toThrow(CliError);

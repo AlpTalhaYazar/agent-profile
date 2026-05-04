@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { findWorkspaceCandidates } from "./monorepo.js";
 
 /**
  * The marker directory that identifies a "myclaude project root".
@@ -27,7 +28,7 @@ export function findProjectChain(startDir: string): string[] {
   let current = resolve(startDir);
 
   while (true) {
-    const candidate = resolve(current, MYCLAUDE_DIR);
+    const candidate = join(current, MYCLAUDE_DIR);
     if (existsSync(candidate)) {
       chain.unshift(current); // prepend so root comes first
     }
@@ -40,5 +41,42 @@ export function findProjectChain(startDir: string): string[] {
     current = parent;
   }
 
-  return chain;
+  return dedupeProjectChain([
+    ...chain,
+    ...findWorkspaceCandidates(startDir)
+      .filter((candidate) => candidate.hasMyClaude)
+      .map((candidate) => candidate.path),
+  ]);
+}
+
+function dedupeProjectChain(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const path of paths) {
+    const key = realpathKey(path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(path);
+  }
+
+  return result.sort((left, right) => pathDepth(left) - pathDepth(right));
+}
+
+function pathDepth(path: string): number {
+  return path.split(/[\\/]+/).filter(Boolean).length;
+}
+
+function realpathKey(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    const parent = dirname(path);
+    if (parent === path) return path;
+    try {
+      return join(realpathSync.native(parent), basename(path));
+    } catch {
+      return path;
+    }
+  }
 }
