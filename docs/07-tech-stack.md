@@ -40,9 +40,9 @@ oclif is the industry default for large CLIs (Heroku, Salesforce). It's mature, 
 
 - **Cold-start latency matters.** Every `myclaude` invocation connects to the daemon. The CLI's own startup must be invisible. Citty's lazy command loading is ~5× faster than oclif's at baseline.
 - **UnJS ecosystem fit.** We already use `defu` (UnJS) and `consola` pairs well with Citty for consistent terminal UX.
-- **No plugin story needed in v1.** oclif's biggest win is plugin discovery. Phase 3's plugin SDK is v2 scope; until then, Citty is simpler.
+- **No plugin discovery needed in v1.** The Phase 3 Plugin SDK gate is closed as deferred; current agent-builder support comes through persona assets and Claude Code skills, not a `myclaude` plugin runtime. Citty remains the simpler fit.
 
-If the plugin surface grows, migration to oclif is mechanical (both use exported command objects; both generate help).
+If concrete SDK or third-party adapter demand later opens the gate, reassess the CLI framework as part of the SDK design; migration to oclif remains mechanical (both use exported command objects; both generate help).
 
 ## Why defu (not deepmerge-ts)
 

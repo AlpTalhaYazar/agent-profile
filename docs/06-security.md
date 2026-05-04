@@ -20,7 +20,7 @@ Agent Profile handles user credentials (Anthropic API keys, GitHub PATs, databas
 | **Info disclosure** | Crash dump contains secrets | Crashpad redaction filters; secret fields tagged in memory to skip serialization |
 | **Denial of service** | Malicious process creates infinite session dirs | Per-user session quota (default 256); GC on session end + daily sweep; rate limit on `resolve` calls per minute |
 | **Denial of service** | Main daemon hang wedges all launches | CLI times out on IPC in 5s and offers standalone fallback or diagnostics |
-| **Elevation of privilege** | Plugin executes arbitrary code in Main's address space | Plugins run in a `vm`/`isolated-vm` sandbox with no `fs`/`net` by default; capability tokens required for every privileged call |
+| **Elevation of privilege** | Future plugin code executes with broader privileges than intended | Plugin SDK runtime is deferred and no plugin code is loaded today. If the gate opens later, the design must define a sandbox model with no `fs`/`net` by default, explicit capability tokens for privileged calls, and a secret-access boundary before implementation. |
 | **Elevation of privilege** | Attacker uses our signed binary as a code-execution proxy (`RunAsNode` attack) | Fuse disabled: `RunAsNode=false`, `EnableNodeCliInspectArguments=false` |
 
 ## Credential storage

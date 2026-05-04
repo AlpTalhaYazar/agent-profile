@@ -255,10 +255,26 @@ Phase 3 measurement stays local-only or GitHub-derived.
      manager/registry owner; the current `mtime` orphan fallback and registry
      retained/running protections remain unchanged
 
-6. **Plugin SDK gate (week 6–8)**
-   - Start only if core handoff usage or agent-builder demand justifies platform expansion
-   - If the gate opens, design the stable TypeScript API, sandbox model, SDK docs, and sample plugin before implementation
-   - Otherwise continue core handoff, reliability, auto-update, or monorepo work
+6. **Plugin SDK gate (week 6–8)** — *Status: closed as deferred on `main` (2026-05-04)*
+   - [x] Reviewed roadmap, product notes, open-source health metrics, README/security/tech docs, persona/skills surfaces, and repo searches for Plugin SDK, plugin runtime, editor adapters, sandbox dependencies, and named integration demand
+   - [x] Current supported agent-builder path is persona-based: repo-local `.myclaude`, `CLAUDE.md` fragments, agents, skills, slash commands, memory seeds, Persona Composer, and skills.sh install/attach
+   - [x] No repo evidence found for repeated verified handoff usage, concrete agent-builder demand, third-party adapter requests, named adapter maintainers, sample plugin requests, or an implemented sandbox/runtime dependency
+   - [x] Keep Plugin SDK runtime, third-party adapter API, VS Code/Cursor/Cline/Goose adapters, sandboxed plugin execution, sample plugin, and plugin registry deferred
+
+   If this gate opens later, write the design before implementation. That
+   design must cover stable TypeScript API, capability model, sandbox model,
+   no `fs`/`net` by default, secret-access boundary, adapter lifecycle, sample
+   plugin contract, and threat model.
+
+   **Revisit signals:** repeated verified handoff usage, concrete
+   agent-builder requests, named adapter maintainer/use case, repeated need to
+   customize secret backends or role activation hooks, or third-party
+   integration demand that cannot be served by the current persona/skills
+   model.
+
+   **Next target direction:** continue core handoff, reliability, distribution,
+   package-manager readiness, or remaining monorepo work before enterprise or
+   plugin expansion.
 
 ### Exit criteria
 
@@ -266,7 +282,7 @@ Phase 3 measurement stays local-only or GitHub-derived.
   distribution artifacts, and auto-update support for the platforms that
   support signed update metadata.
 - One design-partner organization running the build in production for 4 weeks without a P0 incident.
-- Plugin SDK either remains deferred behind core handoff usage signal or ships with at least one third-party adapter in existence.
+- Plugin SDK gate is explicitly closed as deferred unless core handoff usage signal or agent-builder demand later justifies a design-first SDK effort.
 - Full telemetry/Sentry remains deferred unless the privacy-safe event taxonomy, consent copy, redaction tests, and kill-switch tests are complete.
 - Homebrew + Windows Package Manager + apt/yum repos live.
 

@@ -445,6 +445,36 @@ format, security model, migration path, and admin/user failure modes.
 
 ---
 
+### 32. Plugin SDK gate (resolved Phase 3 milestone 6)
+
+**The question:** Should Phase 3 start a Plugin SDK now: stable TypeScript API,
+third-party adapter API, VS Code/Cursor/Cline/Goose adapters, sandboxed plugin
+execution, sample plugin, or plugin registry?
+
+**Decision (2026-05-04):** Defer Plugin SDK. Repo evidence does not show
+repeated verified handoff usage, concrete agent-builder demand, named
+third-party adapter requests, named adapter maintainers, sample plugin
+requests, or an existing sandbox/runtime dependency. The current supported
+agent-builder path remains persona assets through repo-local `.myclaude`,
+`CLAUDE.md` fragments, agents, skills, slash commands, memory seeds, Persona
+Composer, and skills.sh install/attach.
+
+**Explicitly deferred:** Plugin SDK runtime, third-party adapter API,
+VS Code/Cursor/Cline/Goose adapters, sandboxed plugin execution, sample
+plugin, and plugin registry.
+
+**Revisit signal:** Repeated verified handoff usage; concrete agent-builder
+requests; a named adapter maintainer or use case; repeated need to customize
+secret backends or role activation hooks; or third-party integration demand
+that cannot be served by the current persona/skills model.
+
+**If the gate opens:** Write the SDK design before implementation. It must
+define stable TypeScript API, capability model, sandbox model, no `fs`/`net`
+by default, secret-access boundary, adapter lifecycle, sample plugin contract,
+and threat model.
+
+---
+
 ## How decisions are recorded
 
 Once a question resolves, we:

@@ -133,8 +133,10 @@ Next or deferred:
 
 - Sibling workspace glob expansion and broader monorepo management UX.
 - Enterprise mode and managed configuration, deferred until design-partner evidence asks for it.
-- Plugin SDK and first-party editor adapters.
+- Plugin SDK, sandboxed plugin execution, sample plugins, plugin registry, and first-party editor adapters, deferred until repeated core handoff usage or concrete agent-builder demand justifies platform expansion.
 - Full telemetry/Sentry, deferred until privacy-safe event taxonomy, opt-in policy, and telemetry gates are complete.
+
+Current agent-builder support is intentionally persona-based: repo-local `.myclaude` scopes can point at `CLAUDE.md` fragments, agents, skills, slash commands, and memory seeds, and the desktop Profile Workspace can install and attach Claude Code skills.
 
 ## Documentation
 
