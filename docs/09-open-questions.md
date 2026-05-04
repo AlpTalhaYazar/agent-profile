@@ -256,9 +256,11 @@ Current canonical fields:
 
 ### 21. Peer-uid check on POSIX (raised by Sprint 2)
 
-**The question:** Node has no built-in `SO_PEERCRED` (Linux), `LOCAL_PEEREID` (macOS), or equivalent binding. [`docs/06-security.md` § "IPC authentication"](06-security.md) calls for a peer-uid check on `accept`. This sprint cannot satisfy that without a native module.
+**The question:** Node has no built-in `SO_PEERCRED` (Linux), `LOCAL_PEEREID` (macOS), or equivalent binding. [`docs/06-security.md` § "IPC authentication"](06-security.md) calls for a peer-uid check on `accept`. This cannot be truly enforced without a native module.
 
-**Working assumption (Phase 2 milestone 2):** The `0600` socket file plus per-user runtime-dir gating (`$XDG_RUNTIME_DIR` or `/tmp/myclaude-<uid>.sock` mode `0600`) provides same-user gating today. Combined with the cookie handshake and version check, the triple gate still requires (a) being the same local user, (b) reading a `0600` file, and (c) connecting before the cookie rotates. Acceptable under the same-user threat model.
+**Decision (2026-05-04):** `packages/ipc-protocol` now exposes a host-owned peer-verification hook that runs immediately after socket accept and before handshake data is read. `apps/desktop` wires its `verifyPeer` function into that hook, but `verifyPeer` remains a documented pass-through until native OS peer credentials are available.
+
+**Working assumption:** The `0600` socket file plus per-user runtime-dir gating (`$XDG_RUNTIME_DIR` or `/tmp/myclaude-<uid>.sock` mode `0600`) provides the different-user barrier on POSIX today. Combined with the cookie handshake and version check, this remains acceptable under the same-user threat model while the native peer-credential layer is pending.
 
 **Revisit signal:** Adopt a small native module (or a Node N-API binding to `getpeereid`/`getsockopt(SO_PEERCRED)`) when one of: (a) a same-user-different-process confused-deputy scenario surfaces in security review; (b) Node ships a built-in API for peer credentials; (c) the daemon ever runs setuid or with elevated privileges (it does not today and is not expected to).
 

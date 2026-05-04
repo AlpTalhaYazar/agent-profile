@@ -2,13 +2,13 @@
 
 ## TL;DR
 
-Agent Profile handles user credentials (Anthropic API keys, GitHub PATs, database passwords, MCP OAuth tokens) and runs a local IPC daemon that other processes on the machine can try to reach. The design rests on four invariants: (1) secrets live only in the OS keychain and the Electron Main process memory, never on disk or in env vars, never in the Renderer; (2) IPC is gated by filesystem permissions, a per-boot cookie, and `euid` checks; (3) Claude Code receives secrets through helper scripts driven by short-lived capability tokens — not through env vars; (4) release builds are ASAR-verified, use Electron Fuses to disable attack surfaces like `--inspect` and `RunAsNode`, and enforce platform signing/notarization where Phase 3 Milestone 1 supports it.
+Agent Profile handles user credentials (Anthropic API keys, GitHub PATs, database passwords, MCP OAuth tokens) and runs a local IPC daemon that other processes on the machine can try to reach. The design rests on four invariants: (1) secrets live only in the OS keychain and the Electron Main process memory, never on disk or in env vars, never in the Renderer; (2) IPC is gated today by filesystem permissions and a per-boot cookie, with a host-owned peer-verification hook wired before handshake data is read; native `euid` enforcement remains a tracked hardening item; (3) Claude Code receives secrets through helper scripts driven by short-lived capability tokens — not through env vars; (4) release builds are ASAR-verified, use Electron Fuses to disable attack surfaces like `--inspect` and `RunAsNode`, and enforce platform signing/notarization where Phase 3 Milestone 1 supports it.
 
 ## Threat model (STRIDE)
 
 | Category | Threat | Control |
 |---|---|---|
-| **Spoofing** | Another local user connects to the IPC socket | UDS mode `0600` (POSIX) or ACL-restricted pipe (Windows); `euid(peer) == euid(self)` check via `SO_PEERCRED`/`LOCAL_PEEREID`; handshake cookie |
+| **Spoofing** | Another local user connects to the IPC socket | UDS mode `0600` (POSIX); per-boot handshake cookie; peer-verification hook wired before `hello`. Native `euid(peer) == euid(self)` and explicit Windows pipe DACL enforcement are future hardening items. |
 | **Spoofing** | A malicious local process running as the same user impersonates the CLI | Handshake cookie regenerated per daemon boot; capability tokens are per-session; Anthropic API key never cached outside Main |
 | **Tampering** | Attacker edits ephemeral session files mid-launch | Session dir mode `0600`; content written atomically via temp + rename; session TTL ≤ session lifetime; file checksums in audit log |
 | **Tampering** | Attacker replaces `~/.myclaude/ipc-cookie` | File is `0600`; rotated on every daemon boot; stale cookie fails handshake |
@@ -73,23 +73,23 @@ The `MYCLAUDE_ALLOW_PLAINTEXT` escape hatch is deliberately verbose. The CLI sti
 
 ## IPC authentication
 
-Three layers, all required:
+The current daemon has two enforced layers plus a host-owned peer-verification hook:
 
 ### 1. Filesystem permissions
 
 - POSIX UDS path: `$XDG_RUNTIME_DIR/myclaude.sock`, mode `0600`, owned by the user.
 - Fallback on macOS where `$XDG_RUNTIME_DIR` is rarely set: `/tmp/myclaude-<uid>.sock`, mode `0600`, owner-only.
-- Windows Named Pipe: discretionary ACL restricts to the current user's SID.
+- Windows Named Pipe: the path is per-user named; explicit DACL enforcement is tracked with the native peer-auth work.
 
-### 2. `euid` peer check
+### 2. Peer-verification hook
 
-On `accept`, Main calls `SO_PEERCRED` (Linux), `LOCAL_PEEREID` (macOS), or the Win32 equivalent to read the peer's effective user ID and process ID. A mismatch (peer `euid ≠` Main `euid`) closes the socket before any application data is read.
+On `accept`, `DaemonServer` runs the desktop-owned `verifyPeer(socket)` hook before it creates the handshake decoder. If the hook returns `{ ok: false }` or throws, the socket is closed before any protocol frame is processed. As of this milestone, `verifyPeer` is a documented pass-through because Node does not expose `SO_PEERCRED` (Linux), `LOCAL_PEEREID` (macOS), or the Win32 equivalent without a native binding.
 
 ### 3. Handshake cookie
 
 A 32-byte random cookie is generated on every daemon boot and written to `~/.myclaude/ipc-cookie` (mode `0600`). The CLI reads this file and sends it as the first message. Main compares against the in-memory cookie and closes on mismatch.
 
-This triple-gate design means an attacker would need: (a) to be the same local user, (b) to read a 0600 file, and (c) to reach the socket before the cookie rotates. A compromised *different* local user (e.g., via a shared CI runner) cannot connect at all.
+Current enforcement means an attacker must reach the socket and present the per-boot cookie. On POSIX, owner-only socket permissions are the different-user barrier; true OS peer-credential enforcement remains tracked in [`09-open-questions.md`](09-open-questions.md).
 
 ## Capability tokens
 
