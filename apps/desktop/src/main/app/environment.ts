@@ -9,6 +9,10 @@ export function isHeadless(argv: string[] = process.argv, env = process.env): bo
   return argv.includes("--headless");
 }
 
+export function isTestEnvironment(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === "test" || env.VITEST === "true";
+}
+
 export function resolveMyClaudeHome(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir()

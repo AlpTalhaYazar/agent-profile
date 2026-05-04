@@ -28,8 +28,11 @@
     "@agent-profile/ui": "workspace:*",
     "@homebridge/node-pty-prebuilt-multiarch": "0.13.1",
     "@xterm/xterm": "^6.0.0",
+    "electron-squirrel-startup": "^1.0.1",
     "jotai": "^2.10.1",
     "lucide-react": "^1.14.0",
+    "semver": "^7.7.4",
+    "update-electron-app": "^3.2.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -46,6 +49,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/semver": "^7.7.1",
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^2.1.0",
     "autoprefixer": "^10.4.20",

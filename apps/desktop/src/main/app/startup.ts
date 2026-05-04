@@ -10,6 +10,7 @@ import type { DaemonLifecycle } from "../daemon/lifecycle.js";
 import { buildSecretsStore } from "../daemon/secrets-store.js";
 import { registerRendererIpcHandlers } from "../ipc/register.js";
 import { createSecureWindow } from "../security.js";
+import { startAutoUpdateChecks } from "../update/service.js";
 import { preloadEntryPath, rendererEntryUrl } from "../window/entry.js";
 import { SERVER_VERSION, STARTUP_CWD, isHeadless, resolveMyClaudeHome } from "./environment.js";
 
@@ -73,6 +74,8 @@ export async function startup(opts: StartupOptions): Promise<StartupResult> {
   } catch {
     // Non-fatal; Renderer hooks fall back to polling after a down notice.
   }
+
+  void startAutoUpdateChecks({ appState: app }).catch(() => undefined);
 
   if (isHeadless()) {
     return eventClient ? { eventClient } : {};

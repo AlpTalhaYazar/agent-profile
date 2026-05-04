@@ -7,6 +7,7 @@
  */
 
 import { app } from "electron";
+import squirrelStartup from "electron-squirrel-startup";
 import { startup } from "./app/startup.js";
 import { type DaemonEventClient, stopDaemonEventClient } from "./daemon/events.js";
 import { DaemonLifecycle } from "./daemon/lifecycle.js";
@@ -35,7 +36,9 @@ app.on("window-all-closed", () => {
   // intentionally no-op
 });
 
-if (process.env.VITEST !== "true" && process.env.NODE_ENV !== "test") {
+if (squirrelStartup) {
+  app.quit();
+} else if (process.env.VITEST !== "true" && process.env.NODE_ENV !== "test") {
   void startup({ lifecycle })
     .then((result) => {
       eventClient = result.eventClient ?? null;
