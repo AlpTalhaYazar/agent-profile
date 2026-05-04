@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the cascade against Claude Code; Phase 1 (CLI Core, 6–8 weeks) ships a headless `myclaude` that fully launches sessions with correct `--mcp-config` isolation and keychain-backed secrets; Phase 2 (Electron GUI + Daemon, 8–10 weeks) adds the GUI, IPC daemon, and `safeStorage`; Phase 3 (Hardening & Distribution, 6–8 weeks) signs, notarizes, ships auto-update, handles monorepo edge cases, and adds the plugin SDK. The first public release target is end of Phase 2; GA is end of Phase 3.
+Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the cascade against Claude Code; Phase 1 (CLI Core, 6–8 weeks) ships a headless `myclaude` that fully launches sessions with correct `--mcp-config` isolation and keychain-backed secrets; Phase 2 (Electron GUI + Daemon, 8–10 weeks) adds the GUI, IPC daemon, and `safeStorage`; Phase 3 (Hardening & Distribution, 6–8 weeks) signs, notarizes, ships auto-update, handles monorepo edge cases, and gates plugin SDK or enterprise work on core handoff signal. The first public release target is end of Phase 2; GA is end of Phase 3.
 
 ## Phase 0 — Discovery & Prototype
 
@@ -167,7 +167,12 @@ Four phases over roughly six months: Phase 0 (prototype, 1–2 weeks) proves the
 **Owner:** 2 engineers + DevOps
 **Goal:** General availability. Signed and notarized macOS builds, signed
 Windows builds, verified Linux distribution artifacts, auto-update, monorepo
-support, enterprise mode, and plugin SDK.
+support, and explicit gates for enterprise mode and plugin SDK.
+
+Telemetry and crash-reporting work is gated by the privacy-safe taxonomy in
+[`open-source-health-metrics.md`](open-source-health-metrics.md). Until that
+taxonomy, consent copy, redaction tests, and kill-switch tests are complete,
+Phase 3 measurement stays local-only or GitHub-derived.
 
 ### Milestones
 
@@ -197,25 +202,21 @@ support, enterprise mode, and plugin SDK.
    - UI: picker for "which workspace should `cwd` count as?"
    - Test repo with 3 levels of nested packages
 
-4. **Enterprise mode (week 4–5)**
-   - Detect `managed-mcp.json` and gracefully degrade to read-only
-   - MDM-deployed `global-shared` scope (IT-controlled)
-   - Audit log export to syslog / JSONL / SIEM
-   - `MYCLAUDE_ENTERPRISE=1` mode that forbids keychain bypass
+4. **Enterprise mode gate (week 4–5)**
+   - Confirm whether any design-partner organization needs managed config or audit export
+   - Keep `managed-mcp.json`, MDM-deployed `global-shared`, SIEM export, and `MYCLAUDE_ENTERPRISE=1` deferred without that signal
+   - If signal exists, write the managed-configuration design before implementation
 
-5. **Error recovery & telemetry (week 5–6)**
-   - Crashpad with redaction filters
-   - Opt-in Sentry integration (respect `DO_NOT_TRACK`)
+5. **Error recovery & telemetry gates (week 5–6)**
+   - Privacy-safe event taxonomy and opt-in policy reviewed before any telemetry SDK
+   - No Crashpad, Sentry, PostHog, or network upload until redaction tests and kill switches pass
    - `myclaude doctor` with every known failure mode mapped to a fix suggestion
    - Partial-write recovery for all on-disk state (journal + atomic rename, Windows retry loop)
 
-6. **Plugin SDK (week 6–8)**
-   - Stable TypeScript API for third-party:
-     - MCP client adapters (VS Code, Cursor, Cline, Goose)
-     - Custom secret backends (Vault, AWS Secrets Manager, 1Password CLI)
-     - Role-activation hooks (run a script on `use`/`launch`)
-   - Plugin sandbox via `vm` or `isolated-vm`, no `fs`/`net` by default
-   - SDK docs + sample plugin (VS Code adapter) as working reference
+6. **Plugin SDK gate (week 6–8)**
+   - Start only if core handoff usage or agent-builder demand justifies platform expansion
+   - If the gate opens, design the stable TypeScript API, sandbox model, SDK docs, and sample plugin before implementation
+   - Otherwise continue core handoff, reliability, auto-update, or monorepo work
 
 ### Exit criteria
 
@@ -223,7 +224,8 @@ support, enterprise mode, and plugin SDK.
   distribution artifacts, and auto-update support for the platforms that
   support signed update metadata.
 - One design-partner organization running the build in production for 4 weeks without a P0 incident.
-- Plugin SDK published; at least one third-party adapter in existence.
+- Plugin SDK either remains deferred behind core handoff usage signal or ships with at least one third-party adapter in existence.
+- Full telemetry/Sentry remains deferred unless the privacy-safe event taxonomy, consent copy, redaction tests, and kill-switch tests are complete.
 - Homebrew + Windows Package Manager + apt/yum repos live.
 
 ## Non-goals (first release)
@@ -234,7 +236,7 @@ These are deliberately excluded from Phase 0 through Phase 3. They may land in v
 - **Team / org profile registry.** No git-tracked public "profile hub" or cloud-synced team registry in v1. Teams can commit `<repo>/.myclaude/` and share that way.
 - **MCP proxy gateway.** Gemini-research's in-memory proxy architecture is deferred to v2. Conditions for revisit in [`09-open-questions.md`](09-open-questions.md) item 6.
 - **Web UI.** Electron desktop only. No browser-hosted variant.
-- **VS Code / Cursor / Cline / Goose adapters.** Shipped through the Phase 3 plugin SDK; no first-party adapters in v1.
+- **VS Code / Cursor / Cline / Goose adapters.** Shipped only if the Phase 3 plugin SDK gate opens; no first-party adapters in v1.
 - **Background scheduled launches.** Agent Profile does not install system services, launchd agents, or scheduled jobs. `myclaude launch` is always user-initiated or wrapped by the user in their own scheduler.
 
 ## Gantt view

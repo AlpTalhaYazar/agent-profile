@@ -133,7 +133,7 @@ Next or deferred:
 - Monorepo workspace detection and project-chain UX.
 - Enterprise mode and managed configuration.
 - Plugin SDK and first-party editor adapters.
-- Full telemetry/Sentry, pending privacy-safe event taxonomy and opt-in policy.
+- Full telemetry/Sentry, deferred until privacy-safe event taxonomy, opt-in policy, and telemetry gates are complete.
 
 ## Documentation
 
@@ -141,6 +141,7 @@ Next or deferred:
 - [Tech stack](docs/07-tech-stack.md)
 - [Roadmap](docs/08-roadmap.md)
 - [Open questions](docs/09-open-questions.md)
+- [Open-source health metrics](docs/open-source-health-metrics.md)
 - [Desktop signing and notarization runbook](docs/release/desktop-signing-notarization.md)
 - [Core package README](packages/core/README.md)
 - [Secrets package README](packages/secrets/README.md)

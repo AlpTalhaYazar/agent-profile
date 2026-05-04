@@ -10,9 +10,9 @@ Ten trade-offs that are deliberately unresolved in the baseline design. Each one
 
 **The question:** Do we need both `__extends` (textual inheritance from a specific named scope) *and* `__merge: "deep"` (local deep-merge flag)? Claude-research (§1.3) argues yes — they cover different ergonomics. ChatGPT-research (§1) argues for a pure-functional approach with fewer directives.
 
-**Working assumption (Phase 1):** Ship both. Emit a usage metric (how often each appears in real configs) and reconsider after three months of production use.
+**Working assumption (Phase 1):** Ship both. Reconsider after three months using local config review, user reports, or a future opt-in aggregate allowed by [`open-source-health-metrics.md`](open-source-health-metrics.md).
 
-**Revisit signal:** If telemetry shows < 5% of real profiles use `__extends`, remove it and simplify the docs.
+**Revisit signal:** If local evidence, user reports, or future opt-in telemetry shows < 5% of real profiles use `__extends`, remove it and simplify the docs.
 
 ---
 
@@ -45,23 +45,23 @@ rush.json → package.json with "workspaces" field → git root
 
 **Risk:** Custom monorepos (yarn v1 workspaces, hand-rolled setups) may not hit any marker.
 
-**Revisit signal:** User doctor reports with "cwd not recognized as monorepo" exceeding X% of doctor invocations.
+**Revisit signal:** User-reported doctor output, issues, or future opt-in aggregate data shows "cwd not recognized as monorepo" is a recurring setup blocker.
 
 ---
 
 ### 4. Telemetry opt-in policy
 
-**The question:** Do we report crashes and anonymous usage metrics to Sentry / PostHog by default (opt-out) or require explicit opt-in?
+**The question:** Do we ever report crashes and anonymous usage metrics to Sentry / PostHog, and if so, is consent opt-out or explicit opt-in?
 
-**Working assumption:** **Opt-in only.** Respect `DO_NOT_TRACK=1` as a hard refusal. First-run dialog asks, default unchecked.
+**Working assumption:** **Opt-in only, and not implemented yet.** Respect `DO_NOT_TRACK=1` as a hard refusal. Any future first-run dialog asks with the default unchecked. `MYCLAUDE_TELEMETRY=0` is the app-level kill switch.
 
-**Revisit signal:** If Phase 3 beta feedback shows we can't diagnose crashes without telemetry, consider opt-out with a prominent banner.
+**Revisit signal:** If Phase 3 beta feedback shows maintainers cannot diagnose crashes without uploaded diagnostics, first complete the event taxonomy, privacy review, consent copy, redaction tests, and kill-switch tests in [`open-source-health-metrics.md`](open-source-health-metrics.md). Only then reconsider telemetry scope and consent model.
 
 **Constraints:**
 
-- Never report secret names, keychain contents, or profile contents.
-- Only report schema-validated error codes + stack frames from our own code.
-- All telemetry has a kill-switch via `MYCLAUDE_TELEMETRY=0`.
+- Never report secret values, sensitive secret names, keychain contents, profile contents, repo paths, usernames, raw command args, or MCP config bodies.
+- Only report schema-validated error codes, status buckets, and stack frames from our own code after the taxonomy gates pass.
+- All telemetry has a kill-switch via `MYCLAUDE_TELEMETRY=0`; `DO_NOT_TRACK=1` remains a hard refusal.
 
 ---
 
@@ -132,7 +132,7 @@ rush.json → package.json with "workspaces" field → git root
 
 **Working assumption:** English-only in v1. Message catalog (`@formatjs/intl`) is scaffolded but ships with only `en`.
 
-**Revisit signal:** ≥ 50 downloads from a single non-English locale (language fingerprint from Electron `app.getLocale()` in opt-in telemetry, else from GitHub traffic) triggers a translation effort. Likely order: Turkish (requester), Spanish, Japanese.
+**Revisit signal:** GitHub traffic, download data, user reports, or future opt-in aggregate locale buckets show sustained demand from a non-English locale. Likely order: Turkish (requester), Spanish, Japanese.
 
 ---
 
