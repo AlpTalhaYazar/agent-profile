@@ -297,13 +297,13 @@ Current canonical fields:
 
 ---
 
-### 24. Audit log: JSONL → SQLite migration timing (raised by Sprint 3)
+### 24. Audit log: JSONL → SQLite/SIEM export timing (raised by Sprint 3)
 
 **The question:** [`docs/06-security.md` § "Audit log"](06-security.md) specifies a SQLite database at `~/.myclaude/audit.sqlite` with three tables. Sprint 3 ships an append-only JSONL log at `~/.myclaude/audit.log` whose row shapes map 1:1 to the planned SQLite columns. Adding the SQLite layer now would pull in `better-sqlite3` (a native module) and a migration shim for users who already have JSONL rows.
 
-**Working assumption (Phase 2 milestone 3):** Stay on JSONL through milestones 4–7. The current write rate (one row per `auth.*`, `session.*`, `secret.get`) tops out around hundreds per day for a single user; JSONL is fine at that scale.
+**Decision (2026-05-04, enterprise gate):** Stay on JSONL. SQLite storage, retention policy, `myclaude audit export --since ...`, and SIEM ingestion remain deferred enterprise/compliance capabilities. The current write rate (one row per `auth.*`, `session.*`, `secret.get`) tops out around hundreds per day for a single user; JSONL is fine at that scale.
 
-**Revisit signal:** Phase 3, when the auto-update / signing pipelines need a SIEM-friendly export. Move to SQLite + `audit export --since` then. The JSONL → SQLite shim reads the existing file once and inserts rows in order; the column shapes already match.
+**Revisit signal:** A named design-partner organization or compliance owner asks for managed audit export, with target environment and retention/export requirements. Move to SQLite + `audit export --since` only after the managed-configuration design defines source of truth, precedence, audit/export format, security model, migration path, and admin/user failure modes. The JSONL → SQLite shim reads the existing file once and inserts rows in order; the column shapes already match.
 
 ---
 
@@ -397,6 +397,33 @@ UX trade-off.
 **Revisit signal:** First beta feedback that users rely on comments in scope
 files. Likely fix: parse with YAML CST, apply structured edits to the existing
 document, and keep canonical write as an explicit "format document" command.
+
+---
+
+### 31. Enterprise mode gate (resolved Phase 3 milestone 4)
+
+**The question:** Should Phase 3 start enterprise mode now: managed
+configuration, MDM-deployed global config, SIEM/audit export, runtime
+`MYCLAUDE_ENTERPRISE=1`, or an org/team profile registry?
+
+**Decision (2026-05-04):** Defer enterprise mode. Repo evidence does not show a
+named design-partner organization asking for managed configuration, audit
+export, MDM/admin policy, or a team/org registry. The current supported
+team-lite path remains committing `<repo>/.myclaude/` to the team's repo and
+keeping per-developer overrides local.
+
+**Explicitly deferred:** `managed-mcp.json`, MDM-deployed `global-shared`,
+`MYCLAUDE_ENTERPRISE=1`, audit export / SIEM integration, and org/team profile
+registry.
+
+**Revisit signal:** A named design-partner org asks for managed config or audit
+export; repeated user reports show team-lite `.myclaude` sharing is
+insufficient; a compliance owner identifies a target environment and audit
+requirement; or core handoff usage proves repeated value first.
+
+**If the gate opens:** Write the managed-configuration design before
+implementation. It must define source of truth, precedence rules, audit/export
+format, security model, migration path, and admin/user failure modes.
 
 ---
 

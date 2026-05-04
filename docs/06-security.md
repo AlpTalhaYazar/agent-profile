@@ -10,10 +10,10 @@ Agent Profile handles user credentials (Anthropic API keys, GitHub PATs, databas
 |---|---|---|
 | **Spoofing** | Another local user connects to the IPC socket | UDS mode `0600` (POSIX); per-boot handshake cookie; peer-verification hook wired before `hello`. Native `euid(peer) == euid(self)` and explicit Windows pipe DACL enforcement are future hardening items. |
 | **Spoofing** | A malicious local process running as the same user impersonates the CLI | Handshake cookie regenerated per daemon boot; capability tokens are per-session; Anthropic API key never cached outside Main |
-| **Tampering** | Attacker edits ephemeral session files mid-launch | Session dir mode `0600`; content written atomically via temp + rename; session TTL ≤ session lifetime; file checksums in audit log |
+| **Tampering** | Attacker edits ephemeral session files mid-launch | Session dir mode `0600`; content written atomically via temp + rename; session TTL ≤ session lifetime; session records keep rendered paths inspectable |
 | **Tampering** | Attacker replaces `~/.myclaude/ipc-cookie` | File is `0600`; rotated on every daemon boot; stale cookie fails handshake |
 | **Tampering** | Attacker replaces signed app binary | ASAR integrity + Electron Fuses (`OnlyLoadAppFromAsar=true`); Phase 3 M1 release verification requires macOS signing/notarization and Windows Authenticode signatures; Linux M1 artifacts are explicitly unsigned |
-| **Repudiation** | "I never launched a session with those credentials" | SQLite audit log at `~/.myclaude/audit.sqlite` with timestamp, pid, authProfileId, sessionId, spawned command; `--json` export to SIEM |
+| **Repudiation** | "I never launched a session with those credentials" | Append-only JSONL audit log at `~/.myclaude/audit.log` with timestamped launch, secret access, and config-change rows; SQLite storage and SIEM export are deferred |
 | **Info disclosure** | API keys leak via env vars into logs, shell history, process listings | `ANTHROPIC_API_KEY` never exported; `apiKeyHelper.sh` proxies on demand; Main zeros plaintext buffers after encrypting |
 | **Info disclosure** | Secrets leak from the Renderer (web content) | `contextIsolation: true`, `nodeIntegration: false`, narrow `contextBridge`; Renderer never receives secret values, only references |
 | **Info disclosure** | Third-party MCP server reads the environment of its host process and finds a secret | Per-MCP-server env via `env:` in `mcp.json` — secrets are scoped, not exported to the whole process tree |
@@ -227,42 +227,22 @@ distribution strategy.
 
 ## Audit log
 
-`~/.myclaude/audit.sqlite` (SQLite, WAL-mode, 0600). Schema:
+The current runtime writes an append-only JSONL log at
+`~/.myclaude/audit.log` (mode `0600`). The daemon appends one row per
+security-relevant write:
 
-```sql
-CREATE TABLE launches (
-  id TEXT PRIMARY KEY,
-  ts INTEGER NOT NULL,
-  role TEXT,
-  auth_profile_id TEXT,
-  cwd TEXT,
-  session_id TEXT,
-  spawn_pid INTEGER,
-  exit_code INTEGER,
-  wall_ms INTEGER
-);
+| Row kind | Current fields | Notes |
+|---|---|---|
+| `launch` | `ts`, `sessionId`, `event`, `spawnPid`, optional `role`, `authProfileId`, `cwd`, `relaunchedFrom` | Records session start/end/kill lifecycle events. |
+| `secret_access` | `ts`, `sessionId`, `secretName`, `callerPid`, `capabilityValid`, optional `reason` | Records helper secret reads by logical name only, never by value. |
+| `config_change` | `ts`, `actionKind`, `actor`, `target`, optional `diffSha256` | Records auth/setup metadata mutations. `diffSha256` is reserved and currently `null` for auth writes. |
 
-CREATE TABLE secret_accesses (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts INTEGER NOT NULL,
-  session_id TEXT,
-  secret_name TEXT,      -- the logical name, not the value
-  caller_pid INTEGER,
-  caller_path TEXT,      -- resolved /proc/<pid>/exe
-  capability_valid BOOLEAN
-);
-
-CREATE TABLE config_changes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts INTEGER NOT NULL,
-  scope TEXT,
-  file TEXT,
-  actor TEXT,            -- "cli" | "gui"
-  diff_sha256 TEXT
-);
-```
-
-Retention: 90 days default, configurable. `myclaude audit export --since ...` emits JSONL for SIEM ingestion. The log never contains secret values; it contains references.
+The log never contains secret values, raw tokens, or plaintext credential
+material. SQLite storage at `~/.myclaude/audit.sqlite`, retention policy, and
+`myclaude audit export --since ...` for SIEM ingestion are deferred enterprise
+or compliance capabilities. They should not be implemented until a named
+design-partner organization or compliance owner needs managed audit export and
+the managed-configuration design is written first.
 
 ## Known limits
 

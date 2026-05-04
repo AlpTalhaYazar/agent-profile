@@ -217,11 +217,31 @@ Phase 3 measurement stays local-only or GitHub-derived.
    deferred.
 
 4. **Enterprise mode gate (week 4–5)**
-   - Confirm whether any design-partner organization needs managed config or audit export
-   - Keep `managed-mcp.json`, MDM-deployed `global-shared`, SIEM export, and `MYCLAUDE_ENTERPRISE=1` deferred without that signal
-   - If signal exists, write the managed-configuration design before implementation
+   - [x] Confirmed no repo evidence of a named design-partner organization
+     asking for managed configuration, audit export, MDM/admin policy, or a
+     team/org profile registry
+   - [x] Current supported team-lite path remains committing
+     `<repo>/.myclaude/` to the team's repo, with per-developer local overrides
+   - [x] Keep `managed-mcp.json`, MDM-deployed `global-shared`, SIEM export,
+     org/team profile registry, and `MYCLAUDE_ENTERPRISE=1` deferred without
+     that signal
+
+   **Status:** Closed as a defer decision on `main` (2026-05-04). Enterprise
+   implementation was intentionally not added. Evidence reviewed included the
+   roadmap, product notes, security docs, open-source health metrics, audit
+   runtime code, and repo searches for enterprise-specific env/config/runtime
+   hooks. If this gate opens later, write the managed-configuration design
+   before implementation, covering source of truth, precedence rules,
+   audit/export format, security model, migration path, and admin/user failure
+   modes.
+
+   **Revisit signals:** a named design-partner org asks for managed config or
+   audit export; repeated user reports show team-lite `.myclaude` sharing is
+   insufficient; a compliance owner identifies a target environment and audit
+   requirement; or core handoff usage proves repeated value first.
 
 5. **Error recovery & telemetry gates (week 5–6)**
+   - Next Phase 3 target after the enterprise defer decision
    - Privacy-safe event taxonomy and opt-in policy reviewed before any telemetry SDK
    - No Crashpad, Sentry, PostHog, or network upload until redaction tests and kill switches pass
    - `myclaude doctor` with every known failure mode mapped to a fix suggestion

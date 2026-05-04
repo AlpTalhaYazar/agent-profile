@@ -132,7 +132,7 @@ Shipped in the current repo:
 Next or deferred:
 
 - Sibling workspace glob expansion and broader monorepo management UX.
-- Enterprise mode and managed configuration.
+- Enterprise mode and managed configuration, deferred until design-partner evidence asks for it.
 - Plugin SDK and first-party editor adapters.
 - Full telemetry/Sentry, deferred until privacy-safe event taxonomy, opt-in policy, and telemetry gates are complete.
 
