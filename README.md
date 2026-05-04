@@ -128,10 +128,12 @@ Shipped in the current repo:
 - Desktop release signing/notarization pipeline for macOS and Windows, with Linux M1 unsigned artifact verification.
 - Auto-update staged rollout for packaged macOS and Windows releases, gated by `MYCLAUDE_UPDATES` and release rollout metadata.
 - Monorepo workspace detection for the current root-to-package chain, plus a compact desktop `cwd` candidate picker.
+- Local package-manager distribution input verification for Homebrew Cask, Windows Package Manager, and Linux deb/rpm artifacts.
 
 Next or deferred:
 
 - Sibling workspace glob expansion and broader monorepo management UX.
+- External Homebrew, Windows Package Manager, and apt/yum repository publication remains open; the repo currently prepares local manifest inputs only.
 - Enterprise mode and managed configuration, deferred until design-partner evidence asks for it.
 - Plugin SDK, sandboxed plugin execution, sample plugins, plugin registry, and first-party editor adapters, deferred until repeated core handoff usage or concrete agent-builder demand justifies platform expansion.
 - Full telemetry/Sentry, deferred until privacy-safe event taxonomy, opt-in policy, and telemetry gates are complete.
@@ -146,6 +148,7 @@ Current agent-builder support is intentionally persona-based: repo-local `.mycla
 - [Open questions](docs/09-open-questions.md)
 - [Open-source health metrics](docs/open-source-health-metrics.md)
 - [Desktop signing and notarization runbook](docs/release/desktop-signing-notarization.md)
+- [Package-manager distribution runbook](docs/release/package-manager-distribution.md)
 - [Core package README](packages/core/README.md)
 - [Secrets package README](packages/secrets/README.md)
 - [Session artifacts package README](packages/session-artifacts/README.md)
@@ -176,4 +179,5 @@ pnpm -C apps/desktop verify-release -- --platform darwin --arch x64 --require-si
 pnpm -C apps/desktop verify-release -- --platform darwin --arch arm64 --require-signature --require-notarization
 pnpm -C apps/desktop verify-release -- --platform win32 --arch x64 --require-signature
 pnpm -C apps/desktop verify-release -- --platform linux --arch x64 --unsigned-ok
+pnpm -C apps/desktop verify-package-manager-inputs -- --tag v0.0.1 --release-base-url https://github.com/AlpTalhaYazar/agent-profile/releases/download/v0.0.1
 ```

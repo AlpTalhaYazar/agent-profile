@@ -475,6 +475,34 @@ and threat model.
 
 ---
 
+### 33. Package-manager publication ownership and license metadata
+
+**The question:** What must be decided before the GA exit criterion "Homebrew +
+Windows Package Manager + apt/yum repos live" can be claimed?
+
+**Working assumption (Phase 3 package-manager readiness):** Local manifest input
+readiness is enough for the current slice. The verifier can produce
+checksum-backed Homebrew Cask, winget, and Linux deb/rpm inputs from existing
+release artifacts, but external publication remains a maintainer-owned release
+operation.
+
+**Explicitly open:** Homebrew tap or cask submission path, final winget package
+identifier ownership, apt/yum repository host, Linux repository signing key,
+license metadata, and whether apt/yum repository metadata generation belongs in
+CI or in a separate release-ops repository.
+
+**Revisit signal:** Maintainers choose the external publication path for at
+least one package-manager channel, add tracked license metadata, or decide that
+GA must automate package-manager repository publication rather than keep it as a
+manual release step.
+
+**If the gate opens:** Write the publication design before implementation. It
+must define repository ownership, required credentials, signing key custody,
+manifest file ownership, dry-run checks, rollback, and which commands are
+allowed to mutate external package-manager repositories.
+
+---
+
 ## How decisions are recorded
 
 Once a question resolves, we:

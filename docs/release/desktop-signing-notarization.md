@@ -176,6 +176,22 @@ pnpm -C apps/desktop verify-release -- --platform linux --arch x64 --unsigned-ok
 The verifier also runs the strict Electron Fuses check against the packaged
 binary before checking platform-specific artifacts.
 
+## Package-manager input handoff
+
+After release artifacts pass the platform verifier, maintainers can produce
+local package-manager manifest inputs:
+
+```sh
+pnpm -C apps/desktop verify-package-manager-inputs -- --tag v0.0.1 --release-base-url https://github.com/AlpTalhaYazar/agent-profile/releases/download/v0.0.1
+```
+
+This command computes SHA-256 checksums and release URLs for the Homebrew Cask
+DMGs, Windows Package Manager setup executable, and Linux deb/rpm artifacts. It
+does not publish to Homebrew, winget-pkgs, apt, yum, or any external package
+repository. See
+[`package-manager-distribution.md`](package-manager-distribution.md) for the
+current publication boundaries.
+
 ## Troubleshooting
 
 ### Missing release environment

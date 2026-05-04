@@ -272,9 +272,29 @@ Phase 3 measurement stays local-only or GitHub-derived.
    integration demand that cannot be served by the current persona/skills
    model.
 
-   **Next target direction:** continue core handoff, reliability, distribution,
-   package-manager readiness, or remaining monorepo work before enterprise or
+   **Next target direction:** continue core handoff, reliability, external
+   package-manager publishing, or remaining monorepo work before enterprise or
    plugin expansion.
+
+7. **Package-manager distribution readiness** — *Status: local input readiness shipped on `main` (2026-05-04); external repositories not live*
+   - [x] Local verifier maps existing Forge release artifacts into
+     checksum-backed Homebrew Cask, Windows Package Manager, and Linux deb/rpm
+     inputs without fetching or publishing externally
+   - [x] Maintainer runbook documents the package-manager channel scope,
+     verifier command, JSON handoff shape, and publication boundaries
+   - [x] Homebrew tap mutation, winget-pkgs submission, apt/yum repository
+     mutation, package-manager credentials, Linux GPG signing, AppImage, and
+     repository metadata generation remain outside this slice
+   - [ ] External Homebrew, Windows Package Manager, and apt/yum repositories
+     are not live yet
+
+   **Status:** This slice closes local package-manager input readiness only.
+   The GA exit criterion remains open until maintainers decide package-manager
+   repository ownership, license metadata, Linux repository signing strategy,
+   and external publication workflow. Current local verification lives in
+   [`apps/desktop/scripts/verify-package-manager-inputs.mjs`](../apps/desktop/scripts/verify-package-manager-inputs.mjs),
+   and maintainer operations are documented in
+   [`release/package-manager-distribution.md`](release/package-manager-distribution.md).
 
 ### Exit criteria
 
