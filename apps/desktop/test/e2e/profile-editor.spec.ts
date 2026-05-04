@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 import electronExecutable from "electron";
+import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
 
 const electronExecutablePath = electronExecutable as unknown as string;
 
@@ -246,3 +247,31 @@ env:
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("working directory dropdown selects detected monorepo workspace candidates", async () => {
+  const fixture = await createDesktopFixture("agent-profile-workspace-picker-");
+  await seedProfileFixture(fixture);
+  const repoDir = fixture.projectDir;
+  const packageDir = join(repoDir, "apps", "web");
+  await mkdir(join(packageDir, ".myclaude", "roles"), { recursive: true });
+  await writeFile(join(repoDir, "pnpm-workspace.yaml"), 'packages:\n  - "apps/*"\n');
+  await writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "web" }));
+  await writeFile(join(packageDir, ".myclaude", "roles", "backend.yml"), "version: 1\n");
+  fixture.projectDir = packageDir;
+
+  const { app, page } = await launchDesktop(fixture);
+  try {
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await page.getByRole("button", { name: /Working directory/ }).click();
+    await expect(page.getByText("Detected workspaces")).toBeVisible();
+    await page.getByRole("button", { name: new RegExp(`Root.*${escapeRegex(repoDir)}`) }).click();
+    await expect(page.getByRole("button", { name: /Working directory/ })).toContainText(repoDir);
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

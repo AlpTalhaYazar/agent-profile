@@ -57,7 +57,7 @@ import {
   Variable,
 } from "lucide-react";
 import * as React from "react";
-import type { SkillCatalogItem } from "../../shared/bridge.js";
+import type { SkillCatalogItem, WorkspaceCandidateOption } from "../../shared/bridge.js";
 import { FormEditor } from "../components/form-editor.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import {
@@ -158,6 +158,9 @@ export function ProfileEditorScreen(): React.ReactElement {
   const [addMcpOpen, setAddMcpOpen] = React.useState(false);
   const [skillsCatalogOpen, setSkillsCatalogOpen] = React.useState(false);
   const [recentCwds, setRecentCwds] = React.useState<string[]>(() => loadRecentCwds());
+  const [workspaceCandidates, setWorkspaceCandidates] = React.useState<WorkspaceCandidateOption[]>(
+    []
+  );
 
   const hydrateEditor = React.useCallback(
     (nextDoc: ScopeDoc | null) => {
@@ -255,6 +258,36 @@ export function ProfileEditorScreen(): React.ReactElement {
   React.useEffect(() => {
     if (!cwd) return;
     setRecentCwds((current) => storeRecentCwd(cwd, current));
+  }, [cwd]);
+
+  React.useEffect(() => {
+    let active = true;
+    if (!cwd) {
+      setWorkspaceCandidates([]);
+      return () => {
+        active = false;
+      };
+    }
+    const systemApi = window.myclaude?.system;
+    if (!systemApi?.workspaceCandidates) {
+      setWorkspaceCandidates([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    void systemApi
+      .workspaceCandidates({ cwd })
+      .then((candidates) => {
+        if (active) setWorkspaceCandidates(candidates);
+      })
+      .catch(() => {
+        if (active) setWorkspaceCandidates([]);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [cwd]);
 
   React.useEffect(() => {
@@ -704,6 +737,7 @@ export function ProfileEditorScreen(): React.ReactElement {
             onBrowse={() => void handlePickDirectory()}
             onChange={setCwd}
             recentCwds={recentCwds}
+            workspaceCandidates={workspaceCandidates}
           />
           <RoleDropdown
             availableRoles={availableRoles}
@@ -1252,11 +1286,13 @@ function WorkingDirectoryDropdown({
   onBrowse,
   onChange,
   recentCwds,
+  workspaceCandidates,
 }: {
   cwd: string;
   onBrowse: () => void;
   onChange: (value: string) => void;
   recentCwds: string[];
+  workspaceCandidates: WorkspaceCandidateOption[];
 }): React.ReactElement {
   const [draft, setDraft] = React.useState(cwd);
   React.useEffect(() => setDraft(cwd), [cwd]);
@@ -1289,6 +1325,49 @@ function WorkingDirectoryDropdown({
             </Button>
           </PopoverClose>
         </div>
+        {workspaceCandidates.length > 0 ? (
+          <div className="border-t border-subtle pt-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-normal text-tertiary">
+              Detected workspaces
+            </p>
+            <div className="grid gap-1">
+              {workspaceCandidates.map((candidate) => {
+                const label = candidate.kind === "root" ? "Root" : "Package";
+                const detail =
+                  candidate.kind === "package" && candidate.packageName
+                    ? candidate.packageName
+                    : candidate.marker;
+                return (
+                  <PopoverClose asChild key={candidate.path}>
+                    <button
+                      className={cn(
+                        "min-w-0 rounded-md px-2 py-2 text-left text-sm text-secondary hover:bg-elevated hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        candidate.path === cwd && "bg-elevated text-primary"
+                      )}
+                      onClick={() => onChange(candidate.path)}
+                      type="button"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 text-xs font-medium text-primary">{label}</span>
+                        {detail ? (
+                          <span className="truncate text-xs text-tertiary">{detail}</span>
+                        ) : null}
+                        {candidate.hasMyClaude ? (
+                          <span className="ml-auto shrink-0 rounded-sm border border-subtle px-1.5 py-0.5 font-mono text-[0.65rem] text-tertiary">
+                            .myclaude
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-1 block truncate font-mono text-xs">
+                        {candidate.path}
+                      </span>
+                    </button>
+                  </PopoverClose>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         {recentCwds.length > 0 ? (
           <div className="border-t border-subtle pt-3">
             <p className="mb-2 text-xs font-medium uppercase tracking-normal text-tertiary">

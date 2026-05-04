@@ -26,6 +26,7 @@ const bridge: MyClaudeBridge = {
     version: (): Promise<string> => ipcRenderer.invoke(CHANNELS.system.version),
     defaultCwd: (): Promise<string> => ipcRenderer.invoke(CHANNELS.system.defaultCwd),
     pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(CHANNELS.system.pickDirectory),
+    workspaceCandidates: (opts) => ipcRenderer.invoke(CHANNELS.system.workspaceCandidates, opts),
     bootstrap: (): Promise<BootstrapResult> => ipcRenderer.invoke(CHANNELS.system.bootstrap),
   },
   setup: {

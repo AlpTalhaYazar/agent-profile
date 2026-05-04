@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const handlerMap = new Map<string, (event: unknown, payload?: unknown) => Promise<unknown>>();
@@ -662,30 +665,46 @@ describe("main renderer IPC bridge", () => {
     );
   });
 
-  it("handles system.defaultCwd and system.pickDirectory locally in Main", async () => {
+  it("handles system.defaultCwd, system.pickDirectory, and workspace candidates locally in Main", async () => {
     showOpenDialog.mockResolvedValueOnce({
       canceled: false,
       filePaths: ["/picked/project"],
     });
+    const root = mkdtempSync(join(tmpdir(), "desktop-workspace-candidates-"));
+    const packageDir = join(root, "apps", "web");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(join(root, "pnpm-workspace.yaml"), 'packages:\n  - "apps/*"\n');
+    writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "web" }));
 
-    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
-    registerRendererIpcHandlers({
-      expectedFrameUrl: "file:///trusted/index.html",
-      myClaudeHome: "/Users/test/.myclaude",
-      startupCwd: "/repo",
-    });
+    try {
+      const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+      registerRendererIpcHandlers({
+        expectedFrameUrl: "file:///trusted/index.html",
+        myClaudeHome: "/Users/test/.myclaude",
+        startupCwd: "/repo",
+      });
 
-    const defaultCwd = handlerMap.get("system.defaultCwd");
-    const pickDirectory = handlerMap.get("system.pickDirectory");
-    if (!defaultCwd || !pickDirectory) throw new Error("missing system handlers");
+      const defaultCwd = handlerMap.get("system.defaultCwd");
+      const pickDirectory = handlerMap.get("system.pickDirectory");
+      const workspaceCandidates = handlerMap.get("system.workspaceCandidates");
+      if (!defaultCwd || !pickDirectory || !workspaceCandidates) {
+        throw new Error("missing system handlers");
+      }
 
-    const event = {
-      senderFrame: { url: "file:///trusted/index.html" },
-      sender: { id: 1 },
-    };
+      const event = {
+        senderFrame: { url: "file:///trusted/index.html" },
+        sender: { id: 1 },
+      };
 
-    await expect(defaultCwd(event, undefined)).resolves.toBe("/repo");
-    await expect(pickDirectory(event, undefined)).resolves.toBe("/picked/project");
+      await expect(defaultCwd(event, undefined)).resolves.toBe("/repo");
+      await expect(pickDirectory(event, undefined)).resolves.toBe("/picked/project");
+      await expect(workspaceCandidates(event, { cwd: join(packageDir, "src") })).resolves.toEqual([
+        expect.objectContaining({ kind: "root", path: root }),
+        expect.objectContaining({ kind: "package", path: packageDir }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("persists oauth.start once and stores refresh token without replacing the access-token ref", async () => {

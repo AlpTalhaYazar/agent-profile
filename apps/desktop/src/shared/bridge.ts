@@ -1,5 +1,9 @@
+import type { WorkspaceCandidate } from "@agent-profile/core";
+
 export type AuthMode = "apiKey" | "bedrock" | "vertex" | "gateway" | "oauth";
 export type SecretBackedAuthMode = Exclude<AuthMode, "oauth">;
+
+export type WorkspaceCandidateOption = WorkspaceCandidate;
 
 export interface AuthAddSpec {
   id: string;
@@ -138,6 +142,7 @@ export interface MyClaudeBridge {
     version: () => Promise<string>;
     defaultCwd: () => Promise<string>;
     pickDirectory: () => Promise<string | null>;
+    workspaceCandidates: (input: { cwd: string }) => Promise<WorkspaceCandidateOption[]>;
     bootstrap: () => Promise<BootstrapResult>;
   };
   setup: {

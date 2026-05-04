@@ -1,3 +1,4 @@
+import { findWorkspaceCandidates } from "@agent-profile/core";
 import type { RespSetupMarkCompleteOkT, RespSystemBootstrapOkT } from "@agent-profile/ipc-protocol";
 import { BrowserWindow, dialog } from "electron";
 import { z } from "zod";
@@ -7,6 +8,9 @@ import { withDaemonClient } from "../daemon/client-runner.js";
 import { type RendererIpcBaseContext, registerSecureHandler } from "./secure-handler.js";
 
 const NoPayload = z.undefined();
+const WorkspaceCandidatesPayload = z.object({
+  cwd: z.string().min(1),
+});
 
 export function registerSystemHandlers(context: RendererIpcBaseContext): void {
   registerSecureHandler({
@@ -37,6 +41,13 @@ export function registerSystemHandlers(context: RendererIpcBaseContext): void {
         : await dialog.showOpenDialog(dialogOptions);
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+  });
+
+  registerSecureHandler({
+    channel: CHANNELS.system.workspaceCandidates,
+    schema: WorkspaceCandidatesPayload,
+    context,
+    handle: (payload) => findWorkspaceCandidates(payload.cwd),
   });
 
   registerSecureHandler({

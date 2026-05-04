@@ -39,6 +39,7 @@ describe("preload bridge", () => {
     expect(api).toHaveProperty("system.version");
     expect(api).toHaveProperty("system.defaultCwd");
     expect(api).toHaveProperty("system.pickDirectory");
+    expect(api).toHaveProperty("system.workspaceCandidates");
     expect(api).toHaveProperty("auth.list");
     expect(api).toHaveProperty("auth.add");
     expect(api).toHaveProperty("auth.setSecret");
@@ -81,6 +82,7 @@ describe("preload bridge", () => {
     await api.system.version();
     await api.system.defaultCwd();
     await api.system.pickDirectory();
+    await api.system.workspaceCandidates({ cwd: "/repo/apps/web" });
     await api.auth.list();
     await api.auth.add({
       spec: {
@@ -143,6 +145,7 @@ describe("preload bridge", () => {
       ["system.version"],
       ["system.defaultCwd"],
       ["system.pickDirectory"],
+      ["system.workspaceCandidates", { cwd: "/repo/apps/web" }],
       ["auth.list"],
       [
         "auth.add",

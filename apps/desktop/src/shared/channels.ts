@@ -3,6 +3,7 @@ export const CHANNELS = {
     version: "system.version",
     defaultCwd: "system.defaultCwd",
     pickDirectory: "system.pickDirectory",
+    workspaceCandidates: "system.workspaceCandidates",
     bootstrap: "system.bootstrap",
   },
   setup: {
