@@ -46,6 +46,15 @@ export interface ProfileCreationSelection {
   cwd: string;
 }
 
+export const PROFILE_SELECTION_STORAGE_KEY = "agent-profile.selectedProfile";
+
+export interface ProfileSelectionRestoreInput {
+  stored: ProfileCreationSelection | null;
+  roles: readonly string[];
+  authProfiles: readonly Pick<AuthProfileOption, "id">[];
+  fallbackCwd: string;
+}
+
 const ROLE_SLUG_RE = /^[a-z0-9_-]+$/;
 
 /**
@@ -142,12 +151,67 @@ export function buildProfileCreateScopePayload(
   };
 }
 
-export function buildProfileSelection(value: ProfileCreationResolvedDraft): ProfileCreationSelection {
+export function buildProfileSelection(
+  value: ProfileCreationResolvedDraft
+): ProfileCreationSelection {
   return {
     role: value.roleSlug,
     authProfileId: value.authProfileId,
     cwd: value.cwd,
   };
+}
+
+export function readProfileSelection(
+  storage: Pick<Storage, "getItem">,
+  key = PROFILE_SELECTION_STORAGE_KEY
+): ProfileCreationSelection | null {
+  const raw = storage.getItem(key);
+  if (!raw) return null;
+  try {
+    return normalizeProfileSelection(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function writeProfileSelection(
+  storage: Pick<Storage, "setItem">,
+  selection: ProfileCreationSelection,
+  key = PROFILE_SELECTION_STORAGE_KEY
+): void {
+  storage.setItem(key, JSON.stringify(selection));
+}
+
+export function chooseRestoredProfileSelection({
+  stored,
+  roles,
+  authProfiles,
+  fallbackCwd,
+}: ProfileSelectionRestoreInput): ProfileCreationSelection {
+  const fallback: ProfileCreationSelection = {
+    role: roles[0] ?? "",
+    authProfileId: authProfiles[0]?.id ?? "",
+    cwd: fallbackCwd,
+  };
+
+  if (!stored) return fallback;
+  if (!stored.cwd) return fallback;
+  if (!roleExists(stored.role, roles)) return fallback;
+  if (!authProfiles.some((profile) => profile.id === stored.authProfileId)) return fallback;
+  return stored;
+}
+
+function normalizeProfileSelection(input: unknown): ProfileCreationSelection | null {
+  if (!isRecord(input)) return null;
+  const role = typeof input.role === "string" ? input.role.trim() : "";
+  const authProfileId = typeof input.authProfileId === "string" ? input.authProfileId.trim() : "";
+  const cwd = typeof input.cwd === "string" ? input.cwd.trim() : "";
+  if (!role || !authProfileId || !cwd) return null;
+  return { role, authProfileId, cwd };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizePurpose(input: string): string {

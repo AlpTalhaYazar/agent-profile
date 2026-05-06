@@ -28,22 +28,37 @@ import {
   agentProfilePanelSectionAtom,
   authProfilesAtom,
   availableRolesAtom,
-  currentScreenAtom,
   cwdAtom,
+  effectiveStateAtom,
+  previewStateAtom,
+  scopeEntriesAtom,
+  selectedAuthIdAtom,
+  selectedRoleAtom,
+  selectedScopePathAtom,
+  validationStateAtom,
+  currentScreenAtom,
   type ProfileWorkspaceTab,
   profileWorkspaceTabAtom,
   selectedAgentProfilePanelIdAtom,
 } from "../lib/atoms.js";
 import { agentProfileViewModelAtom } from "../lib/agent-profile-view-model.js";
 import {
+  buildProfileCreateScopePayload,
   buildProfileSelection,
   deriveProfileRoleSlug,
   validateProfileCreationDraft,
+  writeProfileSelection,
   type ProfileCreationDraft,
   type ProfileCreationField,
+  type ProfileCreationResolvedDraft,
   type ProfileCreationValidationIssue,
 } from "../lib/profile-creation.js";
-import { getErrorMessage } from "../lib/normalize.js";
+import {
+  collectRoles,
+  getErrorMessage,
+  normalizeEffectiveState,
+  normalizeScopeList,
+} from "../lib/normalize.js";
 import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
@@ -52,8 +67,8 @@ import type { AuthProfileOption } from "../lib/types.js";
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
   const authProfiles = useAtomValue(authProfilesAtom);
-  const availableRoles = useAtomValue(availableRolesAtom);
-  const cwd = useAtomValue(cwdAtom);
+  const [availableRoles, setAvailableRoles] = useAtom(availableRolesAtom);
+  const [cwd, setCwd] = useAtom(cwdAtom);
   const [selectedPanelProfileId, setSelectedPanelProfileId] = useAtom(
     selectedAgentProfilePanelIdAtom
   );
@@ -61,10 +76,19 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const setActiveTerminalSessionId = useSetAtom(activeTerminalSessionIdAtom);
   const setCurrentScreen = useSetAtom(currentScreenAtom);
   const setProfileWorkspaceTab = useSetAtom(profileWorkspaceTabAtom);
+  const setScopeEntries = useSetAtom(scopeEntriesAtom);
+  const setSelectedRole = useSetAtom(selectedRoleAtom);
+  const setSelectedAuthId = useSetAtom(selectedAuthIdAtom);
+  const setSelectedScopePath = useSetAtom(selectedScopePathAtom);
+  const setEffectiveState = useSetAtom(effectiveStateAtom);
+  const setValidationState = useSetAtom(validationStateAtom);
+  const setPreviewState = useSetAtom(previewStateAtom);
   const announce = useAnnounce();
   const [isLaunching, setIsLaunching] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
+  const [createProfileError, setCreateProfileError] = React.useState<string | null>(null);
   const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
@@ -105,6 +129,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
 
   const closeCreateDialog = React.useCallback(() => {
     setCreateDialogOpen(false);
+    setCreateProfileError(null);
     window.requestAnimationFrame(() => {
       createButtonRef.current?.focus();
     });
@@ -114,6 +139,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     setLaunchError(null);
     setSelectedPanelProfileId(null);
     setPanelSection("summary");
+    setCreateProfileError(null);
     setCreateDialogOpen(true);
   }, [setPanelSection, setSelectedPanelProfileId]);
 
@@ -148,6 +174,64 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     setProfileWorkspaceTab,
     setSelectedPanelProfileId,
   ]);
+
+  const handleCreateProfile = React.useCallback(
+    async (value: ProfileCreationResolvedDraft) => {
+      const profileBridge = window.myclaude?.profile;
+      if (!profileBridge?.createScope || !profileBridge.list || !profileBridge.show) {
+        const message = "Profile creation is unavailable right now.";
+        setCreateProfileError(message);
+        announce(message);
+        return;
+      }
+
+      const selection = buildProfileSelection(value);
+      setIsCreatingProfile(true);
+      setCreateProfileError(null);
+      try {
+        await profileBridge.createScope(buildProfileCreateScopePayload(value));
+        const listed = await profileBridge.list({ cwd: selection.cwd });
+        const nextScopeEntries = normalizeScopeList(listed);
+        const nextRoles = collectRoles(nextScopeEntries);
+        const shown = await profileBridge.show(selection);
+
+        setCwd(selection.cwd);
+        setScopeEntries(nextScopeEntries);
+        setAvailableRoles(nextRoles);
+        setSelectedRole(selection.role);
+        setSelectedAuthId(selection.authProfileId);
+        setSelectedScopePath(findScopePathForRole(nextScopeEntries, selection.role));
+        setEffectiveState(normalizeEffectiveState(shown));
+        setValidationState({ status: "idle", issues: [], errorMessage: null });
+        setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
+        writeProfileSelection(window.localStorage, selection);
+        setCreateDialogOpen(false);
+        setSelectedPanelProfileId(null);
+        setPanelSection("summary");
+        announce(`Created Agent Profile ${selection.role}`);
+      } catch (error) {
+        const message = formatCreateProfileError(error);
+        setCreateProfileError(message);
+        announce(message);
+      } finally {
+        setIsCreatingProfile(false);
+      }
+    },
+    [
+      announce,
+      setAvailableRoles,
+      setCwd,
+      setEffectiveState,
+      setPanelSection,
+      setPreviewState,
+      setScopeEntries,
+      setSelectedAuthId,
+      setSelectedPanelProfileId,
+      setSelectedRole,
+      setSelectedScopePath,
+      setValidationState,
+    ]
+  );
 
   const handleLaunch = React.useCallback(async () => {
     const launchPayload = agentProfile.launch.payload;
@@ -381,11 +465,15 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
       </div>
       <CreateAgentProfileDialog
         authProfiles={authProfiles}
+        createError={createProfileError}
         currentAuthProfileId={
           agentProfile.auth.state === "selected" ? (agentProfile.auth.profileId ?? "") : ""
         }
         currentCwd={cwd || agentProfile.workspace.detail || ""}
         existingRoles={availableRoles}
+        isCreating={isCreatingProfile}
+        onClearError={() => setCreateProfileError(null)}
+        onCreate={handleCreateProfile}
         onOpenChange={(open) => {
           if (open) {
             setCreateDialogOpen(true);
@@ -402,17 +490,25 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
 
 function CreateAgentProfileDialog({
   authProfiles,
+  createError,
   currentAuthProfileId,
   currentCwd,
   existingRoles,
+  isCreating,
+  onClearError,
+  onCreate,
   onOpenChange,
   onOpenClaudeAuth,
   open,
 }: {
   authProfiles: readonly AuthProfileOption[];
+  createError: string | null;
   currentAuthProfileId: string;
   currentCwd: string;
   existingRoles: readonly string[];
+  isCreating: boolean;
+  onClearError: () => void;
+  onCreate: (value: ProfileCreationResolvedDraft) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onOpenClaudeAuth: () => void;
   open: boolean;
@@ -422,13 +518,11 @@ function CreateAgentProfileDialog({
   const [draft, setDraft] = React.useState<ProfileCreationDraft>(() =>
     createInitialProfileDraft(currentCwd, currentAuthProfileId, authProfiles)
   );
-  const [reviewReady, setReviewReady] = React.useState(false);
   const [pickerError, setPickerError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setDraft(createInitialProfileDraft(currentCwd, currentAuthProfileId, authProfiles));
-    setReviewReady(false);
     setPickerError(null);
     const frameId = window.requestAnimationFrame(() => {
       initialFocusRef.current?.focus();
@@ -455,11 +549,14 @@ function CreateAgentProfileDialog({
     label: `${profile.displayName} · ${formatAuthMode(profile.mode)}`,
   }));
 
-  const updateDraft = React.useCallback((patch: Partial<ProfileCreationDraft>) => {
-    setReviewReady(false);
-    setPickerError(null);
-    setDraft((current) => ({ ...current, ...patch }));
-  }, []);
+  const updateDraft = React.useCallback(
+    (patch: Partial<ProfileCreationDraft>) => {
+      onClearError();
+      setPickerError(null);
+      setDraft((current) => ({ ...current, ...patch }));
+    },
+    [onClearError]
+  );
 
   const handlePickWorkspace = React.useCallback(async () => {
     const picker = window.myclaude?.system?.pickDirectory;
@@ -486,14 +583,12 @@ function CreateAgentProfileDialog({
     (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (!validation.ok) {
-        setReviewReady(false);
         announce("Agent Profile needs a little more detail before it can be created");
         return;
       }
-      setReviewReady(true);
-      announce("Agent Profile is ready to create");
+      void onCreate(resolved);
     },
-    [announce, validation.ok]
+    [announce, onCreate, resolved, validation.ok]
   );
 
   return (
@@ -614,42 +709,75 @@ function CreateAgentProfileDialog({
                 value={selectedAuth?.displayName ?? "Not selected"}
               />
             </dl>
-            {reviewReady ? (
+            {createError ? (
               <p
-                className="mt-3 rounded-md border border-status-success bg-status-success-soft px-3 py-2 text-sm text-status-success"
-                data-testid="profile-create-ready"
+                className="mt-3 rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger"
+                data-testid="profile-create-error"
+                role="alert"
               >
-                This Agent Profile is ready for the save step. Nothing has been changed yet.
+                {createError}
               </p>
             ) : (
               <p className="mt-3 text-xs text-secondary">
-                Review becomes available once purpose, workspace, and Claude identity are valid.
+                Creating the profile saves it through the desktop bridge, then selects it here.
               </p>
             )}
           </section>
 
           <DialogFooter className="flex-wrap gap-3">
-            <Button onClick={() => onOpenChange(false)} type="button" variant="secondary">
+            <Button
+              onClick={() => onOpenChange(false)}
+              disabled={isCreating}
+              type="button"
+              variant="secondary"
+            >
               Cancel
             </Button>
             {authProfiles.length === 0 ? (
-              <Button onClick={handleConnectClaudeAuth} type="button" variant="secondary">
+              <Button
+                disabled={isCreating}
+                onClick={handleConnectClaudeAuth}
+                type="button"
+                variant="secondary"
+              >
                 Connect Claude identity
               </Button>
             ) : null}
             <Button
               data-testid="profile-create-review-action"
-              disabled={!validation.ok}
+              disabled={!validation.ok || isCreating}
               type="submit"
               variant="primary"
             >
-              Review Agent Profile
+              {isCreating ? "Creating…" : "Create Agent Profile"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
   );
+}
+
+function findScopePathForRole(
+  entries: ReadonlyArray<{ role: string; path: string }>,
+  role: string
+): string | null {
+  if (!role) return null;
+  return entries.find((entry) => entry.role === role)?.path ?? entries[0]?.path ?? null;
+}
+
+function formatCreateProfileError(error: unknown): string {
+  const message = getErrorMessage(error);
+  if (/already exists/i.test(message)) {
+    return "An Agent Profile with that generated role already exists. Choose a different purpose.";
+  }
+  if (/role name/i.test(message)) {
+    return "The generated profile role is not valid. Adjust the purpose and try again.";
+  }
+  if (/workspace|cwd|directory|path/i.test(message)) {
+    return "The workspace could not be used for this Agent Profile. Choose another workspace and try again.";
+  }
+  return "Agent Profile could not be created. Check the inputs and try again.";
 }
 
 function ProfileCreationFact({

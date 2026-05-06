@@ -2,8 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   buildProfileCreateScopePayload,
   buildProfileSelection,
+  chooseRestoredProfileSelection,
   deriveProfileRoleSlug,
+  readProfileSelection,
   validateProfileCreationDraft,
+  writeProfileSelection,
   type ProfileCreationDraft,
   type ProfileCreationValidationContext,
 } from "../src/renderer/lib/profile-creation.js";
@@ -46,6 +49,64 @@ describe("deriveProfileRoleSlug", () => {
     expect(deriveProfileRoleSlug(input)).toBe(expected);
   });
 });
+
+describe("persisted profile selection", () => {
+  test("round-trips selected Agent Profile context through storage", () => {
+    const storage = createMemoryStorage();
+    const selection = {
+      role: "frontend-polish",
+      authProfileId: "work",
+      cwd: "/repo/project",
+    };
+
+    writeProfileSelection(storage, selection);
+
+    expect(readProfileSelection(storage)).toEqual(selection);
+  });
+
+  test("ignores malformed stored selection values", () => {
+    const storage = createMemoryStorage();
+    storage.setItem("agent-profile.selectedProfile", JSON.stringify({ role: "backend" }));
+
+    expect(readProfileSelection(storage)).toBeNull();
+  });
+
+  test("restores stored selection only while role and Claude identity are still available", () => {
+    const stored = {
+      role: "frontend-polish",
+      authProfileId: "work",
+      cwd: "/repo/project",
+    };
+
+    expect(
+      chooseRestoredProfileSelection({
+        stored,
+        roles: ["backend", "frontend-polish"],
+        authProfiles: [workAuth],
+        fallbackCwd: "/repo/project",
+      })
+    ).toEqual(stored);
+
+    expect(
+      chooseRestoredProfileSelection({
+        stored,
+        roles: ["backend"],
+        authProfiles: [workAuth],
+        fallbackCwd: "/repo/project",
+      })
+    ).toEqual({ role: "backend", authProfileId: "work", cwd: "/repo/project" });
+  });
+});
+
+function createMemoryStorage(): Pick<Storage, "getItem" | "setItem"> {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+  };
+}
 
 describe("validateProfileCreationDraft", () => {
   test("builds a project role createScope payload from purpose-first input", () => {

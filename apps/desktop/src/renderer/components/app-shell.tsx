@@ -72,6 +72,11 @@ import {
   normalizeScopeList,
 } from "../lib/normalize.js";
 import { usePrefersReducedMotion } from "../lib/use-prefers-reduced-motion.js";
+import {
+  chooseRestoredProfileSelection,
+  readProfileSelection,
+  writeProfileSelection,
+} from "../lib/profile-creation.js";
 import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
 import { AgentProfilesHomeScreen } from "../screens/agent-profiles-home.js";
 import { AuthVaultScreen } from "../screens/auth-vault.js";
@@ -165,32 +170,46 @@ export function AppShell(): React.ReactElement {
           (await bridge?.system?.defaultCwd?.().catch(() => null)) ??
           (typeof window.location.pathname === "string" ? window.location.pathname : "");
 
-        const listed = bridge?.profile?.list ? await bridge.profile.list({ cwd: nextCwd }) : [];
+        const storedSelection = readProfileSelection(window.localStorage);
+        const usableStoredSelection = storedSelection?.cwd === nextCwd ? storedSelection : null;
+        const preferredCwd = usableStoredSelection?.cwd ?? nextCwd;
+        const listed = bridge?.profile?.list
+          ? await bridge.profile.list({ cwd: preferredCwd })
+          : [];
         const normalizedEntries = normalizeScopeList(listed);
         const roles = collectRoles(normalizedEntries);
         const authList = bridge?.auth?.list ? await bridge.auth.list() : [];
         const normalizedAuthProfiles = normalizeAuthProfiles(authList);
+        const restoredSelection = chooseRestoredProfileSelection({
+          stored: usableStoredSelection,
+          roles,
+          authProfiles: normalizedAuthProfiles,
+          fallbackCwd: preferredCwd,
+        });
 
         if (cancelled) return;
 
         setVersion(nextVersion);
-        setCwd(nextCwd);
+        setCwd(restoredSelection.cwd);
         setScopeEntries(normalizedEntries);
         setAvailableRoles(roles);
         setAuthProfiles(normalizedAuthProfiles);
         setFirstRun(Boolean(bootstrapResult?.firstRun));
 
-        const initialRole = roles[0] ?? "";
-        const initialAuthId = normalizedAuthProfiles[0]?.id ?? "";
-        setSelectedRole(initialRole);
-        setSelectedAuthId(initialAuthId);
-        setSelectedScopePath(normalizedEntries[0]?.path ?? null);
+        setSelectedRole(restoredSelection.role);
+        setSelectedAuthId(restoredSelection.authProfileId);
+        setSelectedScopePath(findScopePathForRole(normalizedEntries, restoredSelection.role));
 
-        if (initialRole && initialAuthId && nextCwd && bridge?.profile?.show) {
+        if (
+          restoredSelection.role &&
+          restoredSelection.authProfileId &&
+          restoredSelection.cwd &&
+          bridge?.profile?.show
+        ) {
           const shown = await bridge.profile.show({
-            role: initialRole,
-            authProfileId: initialAuthId,
-            cwd: nextCwd,
+            role: restoredSelection.role,
+            authProfileId: restoredSelection.authProfileId,
+            cwd: restoredSelection.cwd,
           });
           if (cancelled) return;
           setEffectiveState(normalizeEffectiveState(shown));
@@ -221,6 +240,15 @@ export function AppShell(): React.ReactElement {
     setSelectedScopePath,
     setVersion,
   ]);
+
+  React.useEffect(() => {
+    if (!selectedRole || !selectedAuthId || !cwd) return;
+    writeProfileSelection(window.localStorage, {
+      role: selectedRole,
+      authProfileId: selectedAuthId,
+      cwd,
+    });
+  }, [cwd, selectedAuthId, selectedRole]);
 
   // ─── Theme persistence + DOM `data-theme` syncing ─────────────────────────
 
@@ -789,6 +817,14 @@ function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactEl
       </nav>
     </aside>
   );
+}
+
+function findScopePathForRole(
+  entries: ReadonlyArray<{ role: string; path: string }>,
+  role: string
+): string | null {
+  if (!role) return null;
+  return entries.find((entry) => entry.role === role)?.path ?? entries[0]?.path ?? null;
 }
 
 interface AppStatusbarProps {

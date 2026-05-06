@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
 
-test("new agent profile dialog guides purpose-first creation without persisting yet", async () => {
+test("new agent profile dialog creates and restores a purpose-first profile", async () => {
   const fixture = await createDesktopFixture("agent-profile-create-dialog-");
   await seedProfileFixture(fixture);
   const { app, page } = await launchDesktop(fixture);
@@ -26,6 +26,12 @@ test("new agent profile dialog guides purpose-first creation without persisting 
     await expect(dialog).not.toContainText("keyring://");
     await expect(dialog).not.toContainText("secretRef");
 
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("home-new-agent-profile")).toBeFocused();
+    await page.getByTestId("home-new-agent-profile").click();
+    await expect(dialog).toBeVisible();
+
     await expect(dialog.getByTestId("profile-create-review-action")).toBeDisabled();
 
     await dialog.getByTestId("profile-create-purpose").fill("backend");
@@ -37,17 +43,53 @@ test("new agent profile dialog guides purpose-first creation without persisting 
     await expect(dialog.getByTestId("profile-create-preview")).toContainText("frontend-polish");
     await expect(dialog.getByTestId("profile-create-review-action")).toBeEnabled();
     await dialog.getByTestId("profile-create-review-action").click();
-    await expect(dialog.getByTestId("profile-create-ready")).toContainText(
-      "Nothing has been changed yet"
+
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Frontend Polish");
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Ready to launch");
+    expect(existsSync(join(fixture.projectDir, ".myclaude", "roles", "frontend-polish.yml"))).toBe(
+      true
     );
 
-    await page.keyboard.press("Escape");
-    await expect(dialog).toHaveCount(0);
-    await expect(page.getByTestId("home-new-agent-profile")).toBeFocused();
-    await expect(page.getByTestId("agent-profile-card")).toContainText("Backend Agent");
-    expect(existsSync(join(fixture.projectDir, ".myclaude", "roles", "frontend-polish.yml"))).toBe(
-      false
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Frontend Polish");
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Ready to launch");
+
+    await page.getByTestId("home-new-agent-profile").click();
+    await dialog.getByTestId("profile-create-purpose").fill("Frontend Polish");
+    await expect(dialog).toContainText("already exists");
+    await expect(dialog.getByTestId("profile-create-review-action")).toBeDisabled();
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("new agent profile dialog shows calm service errors without raw paths", async () => {
+  const fixture = await createDesktopFixture("agent-profile-create-service-error-");
+  await seedProfileFixture(fixture);
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("home-new-agent-profile").click();
+
+    const dialog = page.getByTestId("profile-create-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("profile-create-purpose").fill("Race Duplicate");
+    await expect(dialog.getByTestId("profile-create-review-action")).toBeEnabled();
+
+    const duplicatePath = join(fixture.projectDir, ".myclaude", "roles", "race-duplicate.yml");
+    await mkdir(join(fixture.projectDir, ".myclaude", "roles"), { recursive: true });
+    await writeFile(duplicatePath, "version: 1\n");
+
+    await dialog.getByTestId("profile-create-review-action").click();
+    await expect(dialog.getByTestId("profile-create-error")).toContainText(
+      "An Agent Profile with that generated role already exists"
     );
+    await expect(dialog.getByTestId("profile-create-error")).not.toContainText(duplicatePath);
+    await expect(dialog).toBeVisible();
   } finally {
     await app.close();
     await fixture.cleanup();
