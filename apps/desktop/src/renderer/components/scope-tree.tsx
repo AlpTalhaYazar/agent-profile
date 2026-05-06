@@ -16,7 +16,7 @@ import { useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 export interface ScopeTreeProps {
   entries: ScopeListEntry[];
   selectedPath: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (path: string, returnFocusTo?: HTMLElement | null) => void;
 }
 
 export function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): React.ReactElement {
@@ -74,7 +74,9 @@ export function ScopeTree({ entries, selectedPath, onSelect }: ScopeTreeProps): 
                       "grid w-full gap-1 rounded-md border border-transparent px-2 py-2 text-left transition-colors",
                       selectedPath === entry.path ? "border-default bg-elevated" : "hover:bg-subtle"
                     )}
-                    onClick={() => onSelect(entry.path)}
+                    onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                      onSelect(entry.path, event.currentTarget)
+                    }
                     type="button"
                     {...getItemProps(rovingIndex)}
                   >

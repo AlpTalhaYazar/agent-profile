@@ -60,6 +60,7 @@ import * as React from "react";
 import type { SkillCatalogItem, WorkspaceCandidateOption } from "../../shared/bridge.js";
 import { FormEditor } from "../components/form-editor.js";
 import { useAnnounce } from "../components/live-announcer.js";
+import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
 import {
   PreviewSummary,
   ProfileEditorInspector,
@@ -108,6 +109,7 @@ import {
   validationStateAtom,
   versionAtom,
 } from "../lib/atoms.js";
+import { agentProfileViewModelAtom } from "../lib/agent-profile-view-model.js";
 import { cloneDoc, parseJsonObject, stringifyDoc, stringifyValue } from "../lib/clone.js";
 import {
   getErrorMessage,
@@ -116,6 +118,8 @@ import {
   normalizeScopeList,
   normalizeValidationIssues,
 } from "../lib/normalize.js";
+import { mergeValidationIssues, normalizeProfilePreviewResponse } from "../lib/profile-preview.js";
+import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
 import type { ScopeDoc } from "../lib/types.js";
 import { PersonaComposerScreen } from "./persona-composer.js";
 import { ProvenanceInspectorScreen } from "./provenance-inspector.js";
@@ -147,12 +151,14 @@ export function ProfileEditorScreen(): React.ReactElement {
   const setActiveTerminalSessionId = useSetAtom(activeTerminalSessionIdAtom);
   const selectedScope = useAtomValue(selectedScopeAtom);
   const selectedScopeLabel = useAtomValue(selectedScopeLabelAtom);
+  const agentProfile = useAtomValue(agentProfileViewModelAtom);
   const hasUnsavedChanges = useAtomValue(hasUnsavedChangesAtom);
   const issuesByPath = useAtomValue(issuesByPathAtom);
   const version = useAtomValue(versionAtom);
   const previewScrollTargets = React.useRef<Record<string, HTMLElement | null>>({});
   const previewPaneRef = React.useRef<HTMLDivElement | null>(null);
   const announce = useAnnounce();
+  const draftGuard = useProfileDraftNavigationGuard({ announce });
   const [launching, setLaunching] = React.useState(false);
   const [createScopeOpen, setCreateScopeOpen] = React.useState(false);
   const [addMcpOpen, setAddMcpOpen] = React.useState(false);
@@ -325,18 +331,32 @@ export function ProfileEditorScreen(): React.ReactElement {
       ])
         .then(([validationResult, previewResult]) => {
           if (cancelled) return;
-          const issues = normalizeValidationIssues(validationResult);
-          const previewEffective = normalizeEffectiveState(previewResult).effective;
-          const diff = createDiffSummary(effectiveState.effective, previewEffective);
+          const validationIssues = normalizeValidationIssues(validationResult);
+          const preview = normalizeProfilePreviewResponse(previewResult, {
+            currentEffective: effectiveState.effective,
+            createDiffSummary,
+          });
+          const issues = mergeValidationIssues(validationIssues, preview.issues);
           setValidationState({
             status: "ready",
             issues,
             errorMessage: null,
           });
+
+          if (preview.status === "error") {
+            setPreviewState({
+              status: "error",
+              effective: null,
+              diff: [],
+              errorMessage: preview.errorMessage,
+            });
+            return;
+          }
+
           setPreviewState({
             status: "ready",
-            effective: previewEffective,
-            diff,
+            effective: preview.effective,
+            diff: preview.diff,
             errorMessage: null,
           });
         })
@@ -424,13 +444,62 @@ export function ProfileEditorScreen(): React.ReactElement {
     [setDraftDoc, setJsonState, setSettingsParseError, setSettingsText]
   );
 
+  const requestDraftSafeChange = React.useCallback(
+    (continuation: () => void, returnFocusTo?: HTMLElement | null) => {
+      draftGuard.request(continuation, { returnFocusTo });
+    },
+    [draftGuard]
+  );
+
+  const guardedSetCwd = React.useCallback(
+    (nextCwd: string, returnFocusTo?: HTMLElement | null) => {
+      if (nextCwd === cwd) return;
+      requestDraftSafeChange(() => setCwd(nextCwd), returnFocusTo);
+    },
+    [cwd, requestDraftSafeChange, setCwd]
+  );
+
+  const guardedSetSelectedRole = React.useCallback(
+    (nextRole: string, returnFocusTo?: HTMLElement | null) => {
+      if (nextRole === selectedRole) return;
+      requestDraftSafeChange(() => setSelectedRole(nextRole), returnFocusTo);
+    },
+    [requestDraftSafeChange, selectedRole, setSelectedRole]
+  );
+
+  const guardedSetSelectedAuthId = React.useCallback(
+    (nextAuthId: string, returnFocusTo?: HTMLElement | null) => {
+      if (nextAuthId === selectedAuthId) return;
+      requestDraftSafeChange(() => setSelectedAuthId(nextAuthId), returnFocusTo);
+    },
+    [requestDraftSafeChange, selectedAuthId, setSelectedAuthId]
+  );
+
+  const guardedSetSelectedScopePath = React.useCallback(
+    (nextPath: string, returnFocusTo?: HTMLElement | null) => {
+      if (nextPath === selectedScopePath) return;
+      requestDraftSafeChange(() => setSelectedScopePath(nextPath), returnFocusTo);
+    },
+    [requestDraftSafeChange, selectedScopePath, setSelectedScopePath]
+  );
+
+  const guardedSetCurrentScreen = React.useCallback(
+    (
+      nextScreen: "home" | "editor" | "auth-vault" | "sessions",
+      returnFocusTo?: HTMLElement | null
+    ) => {
+      requestDraftSafeChange(() => setCurrentScreen(nextScreen), returnFocusTo);
+    },
+    [requestDraftSafeChange, setCurrentScreen]
+  );
+
   const handlePickDirectory = React.useCallback(async () => {
     const picked = await window.myclaude?.system?.pickDirectory?.().catch(() => null);
-    if (picked) setCwd(picked);
-  }, [setCwd]);
+    if (picked) guardedSetCwd(picked);
+  }, [guardedSetCwd]);
 
   const selectLayerForRole = React.useCallback(
-    (role: string) => {
+    (role: string, returnFocusTo?: HTMLElement | null) => {
       const matchingRoleLayer = scopeEntries.find(
         (entry) => entry.content && entry.role === role && entry.scope.includes("role")
       );
@@ -439,23 +508,19 @@ export function ProfileEditorScreen(): React.ReactElement {
         scopeEntries.find((entry) => entry.content) ??
         null;
       const target = matchingRoleLayer ?? fallbackLayer;
-      if (target) {
-        setSelectedScopePath(target.path);
-      }
-      setWorkspaceTab("layers");
+      requestDraftSafeChange(() => {
+        if (target) setSelectedScopePath(target.path);
+        setWorkspaceTab("layers");
+      }, returnFocusTo);
     },
-    [scopeEntries, selectedScopePath, setSelectedScopePath, setWorkspaceTab]
+    [requestDraftSafeChange, scopeEntries, selectedScopePath, setSelectedScopePath, setWorkspaceTab]
   );
 
-  const stageScopeDraft = React.useCallback(
+  const applyScopeDraft = React.useCallback(
     (path: string, updater: (current: ScopeDoc) => ScopeDoc): boolean => {
       const entry = scopeEntries.find((candidate) => candidate.path === path);
       if (!entry?.content) {
         setAppError("Create or select a writable layer before editing MCP or skills.");
-        return false;
-      }
-      if (path !== selectedScopePath && hasUnsavedChanges) {
-        setAppError("Save or revert the current layer before editing another layer.");
         return false;
       }
 
@@ -477,7 +542,6 @@ export function ProfileEditorScreen(): React.ReactElement {
     },
     [
       draftDoc,
-      hasUnsavedChanges,
       originalDoc,
       scopeEntries,
       selectedScopePath,
@@ -491,6 +555,31 @@ export function ProfileEditorScreen(): React.ReactElement {
       setSettingsText,
       setValidationState,
       setWorkspaceTab,
+    ]
+  );
+
+  const stageScopeDraft = React.useCallback(
+    (path: string, updater: (current: ScopeDoc) => ScopeDoc): boolean => {
+      const entry = scopeEntries.find((candidate) => candidate.path === path);
+      if (!entry?.content) {
+        setAppError("Create or select a writable layer before editing MCP or skills.");
+        return false;
+      }
+      if (path !== selectedScopePath && hasUnsavedChanges) {
+        requestDraftSafeChange(() => {
+          void applyScopeDraft(path, updater);
+        });
+        return true;
+      }
+      return applyScopeDraft(path, updater);
+    },
+    [
+      applyScopeDraft,
+      hasUnsavedChanges,
+      requestDraftSafeChange,
+      scopeEntries,
+      selectedScopePath,
+      setAppError,
     ]
   );
 
@@ -634,9 +723,10 @@ export function ProfileEditorScreen(): React.ReactElement {
     settingsParseError,
   ]);
 
-  const handleLaunch = React.useCallback(async () => {
-    if (!cwd || !selectedRole || !selectedAuthId) {
-      setAppError("Select a working directory, role, and Claude credential before launching.");
+  const executeLaunch = React.useCallback(async () => {
+    const launchPayload = agentProfile.launch.payload;
+    if (!launchPayload) {
+      setAppError(agentProfile.launch.disabledReason ?? "Profile is not ready to launch.");
       return;
     }
     const bridge = window.myclaude?.sessions;
@@ -648,11 +738,7 @@ export function ProfileEditorScreen(): React.ReactElement {
     setLaunching(true);
     setAppError(null);
     try {
-      const result = await bridge.launch({
-        role: selectedRole,
-        authProfileId: selectedAuthId,
-        cwd,
-      });
+      const result = await bridge.launch(launchPayload);
       setActiveTerminalSessionId(result.sessionId);
       setCurrentScreen("sessions");
       announce("Claude session launched");
@@ -664,14 +750,23 @@ export function ProfileEditorScreen(): React.ReactElement {
       setLaunching(false);
     }
   }, [
+    agentProfile.launch.disabledReason,
+    agentProfile.launch.payload,
     announce,
-    cwd,
-    selectedAuthId,
-    selectedRole,
     setActiveTerminalSessionId,
     setAppError,
     setCurrentScreen,
   ]);
+
+  const handleLaunch = React.useCallback(() => {
+    if (hasUnsavedChanges) {
+      draftGuard.request(() => {
+        void executeLaunch();
+      });
+      return;
+    }
+    void executeLaunch();
+  }, [draftGuard, executeLaunch, hasUnsavedChanges]);
 
   React.useEffect(() => {
     if (validationState.status === "ready") {
@@ -697,17 +792,13 @@ export function ProfileEditorScreen(): React.ReactElement {
   const previewEffective = previewState.effective ?? effectiveState.effective;
   const editorDisabled = !draftDoc;
   const invalidDraft = Boolean(settingsParseError || jsonState.parseError);
-  const selectedAuth = authProfiles.find((profile) => profile.id === selectedAuthId);
-  const selectedAuthLabel = selectedAuth?.displayName || selectedAuth?.id || selectedAuthId || "—";
-  const mcpCount = Object.keys(previewEffective?.mcpServers ?? {}).length;
-  const envCount = Object.keys(previewEffective?.env ?? {}).length;
-  const settingsCount = Object.keys(previewEffective?.settings ?? {}).length;
-  const skillCount = previewEffective?.persona.skills.length ?? 0;
-  const personaCount = Object.values(previewEffective?.persona ?? {}).reduce(
-    (sum, paths) => sum + paths.length,
-    0
-  );
-  const launchReady = Boolean(cwd && selectedRole && selectedAuthId);
+  const selectedAuthLabel = agentProfile.auth.label;
+  const mcpCount = agentProfile.toolSkillCounts.tools;
+  const envCount = agentProfile.toolSkillCounts.envVars;
+  const settingsCount = agentProfile.toolSkillCounts.settings;
+  const skillCount = agentProfile.toolSkillCounts.skills;
+  const personaCount = agentProfile.toolSkillCounts.personaAssets;
+  const launchReady = agentProfile.launch.canLaunch;
   const writableLayerOptions = scopeEntries
     .filter((entry) => entry.content)
     .map((entry) => ({
@@ -735,21 +826,23 @@ export function ProfileEditorScreen(): React.ReactElement {
           <WorkingDirectoryDropdown
             cwd={cwd}
             onBrowse={() => void handlePickDirectory()}
-            onChange={setCwd}
+            onChange={guardedSetCwd}
             recentCwds={recentCwds}
             workspaceCandidates={workspaceCandidates}
           />
           <RoleDropdown
             availableRoles={availableRoles}
             onCreateLayer={() => setCreateScopeOpen(true)}
-            onManageLayer={() => selectLayerForRole(selectedRole)}
-            onRoleChange={setSelectedRole}
+            onManageLayer={(returnFocusTo) => selectLayerForRole(selectedRole, returnFocusTo)}
+            onRoleChange={guardedSetSelectedRole}
             selectedRole={selectedRole}
           />
           <CredentialDropdown
             authProfiles={authProfiles}
-            onCredentialChange={setSelectedAuthId}
-            onManageCredentials={() => setCurrentScreen("auth-vault")}
+            onCredentialChange={guardedSetSelectedAuthId}
+            onManageCredentials={(returnFocusTo) =>
+              guardedSetCurrentScreen("auth-vault", returnFocusTo)
+            }
             selectedAuthId={selectedAuthId}
           />
         </div>
@@ -759,15 +852,18 @@ export function ProfileEditorScreen(): React.ReactElement {
             description={
               launchReady
                 ? "Your profile context is configured and ready."
-                : "Choose a role, Claude credential, and workspace before launching."
+                : (agentProfile.readiness.blockingReason?.message ??
+                  "Choose a role, Claude credential, and workspace before launching.")
             }
             icon={Rocket}
             ready={launchReady}
             title={launchReady ? "Ready to launch" : "Select context to launch"}
             chips={
               <>
-                <StatusChip tone={selectedAuthId ? "success" : "warning"}>
-                  {selectedAuthId ? "Claude credential selected" : "No Claude credential"}
+                <StatusChip tone={agentProfile.auth.state === "selected" ? "success" : "warning"}>
+                  {agentProfile.auth.state === "selected"
+                    ? "Claude credential selected"
+                    : "No Claude credential"}
                 </StatusChip>
                 <StatusChip tone={mcpCount > 0 ? "info" : "neutral"}>
                   {mcpCount} MCP servers
@@ -871,7 +967,7 @@ export function ProfileEditorScreen(): React.ReactElement {
                   <ReadinessRow
                     label="Claude credential"
                     value={selectedAuthLabel}
-                    ok={!!selectedAuthId}
+                    ok={agentProfile.auth.state === "selected"}
                   />
                   <ReadinessRow
                     label="Working directory"
@@ -897,9 +993,9 @@ export function ProfileEditorScreen(): React.ReactElement {
 
               <InfoPanel icon={ClipboardList} title="Effective profile summary">
                 <dl className="mt-3 grid gap-3 text-sm">
-                  <SummaryRow label="Resolved role" value={selectedRole || "—"} />
+                  <SummaryRow label="Resolved role" value={agentProfile.name} />
                   <SummaryRow label="Claude credential" value={selectedAuthLabel} />
-                  <SummaryRow label="Workspace" value={cwd || "—"} />
+                  <SummaryRow label="Workspace" value={agentProfile.workspace.detail} />
                   <SummaryRow label="Selected layer" value={selectedScopeLabel} />
                 </dl>
               </InfoPanel>
@@ -943,7 +1039,9 @@ export function ProfileEditorScreen(): React.ReactElement {
                       Launch Claude
                     </Button>
                     <Button
-                      onClick={() => setCurrentScreen("sessions")}
+                      onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                        guardedSetCurrentScreen("sessions", event.currentTarget)
+                      }
                       type="button"
                       variant="secondary"
                     >
@@ -986,7 +1084,7 @@ export function ProfileEditorScreen(): React.ReactElement {
                 </div>
                 <ScopeTree
                   entries={scopeEntries}
-                  onSelect={setSelectedScopePath}
+                  onSelect={guardedSetSelectedScopePath}
                   selectedPath={selectedScopePath}
                 />
               </aside>
@@ -1217,6 +1315,7 @@ export function ProfileEditorScreen(): React.ReactElement {
           ) : null}
         </div>
       </div>
+      <ProfileUnsavedChangesDialog guard={draftGuard} />
       <CreateScopeDialog
         defaultRole={selectedRole}
         onCreate={(input) => void handleCreateScope(input)}
@@ -1290,7 +1389,7 @@ function WorkingDirectoryDropdown({
 }: {
   cwd: string;
   onBrowse: () => void;
-  onChange: (value: string) => void;
+  onChange: (value: string, returnFocusTo?: HTMLElement | null) => void;
   recentCwds: string[];
   workspaceCandidates: WorkspaceCandidateOption[];
 }): React.ReactElement {
@@ -1309,7 +1408,7 @@ function WorkingDirectoryDropdown({
                 setDraft(event.target.value)
               }
               onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
-                if (event.key === "Enter") onChange(draft);
+                if (event.key === "Enter") onChange(draft, event.currentTarget);
               }}
               value={draft}
             />
@@ -1320,7 +1419,13 @@ function WorkingDirectoryDropdown({
         </Field>
         <div className="flex justify-end">
           <PopoverClose asChild>
-            <Button disabled={!draft.trim()} onClick={() => onChange(draft.trim())} type="button">
+            <Button
+              disabled={!draft.trim()}
+              onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                onChange(draft.trim(), event.currentTarget)
+              }
+              type="button"
+            >
               Apply
             </Button>
           </PopoverClose>
@@ -1344,7 +1449,9 @@ function WorkingDirectoryDropdown({
                         "min-w-0 rounded-md px-2 py-2 text-left text-sm text-secondary hover:bg-elevated hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         candidate.path === cwd && "bg-elevated text-primary"
                       )}
-                      onClick={() => onChange(candidate.path)}
+                      onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                        onChange(candidate.path, event.currentTarget)
+                      }
                       type="button"
                     >
                       <span className="flex min-w-0 items-center gap-2">
@@ -1378,7 +1485,9 @@ function WorkingDirectoryDropdown({
                 <PopoverClose asChild key={path}>
                   <button
                     className="min-w-0 rounded-md px-2 py-2 text-left text-sm text-secondary hover:bg-elevated hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => onChange(path)}
+                    onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                      onChange(path, event.currentTarget)
+                    }
                     type="button"
                   >
                     <span className="block truncate font-mono text-xs">{path}</span>
@@ -1402,8 +1511,8 @@ function RoleDropdown({
 }: {
   availableRoles: string[];
   onCreateLayer: () => void;
-  onManageLayer: () => void;
-  onRoleChange: (value: string) => void;
+  onManageLayer: (returnFocusTo?: HTMLElement | null) => void;
+  onRoleChange: (value: string, returnFocusTo?: HTMLElement | null) => void;
   selectedRole: string;
 }): React.ReactElement {
   const [query, setQuery] = React.useState("");
@@ -1433,7 +1542,9 @@ function RoleDropdown({
                     "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     role === selectedRole ? "bg-accent-soft text-primary" : "text-secondary"
                   )}
-                  onClick={() => onRoleChange(role)}
+                  onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                    onRoleChange(role, event.currentTarget)
+                  }
                   type="button"
                 >
                   <span className="truncate font-medium">{role}</span>
@@ -1457,7 +1568,9 @@ function RoleDropdown({
           <PopoverClose asChild>
             <Button
               disabled={!selectedRole}
-              onClick={onManageLayer}
+              onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                onManageLayer(event.currentTarget)
+              }
               type="button"
               variant="secondary"
             >
@@ -1478,8 +1591,8 @@ function CredentialDropdown({
   selectedAuthId,
 }: {
   authProfiles: Array<{ id: string; displayName: string; mode: string }>;
-  onCredentialChange: (value: string) => void;
-  onManageCredentials: () => void;
+  onCredentialChange: (value: string, returnFocusTo?: HTMLElement | null) => void;
+  onManageCredentials: (returnFocusTo?: HTMLElement | null) => void;
   selectedAuthId: string;
 }): React.ReactElement {
   const selected = authProfiles.find((profile) => profile.id === selectedAuthId);
@@ -1499,7 +1612,9 @@ function CredentialDropdown({
                     "flex w-full min-w-0 items-center justify-between gap-3 px-3 py-2 text-left hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     profile.id === selectedAuthId ? "bg-accent-soft" : ""
                   )}
-                  onClick={() => onCredentialChange(profile.id)}
+                  onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                    onCredentialChange(profile.id, event.currentTarget)
+                  }
                   type="button"
                 >
                   <span className="min-w-0">
@@ -1521,7 +1636,13 @@ function CredentialDropdown({
           )}
         </div>
         <PopoverClose asChild>
-          <Button onClick={onManageCredentials} type="button" variant="primary">
+          <Button
+            onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+              onManageCredentials(event.currentTarget)
+            }
+            type="button"
+            variant="primary"
+          >
             <ShieldCheck className="h-4 w-4" aria-hidden="true" />
             {authProfiles.length > 0 ? "Manage credentials" : "Connect Claude"}
           </Button>

@@ -451,8 +451,9 @@ export function SessionMonitorScreen(): React.ReactElement {
                   const active = key === selectedKey;
                   return (
                     <TableRow
+                      aria-label={`Select session ${s.title || s.sessionId}`}
                       aria-selected={active}
-                      className="h-12 cursor-pointer"
+                      className="h-12 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       data-state={active ? "selected" : undefined}
                       key={key}
                       onClick={() => setSelectedKey(key)}
@@ -691,6 +692,7 @@ export function SessionMonitorScreen(): React.ReactElement {
                   <Button
                     onClick={() => {
                       void navigator.clipboard?.writeText(selected.spawnCommand ?? "");
+                      announce("Session command copied");
                     }}
                     size="sm"
                     type="button"

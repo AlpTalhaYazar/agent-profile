@@ -62,6 +62,7 @@ export interface AuthProfileOption {
   displayName: string;
   mode: string;
   secretCount: number;
+  secretNames: string[];
 }
 
 export interface FieldProvenance {

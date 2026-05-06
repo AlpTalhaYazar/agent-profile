@@ -80,13 +80,16 @@ export const issuesByPathAtom = atom((get) => {
 
 // ─── App-level navigation (Phase 2 milestone 5 + 6) ──────────────────────────
 
-export type AppScreen = "editor" | "auth-vault" | "sessions";
+export type AppScreen = "home" | "editor" | "auth-vault" | "sessions";
 export type ProfileWorkspaceTab = "overview" | "layers" | "debug";
 export type ProfileDebugTab = "provenance" | "persona";
+export type AgentProfilePanelSection = "summary" | "identity" | "tools" | "skills" | "inspect";
 
-export const currentScreenAtom = atom<AppScreen>("editor");
+export const currentScreenAtom = atom<AppScreen>("home");
 export const profileWorkspaceTabAtom = atom<ProfileWorkspaceTab>("overview");
 export const profileDebugTabAtom = atom<ProfileDebugTab>("provenance");
+export const selectedAgentProfilePanelIdAtom = atom<string | null>(null);
+export const agentProfilePanelSectionAtom = atom<AgentProfilePanelSection>("summary");
 export const activeTerminalSessionIdAtom = atom<string | null>(null);
 export const themeAtom = atom<"dark" | "light">("dark");
 export const commandPaletteOpenAtom = atom(false);

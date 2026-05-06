@@ -1,7 +1,7 @@
 /**
  * @module renderer/screens/auth-vault
  *
- * Phase 2 milestone 5 Auth Vault screen.
+ * Claude Auth screen focused on Claude identity and credential health.
  *
  * Hybrid plaintext flow:
  *  - `Add profile` → `window.myclaude.auth.add(spec)`. The Renderer payload
@@ -268,7 +268,7 @@ export function AuthVaultScreen(): React.ReactElement {
             Connect Claude
           </Button>
         }
-        description="Credentials used by Profile Workspace launch"
+        description="Claude identities used by Agent Profiles launch and readiness"
         title="Claude Auth"
       />
       <div className="grid min-h-0 flex-1 grid-cols-1 window-large:grid-cols-[360px_minmax(0,1fr)]">
@@ -277,8 +277,8 @@ export function AuthVaultScreen(): React.ReactElement {
             <div className="flex items-center gap-3">
               <IconFrame icon={KeyRound} size="sm" />
               <div>
-                <h2 className="text-base font-semibold text-primary">Claude credentials</h2>
-                <p className="text-sm text-secondary">{profiles.length} configured</p>
+                <h2 className="text-base font-semibold text-primary">Claude identities</h2>
+                <p className="text-sm text-secondary">{profiles.length} connected</p>
               </div>
             </div>
           </div>
@@ -286,8 +286,8 @@ export function AuthVaultScreen(): React.ReactElement {
             <p className="px-4 py-6 text-sm text-secondary">Loading…</p>
           ) : profiles.length === 0 ? (
             <div className="h-72">
-              <EmptyState icon={KeyRound} title="No Claude credentials">
-                Connect Claude before launching a workspace session.
+              <EmptyState icon={KeyRound} title="No Claude identities">
+                Connect Claude before launching an Agent Profile.
               </EmptyState>
             </div>
           ) : (
@@ -334,8 +334,8 @@ export function AuthVaultScreen(): React.ReactElement {
 
         <section className="app-scrollbar min-h-0 overflow-auto bg-subtle">
           {selected === null ? (
-            <EmptyState icon={KeyRound} title="Select a Claude credential">
-              Choose a credential from the list to inspect its real stored metadata.
+            <EmptyState icon={KeyRound} title="Select a Claude identity">
+              Choose an identity from the list to inspect credential health and actions.
             </EmptyState>
           ) : (
             <div className="space-y-6 p-6">
@@ -400,73 +400,87 @@ export function AuthVaultScreen(): React.ReactElement {
                 </div>
               ) : null}
 
-              <CredentialSummary profile={selected} />
+              <div data-testid="claude-auth-identity-summary">
+                <CredentialSummary profile={selected} />
+              </div>
 
-              <InfoPanel
-                actions={
-                  <Button
-                    aria-label="Add or update MCP secret"
-                    disabled={busy || selectedIsDetected}
-                    onClick={() => setAddSecretOpen(true)}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                    Add / update secret
-                  </Button>
-                }
-                icon={Wrench}
-                title="MCP secrets"
+              <section
+                className="rounded-md border border-subtle bg-surface shadow-xs"
+                data-testid="claude-auth-tool-secret-support"
               >
-                <p className="mb-3 text-xs text-secondary">
-                  Tool tokens available to this Claude credential.
-                </p>
-                <div className="sr-only">
-                  <p className="text-xs text-secondary">
-                    Third-party API tokens passed to MCP servers (e.g. <code>github.pat</code>,{" "}
-                    <code>postgres.acme</code>). Not the Claude key.
-                  </p>
-                </div>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selected.secrets.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={3} className="text-sm text-secondary">
-                          No MCP secrets registered yet.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      selected.secrets.map((name) => (
-                        <TableRow key={name}>
-                          <TableCell className="font-mono text-xs">{name}</TableCell>
-                          <TableCell>
-                            <Badge tone="success">present</Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              disabled={busy || selectedIsDetected}
-                              onClick={() => setEditingSecret(name)}
-                            >
-                              Edit
-                            </Button>
-                          </TableCell>
+                <details>
+                  <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <IconFrame icon={Wrench} size="sm" tone="neutral" />
+                    <span className="min-w-0">
+                      <span className="block text-base font-semibold text-primary">
+                        Advanced tool secret support
+                      </span>
+                      <span className="mt-1 block text-sm leading-6 text-secondary">
+                        Tool and MCP readiness is shown from each Agent Profile. Use this advanced
+                        area only when a profile's Tools section asks you to add or update a stored
+                        tool token for this Claude identity.
+                      </span>
+                    </span>
+                  </summary>
+                  <div className="border-t border-subtle px-4 pb-4 pt-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs leading-5 text-secondary">
+                        Stores third-party tool tokens by logical name. Plaintext stays in this
+                        short-lived dialog and never enters renderer global state.
+                      </p>
+                      <Button
+                        aria-label="Add or update MCP secret"
+                        disabled={busy || selectedIsDetected}
+                        onClick={() => setAddSecretOpen(true)}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Plus className="h-4 w-4" aria-hidden="true" />
+                        Add / update tool secret
+                      </Button>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </InfoPanel>
+                      </TableHeader>
+                      <TableBody>
+                        {selected.secrets.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={3} className="text-sm text-secondary">
+                              No tool secrets registered yet.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          selected.secrets.map((name) => (
+                            <TableRow key={name}>
+                              <TableCell className="font-mono text-xs">{name}</TableCell>
+                              <TableCell>
+                                <Badge tone="success">present</Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={busy || selectedIsDetected}
+                                  onClick={() => setEditingSecret(name)}
+                                >
+                                  Edit
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </details>
+              </section>
             </div>
           )}
         </section>
@@ -666,7 +680,7 @@ function CredentialSummary({ profile }: { profile: AuthProfileView }): React.Rea
   }
 
   return (
-    <InfoPanel icon={KeyRound} title="Claude credential">
+    <InfoPanel icon={KeyRound} title="Credential health">
       <dl className="mt-3 grid gap-3 text-sm window-large:grid-cols-2">
         {rows.map((row) => (
           <div className="grid gap-1" key={row.label}>
@@ -891,22 +905,14 @@ export function AddAuthProfileForm({
   const [localBusy, setLocalBusy] = React.useState(false);
   const [displayName, setDisplayName] = React.useState("");
   const [mode, setMode] = React.useState<AuthMode>("apiKey");
-  const [secretRef, setSecretRef] = React.useState("");
   const displayNameId = React.useId();
-  const secretRefId = React.useId();
 
   const derivedId = slugify(displayName);
-
-  React.useEffect(() => {
-    if (derivedId && !secretRef) {
-      setSecretRef(`keyring://anthropic/${derivedId}`);
-    }
-  }, [derivedId, secretRef]);
+  const derivedSecretRef = `keyring://anthropic/${derivedId}`;
 
   const isOAuth = mode === "oauth";
   const effectiveBusy = busy || localBusy;
-  const canSubmit =
-    displayName.trim().length > 0 && (isOAuth || secretRef.length > 0) && !effectiveBusy;
+  const canSubmit = displayName.trim().length > 0 && !effectiveBusy;
 
   return (
     <div className="grid gap-4">
@@ -932,18 +938,15 @@ export function AddAuthProfileForm({
             value={mode}
           />
         </Field>
-        {isOAuth ? null : (
-          <Field
-            description="Where the key will be stored"
-            htmlFor={secretRefId}
-            label="Claude secret ref"
-          >
-            <Input
-              id={secretRefId}
-              onChange={(ev) => setSecretRef(ev.target.value)}
-              value={secretRef}
-            />
-          </Field>
+        {isOAuth ? (
+          <p className="rounded-md border border-subtle bg-subtle px-3 py-2 text-sm text-secondary">
+            OAuth opens a browser sign-in flow. Raw OAuth internals stay outside this screen.
+          </p>
+        ) : (
+          <p className="rounded-md border border-subtle bg-subtle px-3 py-2 text-sm text-secondary">
+            The Claude key is collected in a secure Main-owned dialog after this step. Storage refs
+            and key values are not shown here.
+          </p>
         )}
       </div>
       <div className="flex justify-end gap-2">
@@ -975,7 +978,7 @@ export function AddAuthProfileForm({
             }
             const spec: AddAuthProfileSpec = {
               id: derivedId,
-              anthropic: { mode, secretRef },
+              anthropic: { mode, secretRef: derivedSecretRef },
             };
             if (displayName) spec.displayName = displayName;
             void onSubmit(spec);
@@ -1005,9 +1008,10 @@ function AddProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect Claude credential</DialogTitle>
+          <DialogTitle>Connect Claude identity</DialogTitle>
           <DialogDescription>
-            API keys are collected by a Main-owned dialog. OAuth opens the browser sign-in flow.
+            API keys are collected by a secure Main-owned dialog. OAuth opens the browser sign-in
+            flow.
           </DialogDescription>
         </DialogHeader>
         <AddAuthProfileForm

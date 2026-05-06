@@ -16,7 +16,7 @@ interface ShortcutsHelpProps {
 
 const SHORTCUTS = [
   ["Global", "Cmd/Ctrl K", "Open command palette"],
-  ["Global", "Cmd/Ctrl 1-3", "Switch screens"],
+  ["Global", "Cmd/Ctrl 1-4", "Switch screens"],
   ["Global", "?", "Open keyboard shortcuts"],
   ["Global", "Escape", "Close dialogs and overlays"],
   ["Tree", "Up / Down", "Move between scope entries"],

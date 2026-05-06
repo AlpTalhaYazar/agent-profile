@@ -24,7 +24,7 @@ export function StepDone({
     setError(null);
     try {
       await window.myclaude?.setup?.markComplete();
-      setCurrentScreen("editor");
+      setCurrentScreen("home");
       onComplete();
     } catch (err) {
       setError(getErrorMessage(err));
@@ -42,7 +42,7 @@ export function StepDone({
             Setup complete
           </h1>
           <p className="text-sm text-secondary">
-            Profile Workspace will open with this credential and role selected.
+            Agent Profiles will open with this credential and role ready to review.
           </p>
         </div>
       </div>
@@ -75,7 +75,7 @@ export function StepDone({
           type="button"
           variant="primary"
         >
-          {busy ? "Finishing..." : "Go to Profile Workspace"}
+          {busy ? "Finishing..." : "Go to Agent Profiles"}
         </Button>
       </div>
     </section>

@@ -3,7 +3,7 @@
  *
  * The application shell — titlebar (logo, palette trigger, theme orb),
  * primary sidebar (sidebar-* nav items used by every e2e spec), screen
- * router, statusbar, and the global keyboard shortcuts (⌘K, ⌘1–5).
+ * router, statusbar, and the global keyboard shortcuts (⌘K, ⌘1–4).
  *
  * Owns the theme-toggle handler. The View Transition API circle-reveal is
  * gated by `usePrefersReducedMotion()`: when the OS has reduced-motion on,
@@ -34,6 +34,7 @@ import {
   MonitorPlay,
   Moon,
   Search,
+  Sparkles,
   Sun,
 } from "lucide-react";
 import * as React from "react";
@@ -71,17 +72,21 @@ import {
   normalizeScopeList,
 } from "../lib/normalize.js";
 import { usePrefersReducedMotion } from "../lib/use-prefers-reduced-motion.js";
+import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
+import { AgentProfilesHomeScreen } from "../screens/agent-profiles-home.js";
 import { AuthVaultScreen } from "../screens/auth-vault.js";
 import { ProfileEditorScreen } from "../screens/profile-editor.js";
 import { SessionMonitorScreen } from "../screens/session-monitor.js";
 import { WizardShell } from "../screens/wizard/wizard-shell.js";
 import { CommandPalette, type CommandPaletteItem } from "./command-palette.js";
 import { LiveAnnouncer, useAnnounce } from "./live-announcer.js";
+import { ProfileUnsavedChangesDialog } from "./profile-unsaved-dialog.js";
 import { ShortcutsHelp } from "./shortcuts-help.js";
 
 const THEME_STORAGE_KEY = "agent-profile.theme";
 
 export const SCREEN_LABELS: Record<AppScreen, string> = {
+  home: "Agent Profiles",
   editor: "Profile Workspace",
   "auth-vault": "Claude Auth",
   sessions: "Sessions",
@@ -127,6 +132,15 @@ export function AppShell(): React.ReactElement {
   const announce = useAnnounce();
   const commandPaletteReturnFocusRef = React.useRef<HTMLElement | null>(null);
   const previousScreenRef = React.useRef<AppScreen | null>(null);
+  const draftGuard = useProfileDraftNavigationGuard({ announce });
+
+  const requestScreenChange = React.useCallback(
+    (screen: AppScreen, options?: { returnFocusTo?: HTMLElement | null }) => {
+      if (screen === currentScreen) return;
+      draftGuard.request(() => setCurrentScreen(screen), options);
+    },
+    [currentScreen, draftGuard, setCurrentScreen]
+  );
 
   // ─── Bootstrap effect (replaces the old system.version + system.defaultCwd
   // + auth.list chain with a single system.bootstrap round-trip) ────────────
@@ -303,7 +317,7 @@ export function AppShell(): React.ReactElement {
     setCommandPaletteActiveIndex(0);
   }, [setCommandPaletteActiveIndex, setCommandPaletteOpen, setCommandPaletteQuery]);
 
-  // ─── Global keyboard shortcuts ⌘K + ⌘1–3 + Escape ─────────────────────────
+  // ─── Global keyboard shortcuts ⌘K + ⌘1–4 + Escape ─────────────────────────
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -318,16 +332,17 @@ export function AppShell(): React.ReactElement {
         return;
       }
 
-      if (isModifier && /^[1-3]$/.test(event.key)) {
+      if (isModifier && /^[1-4]$/.test(event.key)) {
         event.preventDefault();
         const nextScreenMap: Record<string, AppScreen> = {
-          "1": "editor",
-          "2": "auth-vault",
-          "3": "sessions",
+          "1": "home",
+          "2": "editor",
+          "3": "auth-vault",
+          "4": "sessions",
         };
         const nextScreen = nextScreenMap[event.key];
         if (!nextScreen) return;
-        setCurrentScreen(nextScreen);
+        requestScreenChange(nextScreen);
         return;
       }
 
@@ -351,7 +366,7 @@ export function AppShell(): React.ReactElement {
     closeCommandPalette,
     commandPaletteOpen,
     openCommandPalette,
-    setCurrentScreen,
+    requestScreenChange,
     setShortcutsHelpOpen,
   ]);
 
@@ -360,28 +375,36 @@ export function AppShell(): React.ReactElement {
   const paletteItems = React.useMemo(() => {
     const items: CommandPaletteItem[] = [
       {
+        id: "nav-home",
+        group: "Navigate",
+        label: "Agent Profiles",
+        hint: "Cmd+1",
+        keywords: ["home", "agent", "profiles", "launch", "readiness"],
+        onSelect: () => requestScreenChange("home"),
+      },
+      {
         id: "nav-editor",
         group: "Navigate",
         label: "Profile Workspace",
-        hint: "Cmd+1",
+        hint: "Cmd+2",
         keywords: ["workspace", "editor", "profile", "scope", "launch"],
-        onSelect: () => setCurrentScreen("editor"),
+        onSelect: () => requestScreenChange("editor"),
       },
       {
         id: "nav-auth",
         group: "Navigate",
         label: "Claude Auth",
-        hint: "Cmd+2",
+        hint: "Cmd+3",
         keywords: ["auth", "claude", "credentials", "profiles"],
-        onSelect: () => setCurrentScreen("auth-vault"),
+        onSelect: () => requestScreenChange("auth-vault"),
       },
       {
         id: "nav-sessions",
         group: "Navigate",
         label: "Sessions",
-        hint: "Cmd+3",
+        hint: "Cmd+4",
         keywords: ["sessions", "monitor"],
-        onSelect: () => setCurrentScreen("sessions"),
+        onSelect: () => requestScreenChange("sessions"),
       },
       {
         id: "nav-provenance",
@@ -435,7 +458,7 @@ export function AppShell(): React.ReactElement {
         label: "Open Sessions",
         description: "Jump to active and recent sessions",
         keywords: ["sessions", "monitor", "processes"],
-        onSelect: () => setCurrentScreen("sessions"),
+        onSelect: () => requestScreenChange("sessions"),
       },
       {
         id: "help:shortcuts",
@@ -491,6 +514,7 @@ export function AppShell(): React.ReactElement {
     authProfiles,
     commandPaletteQuery,
     effectiveState.provenance,
+    requestScreenChange,
     scopeEntries,
     setCurrentScreen,
     setProfileDebugTab,
@@ -544,7 +568,7 @@ export function AppShell(): React.ReactElement {
       />
 
       <div className="grid min-h-0 min-w-0 grid-cols-[56px_minmax(0,1fr)] overflow-hidden window-medium:grid-cols-[276px_minmax(0,1fr)]">
-        <AppSidebar currentScreen={currentScreen} onSelect={setCurrentScreen} />
+        <AppSidebar currentScreen={currentScreen} onSelect={requestScreenChange} />
 
         <main
           id="main-content"
@@ -553,7 +577,9 @@ export function AppShell(): React.ReactElement {
           className="grid min-h-0 min-w-0 grid-cols-1"
         >
           <div className="min-h-0 min-w-0 overflow-hidden bg-canvas">
-            {currentScreen === "editor" ? (
+            {currentScreen === "home" ? (
+              <AgentProfilesHomeScreen />
+            ) : currentScreen === "editor" ? (
               <ProfileEditorScreen />
             ) : (
               <div className="flex h-full min-h-0 min-w-0 flex-col bg-canvas">
@@ -586,6 +612,7 @@ export function AppShell(): React.ReactElement {
         version={version}
       />
 
+      <ProfileUnsavedChangesDialog guard={draftGuard} />
       <CommandPalette
         activeIndex={commandPaletteActiveIndex}
         isOpen={commandPaletteOpen}
@@ -652,13 +679,15 @@ function AppTitlebar({
         <button
           aria-expanded={isPaletteOpen}
           aria-label="Open command palette"
-          className="ml-auto flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary shadow-xs transition-colors hover:bg-elevated window-medium:max-w-[520px]"
+          className="ml-auto flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-subtle bg-canvas px-3 text-left text-sm text-tertiary shadow-xs transition-colors hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring window-medium:max-w-[520px]"
           onClick={onOpenPalette}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           type="button"
         >
           <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="truncate">Jump to workspace, credential, session, or scope…</span>
+          <span className="truncate">
+            Jump to profiles, workspace, credential, session, or scope…
+          </span>
           <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-secondary">
             <Command className="h-3 w-3" aria-hidden="true" />K
           </span>
@@ -667,7 +696,7 @@ function AppTitlebar({
       <div className="ml-3 flex items-center">
         <button
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          className="theme-orb group relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-default bg-canvas transition-all duration-500 hover:border-strong hover:bg-elevated"
+          className="theme-orb group relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-default bg-canvas transition-[border-color,background-color,box-shadow,transform] duration-300 hover:border-strong hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={(e) => onToggleTheme(e)}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -675,7 +704,7 @@ function AppTitlebar({
         >
           <span
             aria-hidden="true"
-            className="theme-orb-icon absolute transition-all duration-500 ease-[var(--ap-ease-spring)]"
+            className="theme-orb-icon absolute transition-[opacity,transform] duration-300 ease-[var(--ap-ease-spring)]"
             style={{
               opacity: theme === "dark" ? 1 : 0,
               transform: theme === "dark" ? "rotate(0deg) scale(1)" : "rotate(-90deg) scale(0.4)",
@@ -685,7 +714,7 @@ function AppTitlebar({
           </span>
           <span
             aria-hidden="true"
-            className="theme-orb-icon absolute transition-all duration-500 ease-[var(--ap-ease-spring)]"
+            className="theme-orb-icon absolute transition-[opacity,transform] duration-300 ease-[var(--ap-ease-spring)]"
             style={{
               opacity: theme === "light" ? 1 : 0,
               transform: theme === "light" ? "rotate(0deg) scale(1)" : "rotate(90deg) scale(0.4)",
@@ -701,7 +730,7 @@ function AppTitlebar({
 
 interface AppSidebarProps {
   currentScreen: AppScreen;
-  onSelect: (screen: AppScreen) => void;
+  onSelect: (screen: AppScreen, options?: { returnFocusTo?: HTMLElement | null }) => void;
 }
 
 function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactElement {
@@ -710,6 +739,7 @@ function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactEl
     label: string;
     icon: LucideIcon;
   }> = [
+    { id: "home", label: "Agent Profiles", icon: Sparkles },
     { id: "editor", label: "Profile Workspace", icon: FolderOpen },
     { id: "auth-vault", label: "Claude Auth", icon: KeyRound },
     { id: "sessions", label: "Sessions", icon: MonitorPlay },
@@ -734,7 +764,9 @@ function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactEl
                       : "border-transparent bg-transparent text-secondary hover:text-primary"
                   )}
                   data-testid={`sidebar-${item.id}`}
-                  onClick={() => onSelect(item.id)}
+                  onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                    onSelect(item.id, { returnFocusTo: event.currentTarget })
+                  }
                   title={item.label}
                   type="button"
                 >

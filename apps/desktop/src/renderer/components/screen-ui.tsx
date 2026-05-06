@@ -44,7 +44,9 @@ export function ScreenHeader({
             {title}
           </h1>
           {description ? (
-            <p className="mt-1 truncate text-sm text-secondary">{description}</p>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-secondary text-pretty">
+              {description}
+            </p>
           ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">

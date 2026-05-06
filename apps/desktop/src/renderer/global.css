@@ -16,6 +16,8 @@
 
   body {
     margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     @apply bg-background text-foreground;
   }
 
@@ -39,7 +41,7 @@
 @layer utilities {
   /* ---- Theme toggle orb ----------------------------------------------- */
   .theme-orb:active {
-    transform: scale(0.88);
+    transform: scale(0.96);
   }
 
   .theme-orb::after {

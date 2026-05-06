@@ -49,6 +49,7 @@ export function normalizeAuthProfiles(input: unknown): AuthProfileOption[] {
         displayName: asString(candidate.displayName) ?? id,
         mode: asString(candidate.mode) ?? "unknown",
         secretCount: Array.isArray(candidate.secrets) ? candidate.secrets.length : 0,
+        secretNames: normalizeSecretNames(candidate.secrets),
       },
     ];
   });
@@ -235,6 +236,22 @@ export function normalizeStringArray(input: unknown): string[] {
   return Array.isArray(input)
     ? input.filter((value): value is string => typeof value === "string")
     : [];
+}
+
+function normalizeSecretNames(input: unknown): string[] {
+  return uniqueSorted(
+    normalizeStringArray(input)
+      .map((name) => name.trim())
+      .filter(isSafeSecretName)
+  );
+}
+
+function isSafeSecretName(value: string): boolean {
+  return /^[A-Za-z0-9._/-]{1,120}$/.test(value) && !value.includes("//");
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
 }
 
 export function normalizeStringRecord(input: unknown): Record<string, string> {
