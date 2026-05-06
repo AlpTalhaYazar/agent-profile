@@ -1,8 +1,15 @@
 import { createId, flattenObject, sortedUnion, stableStringify } from "./clone.js";
+import {
+  collectRoles,
+  getErrorMessage,
+  normalizeEffectiveState,
+  normalizeScopeList,
+} from "./normalize.js";
 import type { ProfileIdentitySelection } from "./profile-identity.js";
 import { sanitizeProfileLabel } from "./profile-identity.js";
 import type {
   AuthProfileOption,
+  EffectiveState,
   ProfileBasicsValidationIssue,
   ScopeDoc,
   ScopeDocPersona,
@@ -110,6 +117,36 @@ export type ProfileBasicsPatchResult =
       selection: null;
       issues: ProfileBasicsValidationIssue[];
     };
+
+export interface ProfileBasicsReloadSelection {
+  selection: ProfileIdentitySelection;
+  scopeEntries: ScopeListEntry[];
+  availableRoles: string[];
+  selectedScopePath: string;
+}
+
+export interface ResolveProfileBasicsReloadSelectionInput {
+  authProfiles: readonly Pick<AuthProfileOption, "id">[];
+  listed: unknown;
+  selection: ProfileIdentitySelection;
+}
+
+export type ProfileBasicsReloadSelectionResult =
+  | { ok: true; value: ProfileBasicsReloadSelection }
+  | { ok: false; message: string };
+
+export interface ResolveProfileBasicsReloadStateInput {
+  reloadSelection: ProfileBasicsReloadSelection;
+  shown: unknown;
+}
+
+export interface ProfileBasicsReloadState extends ProfileBasicsReloadSelection {
+  effectiveState: EffectiveState;
+}
+
+export type ProfileBasicsReloadStateResult =
+  | { ok: true; value: ProfileBasicsReloadState }
+  | { ok: false; message: string };
 
 export interface ValidateProfileBasicsDraftInput {
   draft: ProfileBasicsDraft;
@@ -448,6 +485,134 @@ export function buildProfileBasicsPatch({
     },
     issues: [],
   };
+}
+
+export function resolveProfileBasicsReloadSelection({
+  authProfiles,
+  listed,
+  selection,
+}: ResolveProfileBasicsReloadSelectionInput): ProfileBasicsReloadSelectionResult {
+  const scopeEntries = normalizeScopeList(listed);
+  const role = normalizeRoleKey(selection.role);
+  const selectedEntry = findReloadedProfileBasicsEntry(scopeEntries, role);
+
+  if (!role || !selectedEntry?.content) {
+    return reloadSelectionError(
+      "Profile Basics saved, but the refreshed profile could not be loaded. The previous selection was kept."
+    );
+  }
+
+  const authProfileId =
+    sanitizeAuthProfileId(selectedEntry.content.auth?.profileId) ?? selection.authProfileId.trim();
+  if (!authProfileId || !authProfiles.some((profile) => profile.id === authProfileId)) {
+    return reloadSelectionError(
+      "Profile Basics saved, but the refreshed Claude identity is unavailable. The previous selection was kept."
+    );
+  }
+
+  const cwd = selection.cwd.trim();
+  if (!cwd) {
+    return reloadSelectionError(
+      "Profile Basics saved, but the refreshed workspace could not be loaded. The previous selection was kept."
+    );
+  }
+
+  return {
+    ok: true,
+    value: {
+      selection: { role, authProfileId, cwd },
+      scopeEntries,
+      availableRoles: collectRoles(scopeEntries),
+      selectedScopePath: selectedEntry.path,
+    },
+  };
+}
+
+export function resolveProfileBasicsReloadState({
+  reloadSelection,
+  shown,
+}: ResolveProfileBasicsReloadStateInput): ProfileBasicsReloadStateResult {
+  if (!looksLikeProfileShowPayload(shown)) {
+    return reloadStateError(
+      "Profile Basics saved, but the refreshed profile state could not be loaded. The previous selection was kept."
+    );
+  }
+
+  const effectiveState = normalizeEffectiveState(shown);
+  if (!effectiveState.effective) {
+    return reloadStateError(
+      "Profile Basics saved, but the refreshed profile state could not be loaded. The previous selection was kept."
+    );
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...reloadSelection,
+      effectiveState,
+    },
+  };
+}
+
+export function formatProfileBasicsBridgeError(error: unknown, fallback: string): string {
+  const message = getErrorMessage(error);
+  if (isSafeProfileBasicsMessage(message)) return message;
+  if (containsUnsafeDiagnosticText(message)) return fallback;
+  if (/auth|identity/i.test(message)) {
+    return "Claude identity could not be checked. Choose an available identity and try again.";
+  }
+  if (/workspace|cwd|directory|path/i.test(message)) {
+    return "Workspace could not be checked. The typed workspace is preserved.";
+  }
+  if (/settings|json/i.test(message)) {
+    return "Settings could not be checked. Review the JSON and try again.";
+  }
+  return fallback;
+}
+
+function findReloadedProfileBasicsEntry(
+  scopeEntries: readonly ScopeListEntry[],
+  role: string
+): ScopeListEntry | null {
+  if (!role) return null;
+  return (
+    scopeEntries.find(
+      (entry) =>
+        normalizeRoleKey(entry.role) === role && entry.scope === "project-role" && entry.content
+    ) ?? null
+  );
+}
+
+function reloadSelectionError(message: string): ProfileBasicsReloadSelectionResult {
+  return { ok: false, message };
+}
+
+function reloadStateError(message: string): ProfileBasicsReloadStateResult {
+  return { ok: false, message };
+}
+
+function looksLikeProfileShowPayload(input: unknown): boolean {
+  if (!isPlainRecord(input)) return false;
+  return (
+    "effective" in input ||
+    "provenance" in input ||
+    "mcpServers" in input ||
+    "env" in input ||
+    "settings" in input ||
+    "persona" in input ||
+    "auth" in input
+  );
+}
+
+function isSafeProfileBasicsMessage(message: string): boolean {
+  if (!/^Profile Basics saved, but /.test(message)) return false;
+  return !containsUnsafeDiagnosticText(message);
+}
+
+function containsUnsafeDiagnosticText(message: string): boolean {
+  return /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|oauth|authorization/i.test(
+    message
+  );
 }
 
 function unavailableTarget(role: string | null, message: string): ProfileBasicsUnavailableTarget {

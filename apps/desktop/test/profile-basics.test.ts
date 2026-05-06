@@ -4,6 +4,9 @@ import {
   buildProfileBasicsDraftFromRows,
   createProfileBasicsDraft,
   createSafeProfileBasicsPreviewSummary,
+  formatProfileBasicsBridgeError,
+  resolveProfileBasicsReloadSelection,
+  resolveProfileBasicsReloadState,
   resolveProfileBasicsTarget,
   shouldGuardProfileBasicsClose,
   validateProfileBasicsDraft,
@@ -397,5 +400,130 @@ describe("profile basics target and draft contract", () => {
     expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: false })).toBe(true);
     expect(shouldGuardProfileBasicsClose({ isDirty: false, isSaving: false })).toBe(false);
     expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: true })).toBe(false);
+  });
+});
+
+describe("profile basics preview/save/reload safety", () => {
+  test("formats preview and save bridge rejections without leaking raw paths or secret refs", () => {
+    const previewMessage = formatProfileBasicsBridgeError(
+      new Error(
+        "preview failed for /repo/project/.myclaude/roles/backend-api-review.yml with keyring://anthropic/work"
+      ),
+      "Profile Basics preview could not be prepared. Review the fields and try again."
+    );
+    const saveMessage = formatProfileBasicsBridgeError(
+      new Error("save failed for project-role using Bearer ghp_secretvalue"),
+      "Profile Basics could not be saved. Review the fields and try again."
+    );
+
+    expect(previewMessage).toBe(
+      "Profile Basics preview could not be prepared. Review the fields and try again."
+    );
+    expect(saveMessage).toBe("Profile Basics could not be saved. Review the fields and try again.");
+
+    const serialized = JSON.stringify([previewMessage, saveMessage]);
+    expect(serialized).not.toContain(".myclaude");
+    expect(serialized).not.toContain("project-role");
+    expect(serialized).not.toContain("keyring://");
+    expect(serialized).not.toContain("ghp_secretvalue");
+  });
+
+  test("reload selection follows persisted auth binding and saved workspace before state updates", () => {
+    const listed = [
+      entry({
+        content: scopeDoc({ auth: { profileId: "personal" }, env: { FEATURE_FLAG: "on" } }),
+      }),
+    ];
+
+    const reloadSelection = resolveProfileBasicsReloadSelection({
+      authProfiles: [workAuth, personalAuth],
+      listed,
+      selection: {
+        role: "backend-api-review",
+        authProfileId: "work",
+        cwd: "/repo/next-workspace",
+      },
+    });
+
+    expect(reloadSelection.ok).toBe(true);
+    if (!reloadSelection.ok) throw new Error("expected reload selection");
+    expect(reloadSelection.value.selection).toEqual({
+      role: "backend-api-review",
+      authProfileId: "personal",
+      cwd: "/repo/next-workspace",
+    });
+    expect(reloadSelection.value.availableRoles).toEqual(["backend-api-review"]);
+    expect(reloadSelection.value.selectedScopePath).toBe(
+      "/repo/project/.myclaude/roles/backend-api-review.yml"
+    );
+
+    const reloadState = resolveProfileBasicsReloadState({
+      reloadSelection: reloadSelection.value,
+      shown: {
+        effective: {
+          mcpServers: {},
+          env: { FEATURE_FLAG: "on" },
+          settings: { model: "claude-sonnet" },
+          persona: { claudeMd: [], agents: [], skills: [], slashCmds: [], memory: [] },
+          auth: { profileId: "personal" },
+        },
+        provenance: null,
+      },
+    });
+
+    expect(reloadState.ok).toBe(true);
+    if (!reloadState.ok) throw new Error("expected reload state");
+    expect(reloadState.value.selection.authProfileId).toBe("personal");
+    expect(reloadState.value.effectiveState.effective?.env).toEqual({ FEATURE_FLAG: "on" });
+  });
+
+  test("reload selection rejects stale auth bindings and malformed list payloads calmly", () => {
+    const staleAuth = resolveProfileBasicsReloadSelection({
+      authProfiles: [workAuth],
+      listed: [entry({ content: scopeDoc({ auth: { profileId: "missing-auth" } }) })],
+      selection: { role: "backend-api-review", authProfileId: "work", cwd: "/repo/project" },
+    });
+    const malformedList = resolveProfileBasicsReloadSelection({
+      authProfiles: [workAuth],
+      listed: { ok: true },
+      selection: { role: "backend-api-review", authProfileId: "work", cwd: "/repo/project" },
+    });
+
+    expect(staleAuth).toEqual({
+      ok: false,
+      message:
+        "Profile Basics saved, but the refreshed Claude identity is unavailable. The previous selection was kept.",
+    });
+    expect(malformedList).toEqual({
+      ok: false,
+      message:
+        "Profile Basics saved, but the refreshed profile could not be loaded. The previous selection was kept.",
+    });
+
+    const serialized = JSON.stringify([staleAuth, malformedList]);
+    expect(serialized).not.toContain(".myclaude");
+    expect(serialized).not.toContain("project-role");
+    expect(serialized).not.toContain("keyring://");
+  });
+
+  test("reload state rejects malformed show payloads without committing selection changes", () => {
+    const reloadSelection = resolveProfileBasicsReloadSelection({
+      authProfiles: [workAuth],
+      listed: [entry()],
+      selection: { role: "backend-api-review", authProfileId: "work", cwd: "/repo/project" },
+    });
+    expect(reloadSelection.ok).toBe(true);
+    if (!reloadSelection.ok) throw new Error("expected reload selection");
+
+    expect(
+      resolveProfileBasicsReloadState({
+        reloadSelection: reloadSelection.value,
+        shown: { ok: true },
+      })
+    ).toEqual({
+      ok: false,
+      message:
+        "Profile Basics saved, but the refreshed profile state could not be loaded. The previous selection was kept.",
+    });
   });
 });

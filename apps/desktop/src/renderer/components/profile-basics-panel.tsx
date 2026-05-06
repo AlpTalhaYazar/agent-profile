@@ -31,6 +31,7 @@ import {
   createProfileBasicsDraft,
   createProfileBasicsEnvRows,
   createSafeProfileBasicsPreviewSummary,
+  formatProfileBasicsBridgeError,
   resolveProfileBasicsTarget,
   shouldGuardProfileBasicsClose,
   validateProfileBasicsForm,
@@ -40,7 +41,7 @@ import {
 } from "../lib/profile-basics.js";
 import { stableStringify } from "../lib/clone.js";
 import type { AgentProfileViewModel } from "../lib/agent-profile-view-model.js";
-import { getErrorMessage, normalizeValidationIssues } from "../lib/normalize.js";
+import { normalizeValidationIssues } from "../lib/normalize.js";
 import { mergeValidationIssues, normalizeProfilePreviewResponse } from "../lib/profile-preview.js";
 import type {
   AuthProfileOption,
@@ -265,6 +266,7 @@ export function ProfileBasicsPanel({
               diff: [],
               errorMessage: message,
             });
+            announce("Profile Basics preview needs attention");
             return;
           }
 
@@ -276,6 +278,11 @@ export function ProfileBasicsPanel({
             diff: createSafeEffectiveDiffSummary(currentEffective, preview.effective),
             errorMessage: null,
           });
+          announce(
+            summary.length > 0
+              ? "Profile Basics preview ready"
+              : "Profile Basics preview has no changes"
+          );
         })
         .catch((error) => {
           if (cancelled) return;
@@ -294,6 +301,7 @@ export function ProfileBasicsPanel({
             diff: [],
             errorMessage: message,
           });
+          announce("Profile Basics preview failed");
         });
     }, 250);
 
@@ -302,6 +310,7 @@ export function ProfileBasicsPanel({
       window.clearTimeout(timer);
     };
   }, [
+    announce,
     authProfiles,
     currentEffective,
     formValidation,
@@ -1008,20 +1017,6 @@ function safeSortedUnion(left: string[], right: string[]): string[] {
 function safeDiffKey(value: string, fallback: string): string {
   if (/secret|token|authorization|api[_-]?key|keyring|bearer/i.test(value)) return fallback;
   return value || fallback;
-}
-
-function formatProfileBasicsBridgeError(error: unknown, fallback: string): string {
-  const message = getErrorMessage(error);
-  if (/auth|identity/i.test(message)) {
-    return "Claude identity could not be checked. Choose an available identity and try again.";
-  }
-  if (/workspace|cwd|directory/i.test(message)) {
-    return "Workspace could not be checked. The typed workspace is preserved.";
-  }
-  if (/settings|json/i.test(message)) {
-    return "Settings could not be checked. Review the JSON and try again.";
-  }
-  return fallback;
 }
 
 function formatAuthOptionLabel(authProfile: AuthProfileOption): string {

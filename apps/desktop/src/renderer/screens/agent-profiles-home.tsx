@@ -47,6 +47,11 @@ import {
   type AgentProfileLibraryItem,
 } from "../lib/agent-profile-view-model.js";
 import {
+  formatProfileBasicsBridgeError,
+  resolveProfileBasicsReloadSelection,
+  resolveProfileBasicsReloadState,
+} from "../lib/profile-basics.js";
+import {
   buildProfileCreateScopePayload,
   buildProfileSelection,
   deriveProfileRoleSlug,
@@ -269,27 +274,49 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
         throw new Error("Profile refresh is unavailable right now.");
       }
 
-      const [listed, shown] = await Promise.all([
-        profileBridge.list({ cwd: selection.cwd }),
-        profileBridge.show(selection),
-      ]);
-      const nextScopeEntries = normalizeScopeList(listed);
-      const nextRoles = collectRoles(nextScopeEntries);
+      try {
+        const listed = await profileBridge.list({ cwd: selection.cwd });
+        const reloadSelection = resolveProfileBasicsReloadSelection({
+          authProfiles,
+          listed,
+          selection,
+        });
+        if (!reloadSelection.ok) {
+          throw new Error(reloadSelection.message);
+        }
 
-      setCwd(selection.cwd);
-      setScopeEntries(nextScopeEntries);
-      setAvailableRoles(nextRoles);
-      setSelectedRole(selection.role);
-      setSelectedAuthId(selection.authProfileId);
-      setSelectedScopePath(findScopePathForRole(nextScopeEntries, selection.role));
-      setEffectiveState(normalizeEffectiveState(shown));
-      setValidationState({ status: "idle", issues: [], errorMessage: null });
-      setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
-      writeProfileSelection(window.localStorage, selection);
-      setSelectedPanelProfileId(null);
-      setPanelSection("summary");
+        const shown = await profileBridge.show(reloadSelection.value.selection);
+        const reloadState = resolveProfileBasicsReloadState({
+          reloadSelection: reloadSelection.value,
+          shown,
+        });
+        if (!reloadState.ok) {
+          throw new Error(reloadState.message);
+        }
+
+        setCwd(reloadState.value.selection.cwd);
+        setScopeEntries(reloadState.value.scopeEntries);
+        setAvailableRoles(reloadState.value.availableRoles);
+        setSelectedRole(reloadState.value.selection.role);
+        setSelectedAuthId(reloadState.value.selection.authProfileId);
+        setSelectedScopePath(reloadState.value.selectedScopePath);
+        setEffectiveState(reloadState.value.effectiveState);
+        setValidationState({ status: "idle", issues: [], errorMessage: null });
+        setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
+        writeProfileSelection(window.localStorage, reloadState.value.selection);
+        setSelectedPanelProfileId(null);
+        setPanelSection("summary");
+      } catch (error) {
+        throw new Error(
+          formatProfileBasicsBridgeError(
+            error,
+            "Profile Basics saved, but the refreshed profile could not be loaded. The previous selection was kept."
+          )
+        );
+      }
     },
     [
+      authProfiles,
       setAvailableRoles,
       setCwd,
       setEffectiveState,
