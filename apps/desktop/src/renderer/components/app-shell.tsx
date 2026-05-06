@@ -71,13 +71,14 @@ import {
   normalizeEffectiveState,
   normalizeScopeList,
 } from "../lib/normalize.js";
-import { usePrefersReducedMotion } from "../lib/use-prefers-reduced-motion.js";
 import {
   chooseRestoredProfileSelection,
   readProfileSelection,
   writeProfileSelection,
 } from "../lib/profile-creation.js";
 import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
+import type { AuthProfileOption, ScopeListEntry } from "../lib/types.js";
+import { usePrefersReducedMotion } from "../lib/use-prefers-reduced-motion.js";
 import { AgentProfilesHomeScreen } from "../screens/agent-profiles-home.js";
 import { AuthVaultScreen } from "../screens/auth-vault.js";
 import { ProfileEditorScreen } from "../screens/profile-editor.js";
@@ -221,7 +222,7 @@ export function AppShell(): React.ReactElement {
           setEffectiveState(normalizeEffectiveState(shown));
         }
       } catch (error) {
-        if (!cancelled) setAppError(getErrorMessage(error));
+        if (!cancelled) setAppError(formatAppShellError(error));
       } finally {
         if (!cancelled) setIsBootstrapping(false);
       }
@@ -466,12 +467,12 @@ export function AppShell(): React.ReactElement {
           });
         },
       },
-      ...scopeEntries.map((entry) => ({
-        id: `scope:${entry.path}`,
-        group: "Scope",
-        label: entry.role !== "—" ? `${entry.scope} / ${entry.role}` : entry.scope,
-        description: entry.path,
-        keywords: [entry.scope, entry.role, entry.path],
+      ...scopeEntries.map((entry, index) => ({
+        id: `scope:${createPaletteStableId(entry.path, index)}`,
+        group: "Profile layers",
+        label: formatScopePaletteLabel(entry),
+        description: formatScopePaletteDescription(entry),
+        keywords: createScopePaletteKeywords(entry),
         onSelect: () => {
           requestGuardedAction(() => {
             setCurrentScreen("editor");
@@ -480,12 +481,12 @@ export function AppShell(): React.ReactElement {
           });
         },
       })),
-      ...authProfiles.map((profile) => ({
-        id: `auth:${profile.id}`,
-        group: "Auth",
-        label: profile.displayName || profile.id,
-        description: `${profile.id} · ${profile.mode}`,
-        keywords: [profile.id, profile.displayName, profile.mode],
+      ...authProfiles.map((profile, index) => ({
+        id: `auth:${createPaletteStableId(profile.id, index)}`,
+        group: "Claude identities",
+        label: formatAuthPaletteLabel(profile),
+        description: "Manage this Claude identity",
+        keywords: createAuthPaletteKeywords(profile),
         onSelect: () => {
           requestGuardedAction(() => {
             setCurrentScreen("editor");
@@ -525,12 +526,14 @@ export function AppShell(): React.ReactElement {
         ),
       ];
       for (const [section, key] of provenanceEntries) {
+        const safeKey = sanitizePaletteText(key) ?? "Configuration item";
+        const safeSection = formatProvenancePaletteSection(section);
         items.push({
-          id: `provenance:${section}:${key}`,
+          id: `provenance:${section}:${createPaletteStableId(key, items.length)}`,
           group: "Provenance",
-          label: key,
-          description: section,
-          keywords: [section, key, "provenance"],
+          label: safeKey,
+          description: safeSection,
+          keywords: [safeSection, safeKey, "provenance"],
           onSelect: () => {
             requestGuardedAction(() => {
               setSelectedProvenanceField({
@@ -621,27 +624,27 @@ export function AppShell(): React.ReactElement {
           aria-busy={isBootstrapping || isRefreshing}
           className="grid min-h-0 min-w-0 grid-cols-1"
         >
-          <div className="min-h-0 min-w-0 overflow-hidden bg-canvas">
-            {currentScreen === "home" ? (
-              <AgentProfilesHomeScreen />
-            ) : currentScreen === "editor" ? (
-              <ProfileEditorScreen />
-            ) : (
-              <div className="flex h-full min-h-0 min-w-0 flex-col bg-canvas">
-                {appError ? (
-                  <div className="border-b border-status-danger bg-status-danger-soft px-4 py-2 text-sm text-status-danger">
-                    {appError}
-                  </div>
-                ) : null}
-                <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                  {currentScreen === "auth-vault" ? (
-                    <AuthVaultScreen />
-                  ) : currentScreen === "sessions" ? (
-                    <SessionMonitorScreen />
-                  ) : null}
-                </div>
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-canvas">
+            {appError ? (
+              <div
+                className="border-b border-status-danger bg-status-danger-soft px-4 py-2 text-sm text-status-danger"
+                data-testid="app-shell-error"
+                role="alert"
+              >
+                {appError}
               </div>
-            )}
+            ) : null}
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+              {currentScreen === "home" ? (
+                <AgentProfilesHomeScreen />
+              ) : currentScreen === "editor" ? (
+                <ProfileEditorScreen />
+              ) : currentScreen === "auth-vault" ? (
+                <AuthVaultScreen />
+              ) : currentScreen === "sessions" ? (
+                <SessionMonitorScreen />
+              ) : null}
+            </div>
           </div>
         </main>
       </div>
@@ -731,7 +734,7 @@ function AppTitlebar({
         >
           <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="truncate">
-            Jump to profiles, workspace, credential, session, or scope…
+            Jump to profiles, workspace, Claude identity, session, or layer…
           </span>
           <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-default bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-secondary">
             <Command className="h-3 w-3" aria-hidden="true" />K
@@ -836,6 +839,110 @@ function AppSidebar({ currentScreen, onSelect }: AppSidebarProps): React.ReactEl
   );
 }
 
+function formatAppShellError(error: unknown): string {
+  const message = getErrorMessage(error);
+  if (!message) {
+    return "Agent Profile desktop data could not be loaded. Refresh and try again.";
+  }
+  if (containsUnsafeDefaultSurfaceText(message)) {
+    return "Agent Profile desktop data could not be loaded safely. Refresh or review Profile Workspace.";
+  }
+  if (
+    /bootstrap|defaultCwd|profile\.(list|show)|scope|authProfiles|provenance|effective/i.test(
+      message
+    )
+  ) {
+    return "Agent Profile desktop data could not be loaded safely. Refresh or review Profile Workspace.";
+  }
+  return "Agent Profile desktop data could not be loaded. Refresh and try again.";
+}
+
+function containsUnsafeDefaultSurfaceText(value: string): boolean {
+  return /\.myclaude|project-role|global-role|project-shared|global-shared|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|oauth|authorization|effective config|cwd|\/Users\/|\/tmp\//i.test(
+    value
+  );
+}
+
+function createPaletteStableId(value: string, index: number): string {
+  const source = value || `item-${index}`;
+  let hash = 0x811c9dc5;
+  for (let cursor = 0; cursor < source.length; cursor += 1) {
+    hash ^= source.charCodeAt(cursor);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${index}-${(hash >>> 0).toString(36)}`;
+}
+
+function formatScopePaletteLabel(entry: ScopeListEntry): string {
+  const displayName = readSafeProfileDisplayName(entry.content);
+  if (displayName) return `Profile layer · ${displayName}`;
+  if (entry.role && entry.role !== "—")
+    return `Profile layer · ${humanizePaletteToken(entry.role)}`;
+  return formatScopePaletteDescription(entry);
+}
+
+function formatScopePaletteDescription(entry: ScopeListEntry): string {
+  if (entry.scope.includes("shared")) {
+    return entry.scope.startsWith("global") ? "Open global defaults" : "Open workspace defaults";
+  }
+  return entry.scope.startsWith("global")
+    ? "Open global profile layer"
+    : "Open workspace profile layer";
+}
+
+function createScopePaletteKeywords(entry: ScopeListEntry): string[] {
+  const keywords = ["profile", "layer", "workspace", "defaults"];
+  const displayName = readSafeProfileDisplayName(entry.content);
+  if (displayName) keywords.push(displayName);
+  else if (entry.role && entry.role !== "—" && !containsUnsafeDefaultSurfaceText(entry.role)) {
+    keywords.push(humanizePaletteToken(entry.role));
+  }
+  return keywords;
+}
+
+function formatAuthPaletteLabel(profile: AuthProfileOption): string {
+  return sanitizePaletteText(profile.displayName) ?? "Claude identity";
+}
+
+function createAuthPaletteKeywords(profile: AuthProfileOption): string[] {
+  const keywords = ["claude", "identity", "credentials"];
+  const safeLabel = sanitizePaletteText(profile.displayName);
+  if (safeLabel) keywords.push(safeLabel);
+  return keywords;
+}
+
+function formatProvenancePaletteSection(section: string): string {
+  if (section === "env") return "Environment";
+  if (section === "settings") return "Settings";
+  if (section === "mcpServers") return "Tools";
+  return "Configuration";
+}
+
+function readSafeProfileDisplayName(content: unknown): string | null {
+  if (!content || typeof content !== "object") return null;
+  const profile = (content as { profile?: unknown }).profile;
+  if (!profile || typeof profile !== "object") return null;
+  const displayName = (profile as { displayName?: unknown }).displayName;
+  return typeof displayName === "string" ? sanitizePaletteText(displayName) : null;
+}
+
+function sanitizePaletteText(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || containsUnsafeDefaultSurfaceText(trimmed)) return null;
+  return trimmed;
+}
+
+function humanizePaletteToken(value: string): string {
+  const safe = sanitizePaletteText(value);
+  if (!safe) return "Agent Profile";
+  const words = safe
+    .split(/[-_\s]+/g)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  if (words.length === 0) return "Agent Profile";
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
 function findScopePathForRole(
   entries: ReadonlyArray<{ role: string; path: string }>,
   role: string
@@ -866,7 +973,10 @@ function AppStatusbar({
   version,
 }: AppStatusbarProps): React.ReactElement {
   return (
-    <footer className="flex items-center gap-3 border-t border-default bg-surface px-3 text-[11px] font-medium text-tertiary">
+    <footer
+      className="flex items-center gap-3 border-t border-default bg-surface px-3 text-[11px] font-medium text-tertiary"
+      data-testid="app-statusbar"
+    >
       <span
         className={cn(
           "h-1.5 w-1.5 rounded-full",
@@ -889,11 +999,13 @@ function AppStatusbar({
       <span className="text-secondary">·</span>
       <span>{SCREEN_LABELS[currentScreen]}</span>
       <span className="text-secondary">·</span>
+      <span className="truncate">{selectedRole ? "Profile selected" : "No profile selected"}</span>
+      <span className="text-secondary">·</span>
       <span className="truncate">
-        {selectedRole || "—"} @ {selectedAuthId || "—"}
+        {selectedAuthId ? "Claude identity selected" : "No Claude identity"}
       </span>
       <span className="text-secondary">·</span>
-      <span className="truncate">{cwd || "No working directory"}</span>
+      <span className="truncate">{cwd ? "Workspace ready" : "No workspace"}</span>
       <span className="ml-auto">v{version ?? "loading"}</span>
     </footer>
   );

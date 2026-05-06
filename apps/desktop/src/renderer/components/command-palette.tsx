@@ -109,7 +109,7 @@ export function CommandPalette({
                   onClose();
                 }
               }}
-              placeholder="Search screens, scopes, auth, or provenance…"
+              placeholder="Search screens, profile layers, identities, or provenance…"
               ref={inputRef}
               value={query}
             />

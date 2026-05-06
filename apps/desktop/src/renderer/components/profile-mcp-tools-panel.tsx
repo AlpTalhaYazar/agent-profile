@@ -165,15 +165,18 @@ export function ProfileMcpToolsPanel({
     onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
   }, [onPreviewStateChange, onValidationStateChange]);
 
-  const completeClose = React.useCallback(() => {
-    resetPanelState();
-    onOpenChange(false);
-    announce("Guided Profile Tools closed");
-  }, [announce, onOpenChange, resetPanelState]);
+  const completeClose = React.useCallback(
+    (announceClosed = true) => {
+      resetPanelState();
+      onOpenChange(false);
+      if (announceClosed) announce("Guided Profile Tools closed");
+    },
+    [announce, onOpenChange, resetPanelState]
+  );
 
   const completeCloseAndContinue = React.useCallback(
-    (continuation: (() => void) | null) => {
-      completeClose();
+    (continuation: (() => void) | null, announceClosed = true) => {
+      completeClose(announceClosed);
       window.setTimeout(() => continuation?.(), 0);
     },
     [completeClose]
@@ -365,7 +368,7 @@ export function ProfileMcpToolsPanel({
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const result = await saveToolsDraft();
-      if (result.ok) completeClose();
+      if (result.ok) completeClose(false);
     },
     [completeClose, saveToolsDraft]
   );
@@ -386,14 +389,18 @@ export function ProfileMcpToolsPanel({
     const continuation = pendingLeaveContinuationRef.current;
     const result = await saveToolsDraft();
     if (!result.ok) return;
-    completeCloseAndContinue(continuation);
+    completeCloseAndContinue(continuation, false);
   }, [completeCloseAndContinue, saveToolsDraft]);
 
   const handleRepairMissingSecret = React.useCallback(
     (secretName: string) => {
+      if (!isSafeRepairSecretName(secretName)) {
+        announce("Profile Tools cannot repair an unsafe MCP secret reference.");
+        return;
+      }
       requestLeave(() => onRepairMissingSecret(secretName));
     },
-    [onRepairMissingSecret, requestLeave]
+    [announce, onRepairMissingSecret, requestLeave]
   );
 
   React.useEffect(() => {
@@ -428,6 +435,19 @@ export function ProfileMcpToolsPanel({
       ? "Guided Tools will update MCP servers on the selected Agent Profile only."
       : target.message;
   const missingToolSecretNames = profile.capabilities.tools.missingSecretNames;
+  const repairSecretRows = React.useMemo(
+    () =>
+      missingToolSecretNames.map((secretName, index) => {
+        const repairable = isSafeRepairSecretName(secretName);
+        return {
+          id: repairable ? toSafeTestId(secretName) : `unsafe-${index + 1}`,
+          rawName: secretName,
+          displayName: repairable ? secretName : "Unsafe MCP secret reference",
+          repairable,
+        };
+      }),
+    [missingToolSecretNames]
+  );
   const authRepairAvailable = Boolean(selectedAuthId.trim() && hasAuthSetSecretBridge());
 
   if (!open) return null;
@@ -644,7 +664,7 @@ export function ProfileMcpToolsPanel({
                   </ul>
                 </div>
 
-                {missingToolSecretNames.length > 0 ? (
+                {repairSecretRows.length > 0 ? (
                   <div
                     className="rounded-xl border border-default bg-surface p-4"
                     data-testid="profile-tools-auth-repair"
@@ -655,18 +675,18 @@ export function ProfileMcpToolsPanel({
                       Claude identity. Repair opens Auth with the logical name only.
                     </p>
                     <ul className="mt-3 grid gap-2">
-                      {missingToolSecretNames.map((secretName) => (
+                      {repairSecretRows.map((row) => (
                         <li
                           className="flex items-center justify-between gap-3 rounded-md border border-subtle bg-canvas/70 px-3 py-2 text-sm"
-                          key={secretName}
+                          key={row.id}
                         >
                           <span className="truncate font-mono text-xs text-primary">
-                            {secretName}
+                            {row.displayName}
                           </span>
                           <Button
-                            data-testid={`profile-tools-repair-secret-${toSafeTestId(secretName)}`}
-                            disabled={!authRepairAvailable}
-                            onClick={() => handleRepairMissingSecret(secretName)}
+                            data-testid={`profile-tools-repair-secret-${row.id}`}
+                            disabled={!authRepairAvailable || !row.repairable}
+                            onClick={() => handleRepairMissingSecret(row.rawName)}
                             size="sm"
                             type="button"
                             variant="secondary"
@@ -676,6 +696,12 @@ export function ProfileMcpToolsPanel({
                         </li>
                       ))}
                     </ul>
+                    {repairSecretRows.some((row) => !row.repairable) ? (
+                      <p className="mt-3 rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-xs text-status-warning">
+                        One MCP secret reference is unsafe for guided repair. Open Profile Workspace
+                        to replace it with a logical name such as github.pat.
+                      </p>
+                    ) : null}
                     {!authRepairAvailable ? (
                       <p className="mt-3 rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-xs text-status-warning">
                         Auth support is unavailable for this profile. Open Claude Auth when the
@@ -1181,6 +1207,16 @@ function uniqueDraftToolName(tools: readonly ProfileMcpToolDraft[]): string {
 
 function hasAuthSetSecretBridge(): boolean {
   return typeof window !== "undefined" && typeof window.myclaude?.auth?.setSecret === "function";
+}
+
+function isSafeRepairSecretName(value: string): boolean {
+  return (
+    /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/.test(value) &&
+    !value.includes("//") &&
+    !/keyring:|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|authorization|oauth|client[_-]?secret|refresh[_-]?token|access[_-]?token|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+/i.test(
+      value
+    )
+  );
 }
 
 function toSafeTestId(value: string): string {

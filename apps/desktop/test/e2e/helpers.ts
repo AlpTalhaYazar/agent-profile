@@ -128,6 +128,41 @@ export async function seedProfileCapabilityFixture(fixture: DesktopFixture): Pro
   );
 }
 
+export async function seedMissingToolSecretRepairFixture(
+  fixture: DesktopFixture
+): Promise<void> {
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "authProfiles.yml"),
+    `
+version: 1
+authProfiles:
+  work:
+    displayName: Work
+    anthropic:
+      mode: apiKey
+      secretRef: keyring://anthropic/work
+    mcpSecretRefs: {}
+`.trimStart()
+  );
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "global", "shared.yml"),
+    `
+version: 1
+mcpServers:
+  github:
+    type: http
+    url: https://github.example/mcp
+    headers:
+      Authorization: Bearer \${secret:github.pat}
+`.trimStart()
+  );
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "global", "roles", "backend.yml"),
+    "version: 1\n"
+  );
+  await writeFile(join(fixture.projectDir, ".myclaude", "roles", "backend.yml"), "version: 1\n");
+}
+
 export async function launchDesktop(fixture: DesktopFixture): Promise<{
   app: Awaited<ReturnType<typeof electron.launch>>;
   page: Awaited<ReturnType<Awaited<ReturnType<typeof electron.launch>>["firstWindow"]>>;

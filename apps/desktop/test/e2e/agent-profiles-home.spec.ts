@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { type Locator, expect, test } from "@playwright/test";
 import {
   createDesktopFixture,
   launchDesktop,
@@ -8,6 +8,23 @@ import {
   openProfileWorkspace,
   seedProfileFixture,
 } from "./helpers.js";
+
+const defaultSurfaceForbiddenText = [
+  /\.myclaude/i,
+  /project-role/i,
+  /global-role/i,
+  /project-shared/i,
+  /global-shared/i,
+  /keyring:\/\//i,
+  /\$\{secret:/i,
+  /Bearer\s+\S+/i,
+  /secretRef/i,
+  /Authorization/i,
+  /OAuth/i,
+  /authProfiles\.yml/i,
+  /Schema error/i,
+  /Failed to parse/i,
+];
 
 test("agent profiles home is the default profile-first surface", async () => {
   const fixture = await createDesktopFixture();
@@ -46,14 +63,65 @@ test("agent profiles home is the default profile-first surface", async () => {
     await expect(page.getByText("keyring://")).toHaveCount(0);
     await expect(page.getByText("project-role")).toHaveCount(0);
     await expect(page.getByText(".myclaude")).toHaveCount(0);
+    await expect(page.getByTestId("app-statusbar")).toContainText("Profile selected");
+    await expect(page.getByTestId("app-statusbar")).toContainText("Claude identity selected");
+    await expect(page.getByTestId("app-statusbar")).toContainText("Workspace ready");
+    await expectDefaultSurfaceRedacted(page.getByTestId("app-statusbar"), [
+      new RegExp(escapeRegex(fixture.projectDir)),
+      /backend\.yml/i,
+      /\bbackend\s*@\s*work\b/i,
+    ]);
 
     await openProfileWorkspace(page);
     await openAgentProfilesHome(page);
 
     await page.getByLabel("Open command palette").click();
+    const palette = page.getByTestId("command-palette");
     await expect(page.getByTestId("command-palette-item-nav-home")).toBeVisible();
+    await expectDefaultSurfaceRedacted(palette, [new RegExp(escapeRegex(fixture.projectDir))]);
+    await expect(palette).toContainText("Profile layer");
+    await expect(palette).toContainText("Manage this Claude identity");
     await page.getByTestId("command-palette-item-nav-editor").click();
     await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("app shell sanitizes bootstrap and profile-load failures on default surfaces", async () => {
+  const fixture = await createDesktopFixture("agent-profile-home-bootstrap-error-");
+  await seedProfileFixture(fixture);
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "authProfiles.yml"),
+    [
+      "version: 1",
+      "authProfiles:",
+      "  leaked:",
+      "    displayName: keyring://anthropic/work",
+      "    anthropic:",
+      "      mode: oauth",
+      "      secretRef: ${secret:anthropic.oauth}",
+      "    mcpSecretRefs: []",
+      "",
+    ].join("\n")
+  );
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByTestId("app-shell-error")).toContainText(
+      "Agent Profile desktop data could not be loaded safely",
+      { timeout: 15_000 }
+    );
+    await expectDefaultSurfaceRedacted(page.getByTestId("app-shell-error"), [
+      /keyring:\/\/anthropic\/work/i,
+      /anthropic\.oauth/i,
+    ]);
+    await expectDefaultSurfaceRedacted(page.getByTestId("app-statusbar"), [
+      new RegExp(escapeRegex(fixture.projectDir)),
+      /keyring:\/\/anthropic\/work/i,
+      /anthropic\.oauth/i,
+    ]);
   } finally {
     await app.close();
     await fixture.cleanup();
@@ -85,3 +153,18 @@ authProfiles: {}
     await fixture.cleanup();
   }
 });
+
+async function expectDefaultSurfaceRedacted(
+  locator: Locator,
+  extraForbidden: RegExp[] = []
+): Promise<void> {
+  await expect(locator).toBeVisible();
+  const text = await locator.innerText();
+  for (const forbidden of [...defaultSurfaceForbiddenText, ...extraForbidden]) {
+    expect(text).not.toMatch(forbidden);
+  }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

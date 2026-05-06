@@ -1,9 +1,4 @@
-import {
-  Button,
-  Field,
-  Input,
-  cn,
-} from "@agent-profile/ui";
+import { Button, Field, Input, cn } from "@agent-profile/ui";
 import { useSetAtom } from "jotai";
 import {
   AlertTriangle,
@@ -19,25 +14,26 @@ import {
   X,
 } from "lucide-react";
 import * as React from "react";
-import { sanitizeProfileLabel, type ProfileIdentitySelection } from "../lib/profile-identity.js";
+import type { AgentProfileViewModel } from "../lib/agent-profile-view-model.js";
+import { profileBasicsNavigationGuardAtom } from "../lib/atoms.js";
+import { stableStringify } from "../lib/clone.js";
+import { normalizeValidationIssues } from "../lib/normalize.js";
 import {
+  type ProfileBasicsDraft,
+  type ProfileBasicsEnvRow,
+  type ProfileBasicsPreviewSummaryItem,
+  type ProfileBasicsTarget,
   buildProfileBasicsPatch,
   createProfileBasicsDraft,
   createProfileBasicsEnvRows,
   createSafeProfileBasicsPreviewSummary,
   formatProfileBasicsBridgeError,
   resolveProfileBasicsTarget,
+  resolveProfileBasicsTargetFromList,
   shouldGuardProfileBasicsClose,
   validateProfileBasicsForm,
-  type ProfileBasicsDraft,
-  type ProfileBasicsEnvRow,
-  type ProfileBasicsPreviewSummaryItem,
-  type ProfileBasicsTarget,
 } from "../lib/profile-basics.js";
-import { stableStringify } from "../lib/clone.js";
-import { profileBasicsNavigationGuardAtom } from "../lib/atoms.js";
-import type { AgentProfileViewModel } from "../lib/agent-profile-view-model.js";
-import { normalizeValidationIssues } from "../lib/normalize.js";
+import { type ProfileIdentitySelection, sanitizeProfileLabel } from "../lib/profile-identity.js";
 import { mergeValidationIssues, normalizeProfilePreviewResponse } from "../lib/profile-preview.js";
 import type {
   AuthProfileOption,
@@ -68,8 +64,9 @@ interface ProfileBasicsPanelProps {
   selectedRole: string;
 }
 
-type BasicsAsyncStatus = "idle" | "loading" | "ready" | "error";
+type BasicsAsyncStatus = "idle" | "pending" | "loading" | "ready" | "error";
 type BasicsSaveResult = { ok: true } | { ok: false; message: string };
+type ProfileBridge = NonNullable<typeof window.myclaude>["profile"];
 
 export function ProfileBasicsPanel({
   authProfiles,
@@ -107,6 +104,7 @@ export function ProfileBasicsPanel({
   const [previewStatus, setPreviewStatus] = React.useState<BasicsAsyncStatus>("idle");
   const [previewError, setPreviewError] = React.useState<string | null>(null);
   const [previewItems, setPreviewItems] = React.useState<ProfileBasicsPreviewSummaryItem[]>([]);
+  const [previewedSerialized, setPreviewedSerialized] = React.useState<string | null>(null);
   const [dirtyPromptOpen, setDirtyPromptOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
 
@@ -134,6 +132,7 @@ export function ProfileBasicsPanel({
     setPreviewStatus("idle");
     setPreviewError(null);
     setPreviewItems([]);
+    setPreviewedSerialized(null);
     setDirtyPromptOpen(false);
     announce("Guided Profile Basics opened");
     const frameId = window.requestAnimationFrame(() => {
@@ -169,10 +168,12 @@ export function ProfileBasicsPanel({
   const hasStaleAuth = Boolean(draft.authProfileId) && !authProfileAvailable;
   const currentSerialized = serializeBasicsForm(draft, envRows);
   const isDirty = open && currentSerialized !== baselineSerialized;
+  const hasCurrentPreview = previewStatus === "ready" && previewedSerialized === currentSerialized;
   const hasBlockingIssues = issues.length > 0 || previewStatus === "error";
   const saveDisabledReason = getProfileBasicsSaveDisabledReason({
     targetStatus: target.status,
     hasBlockingIssues,
+    hasCurrentPreview,
     isSaving,
     previewStatus,
   });
@@ -184,6 +185,11 @@ export function ProfileBasicsPanel({
 
     const safeIssues = formValidation.issues.map(toValidationIssue);
     onValidationStateChange({ status: "ready", issues: safeIssues, errorMessage: null });
+    setPreviewedSerialized(null);
+    if (currentSerialized !== baselineSerialized) {
+      setPreviewStatus("pending");
+      setPreviewError(null);
+    }
 
     if (target.status !== "writable" || !formValidation.ok) {
       setBridgeIssues([]);
@@ -194,37 +200,28 @@ export function ProfileBasicsPanel({
       return;
     }
 
-    const patch = buildProfileBasicsPatch({
-      target,
-      draft: formValidation.draft,
-      authProfiles,
-    });
-    if (!patch.ok) {
+    if (currentSerialized === baselineSerialized) {
       setBridgeIssues([]);
       setPreviewStatus("idle");
       setPreviewError(null);
       setPreviewItems([]);
-      onValidationStateChange({
-        status: "ready",
-        issues: patch.issues.map(toValidationIssue),
-        errorMessage: null,
-      });
       onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
       return;
     }
 
     const profileApi = window.myclaude?.profile;
-    if (!profileApi?.validate || !profileApi.preview) {
+    if (!profileApi?.validate || !profileApi.preview || !profileApi.list) {
       const message = "Profile Basics preview is unavailable right now.";
       setPreviewStatus("error");
       setPreviewError(message);
       setBridgeIssues([]);
-      setPreviewItems(createSafeProfileBasicsPreviewSummary(target.content, patch.content));
+      setPreviewItems([]);
       onPreviewStateChange({ status: "error", effective: null, diff: [], errorMessage: message });
       return;
     }
 
     let cancelled = false;
+    const serializedForPreview = currentSerialized;
     const timer = window.setTimeout(() => {
       setPreviewStatus("loading");
       setPreviewError(null);
@@ -235,17 +232,51 @@ export function ProfileBasicsPanel({
         errorMessage: null,
       });
 
-      void Promise.all([
-        profileApi.validate({ content: patch.content }),
-        profileApi.preview({
-          role: patch.selection.role,
-          authProfileId: patch.selection.authProfileId,
-          cwd: patch.selection.cwd,
-          draft: { path: patch.path, content: patch.content },
-        }),
-      ])
-        .then(([validationResult, previewResult]) => {
-          if (cancelled) return;
+      void prepareProfileBasicsPatchForDraft({
+        authProfiles,
+        draft: formValidation.draft,
+        envRows,
+        profileApi,
+        selectedRole,
+      })
+        .then((prepared) => {
+          if (cancelled) return null;
+          if (!prepared.ok) {
+            setBridgeIssues(prepared.issues.map(toValidationIssue));
+            setPreviewStatus("error");
+            setPreviewError(prepared.message);
+            setPreviewItems([]);
+            onValidationStateChange({
+              status: "error",
+              issues: prepared.issues.map(toValidationIssue),
+              errorMessage: prepared.message,
+            });
+            onPreviewStateChange({
+              status: "error",
+              effective: null,
+              diff: [],
+              errorMessage: prepared.message,
+            });
+            announce("Profile Basics preview needs a writable profile target");
+            return null;
+          }
+          return Promise.all([
+            profileApi.validate({ content: prepared.patch.content }),
+            profileApi.preview({
+              role: prepared.patch.selection.role,
+              authProfileId: prepared.patch.selection.authProfileId,
+              cwd: prepared.patch.selection.cwd,
+              draft: { path: prepared.patch.path, content: prepared.patch.content },
+            }),
+          ]).then(([validationResult, previewResult]) => ({
+            prepared,
+            validationResult,
+            previewResult,
+          }));
+        })
+        .then((result) => {
+          if (cancelled || !result) return;
+          const { prepared, validationResult, previewResult } = result;
           const validationIssues = sanitizeValidationIssues(
             normalizeValidationIssues(validationResult)
           );
@@ -255,12 +286,15 @@ export function ProfileBasicsPanel({
           });
           const previewIssues = sanitizeValidationIssues(preview.issues);
           const mergedIssues = mergeValidationIssues(validationIssues, previewIssues);
-          const summary = createSafeProfileBasicsPreviewSummary(target.content, patch.content);
+          const summary = createSafeProfileBasicsPreviewSummary(
+            prepared.target.content,
+            prepared.patch.content
+          );
           setBridgeIssues(mergedIssues);
           setPreviewItems(summary);
           onValidationStateChange({ status: "ready", issues: mergedIssues, errorMessage: null });
 
-          if (preview.status === "error") {
+          if (preview.status === "error" || mergedIssues.length > 0) {
             const message =
               "Profile Basics preview could not be prepared. Review the fields and try again.";
             setPreviewStatus("error");
@@ -277,6 +311,7 @@ export function ProfileBasicsPanel({
 
           setPreviewStatus("ready");
           setPreviewError(null);
+          setPreviewedSerialized(serializedForPreview);
           onPreviewStateChange({
             status: "ready",
             effective: preview.effective,
@@ -298,7 +333,7 @@ export function ProfileBasicsPanel({
           setBridgeIssues([]);
           setPreviewStatus("error");
           setPreviewError(message);
-          setPreviewItems(createSafeProfileBasicsPreviewSummary(target.content, patch.content));
+          setPreviewItems([]);
           onValidationStateChange({ status: "error", issues: [], errorMessage: message });
           onPreviewStateChange({
             status: "error",
@@ -317,12 +352,16 @@ export function ProfileBasicsPanel({
   }, [
     announce,
     authProfiles,
+    baselineSerialized,
     currentEffective,
+    currentSerialized,
+    envRows,
     formValidation,
     onPreviewStateChange,
     onValidationStateChange,
     open,
-    target,
+    selectedRole,
+    target.status,
   ]);
 
   const completeClose = React.useCallback(() => {
@@ -334,6 +373,7 @@ export function ProfileBasicsPanel({
     setPreviewStatus("idle");
     setPreviewError(null);
     setPreviewItems([]);
+    setPreviewedSerialized(null);
     onValidationStateChange({ status: "idle", issues: [], errorMessage: null });
     onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
     onOpenChange(false);
@@ -378,6 +418,10 @@ export function ProfileBasicsPanel({
   const updateDraft = React.useCallback((patch: Partial<ProfileBasicsDraft>) => {
     setSaveError(null);
     setBridgeIssues([]);
+    setPreviewedSerialized(null);
+    setPreviewStatus("pending");
+    setPreviewError(null);
+    setPreviewItems([]);
     setDraft((current) => ({ ...current, ...patch }));
   }, []);
 
@@ -412,21 +456,15 @@ export function ProfileBasicsPanel({
       announce(message);
       return { ok: false, message };
     }
-
-    const patch = buildProfileBasicsPatch({
-      target,
-      draft: formValidation.draft,
-      authProfiles,
-    });
-    if (!patch.ok) {
-      const message = "Fix the highlighted Basics fields before saving.";
+    if (!hasCurrentPreview) {
+      const message = "Wait for Profile Basics preview to finish checking the current draft.";
       setSaveError(message);
       announce(message);
       return { ok: false, message };
     }
 
     const profileApi = window.myclaude?.profile;
-    if (!profileApi?.save) {
+    if (!profileApi?.save || !profileApi.list) {
       const message = "Profile Basics save is unavailable right now.";
       setSaveError(message);
       announce(message);
@@ -436,9 +474,24 @@ export function ProfileBasicsPanel({
     setIsSaving(true);
     setSaveError(null);
     try {
-      await profileApi.save({ path: patch.path, content: patch.content });
-      await onSaved(patch.selection);
+      const prepared = await prepareProfileBasicsPatchForDraft({
+        authProfiles,
+        draft: formValidation.draft,
+        envRows,
+        profileApi,
+        selectedRole,
+      });
+      if (!prepared.ok) {
+        setBridgeIssues(prepared.issues.map(toValidationIssue));
+        setSaveError(prepared.message);
+        announce(prepared.message);
+        return { ok: false, message: prepared.message };
+      }
+
+      await profileApi.save({ path: prepared.patch.path, content: prepared.patch.content });
+      await onSaved(prepared.patch.selection);
       setBaselineSerialized(serializeBasicsForm(formValidation.draft, envRows));
+      setPreviewedSerialized(null);
       announce("Guided Profile Basics saved");
       return { ok: true };
     } catch (error) {
@@ -452,7 +505,17 @@ export function ProfileBasicsPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [announce, authProfiles, envRows, formValidation, issues.length, onSaved, target]);
+  }, [
+    announce,
+    authProfiles,
+    envRows,
+    formValidation,
+    hasCurrentPreview,
+    issues.length,
+    onSaved,
+    selectedRole,
+    target,
+  ]);
 
   const saveBasicsAndClose = React.useCallback(async (): Promise<void> => {
     const result = await saveBasicsDraft();
@@ -543,6 +606,10 @@ export function ProfileBasicsPanel({
   }, [cancelDirtyPrompt, dirtyPromptOpen, open, requestClose]);
 
   const addEnvRow = React.useCallback(() => {
+    setPreviewedSerialized(null);
+    setPreviewStatus("pending");
+    setPreviewError(null);
+    setPreviewItems([]);
     setEnvRows((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }]);
   }, []);
 
@@ -550,6 +617,10 @@ export function ProfileBasicsPanel({
     (rowId: string, patch: Partial<Pick<ProfileBasicsEnvRow, "key" | "value">>) => {
       setSaveError(null);
       setBridgeIssues([]);
+      setPreviewedSerialized(null);
+      setPreviewStatus("pending");
+      setPreviewError(null);
+      setPreviewItems([]);
       setEnvRows((current) =>
         current.map((row) => (row.id === rowId ? { ...row, ...patch } : row))
       );
@@ -560,6 +631,10 @@ export function ProfileBasicsPanel({
   const removeEnvRow = React.useCallback((rowId: string) => {
     setSaveError(null);
     setBridgeIssues([]);
+    setPreviewedSerialized(null);
+    setPreviewStatus("pending");
+    setPreviewError(null);
+    setPreviewItems([]);
     setEnvRows((current) => current.filter((row) => row.id !== rowId));
   }, []);
 
@@ -585,12 +660,12 @@ export function ProfileBasicsPanel({
   return (
     <>
       <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm" aria-hidden="true" />
-      <div
+      <dialog
         aria-labelledby="profile-basics-title"
         aria-modal="true"
-        className="fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-5xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg focus-visible:outline-none"
+        className="fixed left-1/2 top-1/2 z-50 m-0 grid max-h-[90vh] w-full max-w-5xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-lg focus-visible:outline-none"
         data-testid="profile-basics-panel"
-        role="dialog"
+        open
       >
         <form className="flex max-h-[90vh] min-h-0 flex-col" onSubmit={handleSave}>
           <header className="border-b border-subtle bg-surface/95 px-6 py-5">
@@ -868,7 +943,7 @@ export function ProfileBasicsPanel({
                         </StatusChip>
                       </div>
                       <p className="mt-2 text-sm leading-6 text-secondary">
-                        {previewStatus === "loading"
+                        {previewStatus === "loading" || previewStatus === "pending"
                           ? "Checking the guided Basics draft…"
                           : previewStatus === "error"
                             ? previewError
@@ -957,25 +1032,28 @@ export function ProfileBasicsPanel({
             </Button>
           </div>
         </form>
-      </div>
+      </dialog>
 
       {dirtyPromptOpen ? (
         <>
           <div className="fixed inset-0 z-[60] bg-overlay/80 backdrop-blur-sm" aria-hidden="true" />
-          <div
+          <dialog
             aria-labelledby="profile-basics-dirty-title"
             aria-modal="true"
-            className="fixed left-1/2 top-1/2 z-[61] grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-md border border-border bg-popover p-6 text-popover-foreground shadow-lg"
+            className="fixed left-1/2 top-1/2 z-[61] m-0 grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-md border border-border bg-popover p-6 text-popover-foreground shadow-lg"
             data-testid="profile-basics-dirty-dialog"
-            role="dialog"
+            open
           >
             <header className="flex flex-col gap-1.5">
-              <h2 className="text-base font-semibold text-foreground" id="profile-basics-dirty-title">
+              <h2
+                className="text-base font-semibold text-foreground"
+                id="profile-basics-dirty-title"
+              >
                 Save Profile Basics changes?
               </h2>
               <p className="text-sm text-muted-foreground">
-                You have unsaved guided Basics edits. Save before leaving, discard the draft, or stay
-                here to keep editing.
+                You have unsaved guided Basics edits. Save before leaving, discard the draft, or
+                stay here to keep editing.
               </p>
             </header>
             {saveDisabledReason ? (
@@ -1020,11 +1098,86 @@ export function ProfileBasicsPanel({
                 {isSaving ? "Saving…" : "Save Basics"}
               </Button>
             </div>
-          </div>
+          </dialog>
         </>
       ) : null}
     </>
   );
+}
+
+function profileBasicsIssueMessage(
+  issues: readonly { field: string; message: string }[],
+  fallback: string
+): string {
+  return (
+    issues.find((issue) => issue.field === "target")?.message ?? issues[0]?.message ?? fallback
+  );
+}
+
+async function prepareProfileBasicsPatchForDraft({
+  authProfiles,
+  draft,
+  envRows,
+  profileApi,
+  selectedRole,
+}: {
+  authProfiles: readonly AuthProfileOption[];
+  draft: ProfileBasicsDraft;
+  envRows: readonly ProfileBasicsEnvRow[];
+  profileApi: ProfileBridge;
+  selectedRole: string;
+}): Promise<
+  | {
+      ok: true;
+      target: Extract<ProfileBasicsTarget, { status: "writable" }>;
+      patch: Extract<ReturnType<typeof buildProfileBasicsPatch>, { ok: true }>;
+    }
+  | {
+      ok: false;
+      message: string;
+      issues: ReturnType<typeof validateProfileBasicsForm>["issues"];
+    }
+> {
+  const workspace = draft.cwd.trim();
+  if (!workspace) {
+    const issues: ReturnType<typeof validateProfileBasicsForm>["issues"] = [
+      {
+        field: "cwd",
+        path: "cwd",
+        message: "Choose a workspace before saving basics.",
+        severity: "error",
+      },
+    ];
+    return { ok: false, message: issues[0]?.message ?? "Choose a workspace.", issues };
+  }
+
+  const listed = await profileApi.list({ cwd: workspace, roleFilter: selectedRole });
+  const target = resolveProfileBasicsTargetFromList({ listed, selectedRole });
+  const validation = validateProfileBasicsForm({ target, draft, envRows, authProfiles });
+  if (!validation.ok || target.status !== "writable") {
+    return {
+      ok: false,
+      message: profileBasicsIssueMessage(
+        validation.issues,
+        "Profile Basics needs a writable profile target."
+      ),
+      issues: validation.issues,
+    };
+  }
+
+  const patch = buildProfileBasicsPatch({ target, draft: validation.draft, authProfiles });
+  if (!patch.ok) {
+    return {
+      ok: false,
+      message: profileBasicsIssueMessage(
+        patch.issues,
+        "Fix the highlighted Basics fields before saving."
+      ),
+      issues: patch.issues,
+    };
+  }
+
+  return { ok: true, target, patch };
 }
 
 function createPanelDraft(
@@ -1059,18 +1212,23 @@ function serializeBasicsForm(
 
 function getProfileBasicsSaveDisabledReason({
   hasBlockingIssues,
+  hasCurrentPreview,
   isSaving,
   previewStatus,
   targetStatus,
 }: {
   targetStatus: ProfileBasicsTarget["status"];
   hasBlockingIssues: boolean;
+  hasCurrentPreview: boolean;
   isSaving: boolean;
   previewStatus: BasicsAsyncStatus;
 }): string | null {
   if (targetStatus !== "writable") return "Profile Basics needs a writable profile target.";
   if (hasBlockingIssues) return "Fix the highlighted Basics fields before saving.";
-  if (previewStatus === "loading") return "Wait for Profile Basics preview to finish checking.";
+  if (previewStatus === "loading" || previewStatus === "pending") {
+    return "Wait for Profile Basics preview to finish checking.";
+  }
+  if (!hasCurrentPreview) return "Preview the current Profile Basics draft before saving.";
   if (isSaving) return "Profile Basics is saving.";
   return null;
 }
@@ -1220,7 +1378,7 @@ function formatSecretCount(count: number): string {
 }
 
 function formatPreviewStatus(status: BasicsAsyncStatus): string {
-  if (status === "loading") return "Checking";
+  if (status === "pending" || status === "loading") return "Checking";
   if (status === "ready") return "Ready";
   if (status === "error") return "Needs attention";
   return "Waiting";

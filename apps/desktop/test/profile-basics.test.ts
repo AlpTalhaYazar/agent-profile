@@ -1,21 +1,22 @@
 import { describe, expect, test } from "vitest";
 import {
-  formatProfileDraftGuardError,
-  resolveProfileDraftGuardSnapshot,
-} from "../src/renderer/lib/profile-draft-guard.js";
-import {
-  buildProfileBasicsPatch,
   buildProfileBasicsDraftFromRows,
+  buildProfileBasicsPatch,
   createProfileBasicsDraft,
   createSafeProfileBasicsPreviewSummary,
   formatProfileBasicsBridgeError,
   resolveProfileBasicsReloadSelection,
   resolveProfileBasicsReloadState,
   resolveProfileBasicsTarget,
+  resolveProfileBasicsTargetFromList,
   shouldGuardProfileBasicsClose,
   validateProfileBasicsDraft,
   validateProfileBasicsForm,
 } from "../src/renderer/lib/profile-basics.js";
+import {
+  formatProfileDraftGuardError,
+  resolveProfileDraftGuardSnapshot,
+} from "../src/renderer/lib/profile-draft-guard.js";
 import type { AuthProfileOption, ScopeDoc, ScopeListEntry } from "../src/renderer/lib/types.js";
 
 const workAuth: AuthProfileOption = {
@@ -183,6 +184,38 @@ describe("profile basics target and draft contract", () => {
     expect(serialized).not.toContain(".myclaude");
     expect(serialized).not.toContain("project-role");
     expect(serialized).not.toContain("global-role");
+  });
+
+  test("resolves guided save targets from the draft workspace scope list", () => {
+    const oldWorkspaceEntry = entry({ path: "/repo/old/.myclaude/roles/backend-api-review.yml" });
+    const newWorkspaceEntry = entry({
+      path: "/repo/new/.myclaude/roles/backend-api-review.yml",
+      content: scopeDoc({ profile: { displayName: "New Workspace", purpose: "New purpose" } }),
+    });
+
+    const resolved = resolveProfileBasicsTargetFromList({
+      listed: { scopes: [newWorkspaceEntry] },
+      selectedRole: "backend-api-review",
+    });
+    const missing = resolveProfileBasicsTargetFromList({
+      listed: { scopes: [oldWorkspaceEntry] },
+      selectedRole: "frontend-polish",
+    });
+
+    expect(resolved.status).toBe("writable");
+    if (resolved.status !== "writable") throw new Error("expected changed workspace target");
+    expect(resolved.path).toBe("/repo/new/.myclaude/roles/backend-api-review.yml");
+    expect(resolved.content.profile?.displayName).toBe("New Workspace");
+    expect(missing).toMatchObject({
+      status: "unavailable",
+      message:
+        "Selected Agent Profile basics are unavailable. Choose another profile and try again.",
+    });
+
+    const serialized = JSON.stringify(missing);
+    expect(serialized).not.toContain("/repo/old");
+    expect(serialized).not.toContain(".myclaude");
+    expect(serialized).not.toContain("project-role");
   });
 
   test("blocks save for stale identities and invalid settings JSON without producing a patch", () => {

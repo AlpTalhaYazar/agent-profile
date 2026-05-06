@@ -824,7 +824,13 @@ function extractSecretNamesFromString(value: unknown): string[] {
 }
 
 function isSafeSecretName(value: string): boolean {
-  return /^[A-Za-z0-9._/-]{1,120}$/.test(value) && !value.includes("//");
+  return (
+    /^[A-Za-z0-9._/-]{1,120}$/.test(value) &&
+    !value.includes("//") &&
+    !/keyring:|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|authorization|oauth|client[_-]?secret|refresh[_-]?token|access[_-]?token|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+/i.test(
+      value
+    )
+  );
 }
 
 function uniqueSorted(values: readonly string[]): string[] {

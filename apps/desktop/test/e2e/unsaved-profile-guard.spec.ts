@@ -18,6 +18,7 @@ async function openLayerEditor(
   await expect(page.getByRole("heading", { name: "Scope layers" })).toBeVisible();
   const sharedLayer = page.locator("button").filter({ hasText: "shared.yml" }).first();
   await sharedLayer.click();
+  await expect(page.locator('input[value="EDITOR"]')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByPlaceholder("Value").first()).toBeVisible();
 }
 
@@ -110,9 +111,9 @@ test("dirty Profile Basics close can be cancelled and saved before leaving", asy
     await expect(page.getByTestId("profile-basics-dirty-dialog")).toBeVisible();
     await page.getByTestId("profile-basics-dirty-save").click();
     await expect(panel).toHaveCount(0, { timeout: 15_000 });
-    await expect.poll(async () => readFile(rolePath, "utf8")).toContain(
-      "purpose: Save Basics before navigation"
-    );
+    await expect
+      .poll(async () => readFile(rolePath, "utf8"))
+      .toContain("purpose: Save Basics before navigation");
   } finally {
     await app.close();
     await fixture.cleanup();

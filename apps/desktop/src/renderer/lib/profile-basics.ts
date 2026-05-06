@@ -22,6 +22,11 @@ export interface ResolveProfileBasicsTargetInput {
   selectedRole: string;
 }
 
+export interface ResolveProfileBasicsListedTargetInput {
+  listed: unknown;
+  selectedRole: string;
+}
+
 export interface ProfileBasicsDraftSeed extends ProfileIdentitySelection {
   displayName?: string;
   purpose?: string;
@@ -213,6 +218,16 @@ export function resolveProfileBasicsTarget({
       ? "This Agent Profile needs a writable project layer before guided basics can be saved."
       : "Selected Agent Profile basics are unavailable. Choose another profile and try again."
   );
+}
+
+export function resolveProfileBasicsTargetFromList({
+  listed,
+  selectedRole,
+}: ResolveProfileBasicsListedTargetInput): ProfileBasicsTarget {
+  return resolveProfileBasicsTarget({
+    scopeEntries: normalizeScopeList(listed),
+    selectedRole,
+  });
 }
 
 export function createProfileBasicsDraft(

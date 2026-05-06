@@ -90,7 +90,14 @@ describe("deriveAgentProfileViewModel", () => {
           id: "work-oauth",
           displayName: "Work Claude",
           mode: "oauth",
-          secrets: ["linear.token", "github.pat", "keyring://invalid", "${secret:raw}"],
+          secrets: [
+            "linear.token",
+            "github.pat",
+            "keyring://invalid",
+            "${secret:raw}",
+            "ghp_realToken123",
+            "refresh_token",
+          ],
         },
       ])
     ).toEqual([
@@ -98,7 +105,7 @@ describe("deriveAgentProfileViewModel", () => {
         id: "work-oauth",
         displayName: "Work Claude",
         mode: "oauth",
-        secretCount: 4,
+        secretCount: 6,
         secretNames: ["github.pat", "linear.token"],
       },
     ]);
@@ -281,7 +288,11 @@ describe("deriveAgentProfileViewModel", () => {
                 type: "stdio",
                 command: "npx",
                 args: ["browser-mcp", "--token=${secret:browser.token}"],
-                env: { MCP_TOKEN: "${secret:keyring://unsafe}" },
+                env: {
+                  MCP_TOKEN: "${secret:keyring://unsafe}",
+                  RAW_TOKEN_NAME: "${secret:ghp_realToken123}",
+                  OAUTH_INTERNAL: "${secret:refresh_token}",
+                },
               },
             },
           }),
@@ -314,6 +325,8 @@ describe("deriveAgentProfileViewModel", () => {
     const capabilityJson = JSON.stringify(vm.capabilities);
     expect(capabilityJson).not.toContain("${secret:");
     expect(capabilityJson).not.toContain("keyring://");
+    expect(capabilityJson).not.toContain("ghp_realToken123");
+    expect(capabilityJson).not.toContain("refresh_token");
     expect(capabilityJson).not.toContain("Authorization");
     expect(capabilityJson).not.toContain("MCP_TOKEN");
     expect(capabilityJson).not.toContain("Bearer");

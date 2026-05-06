@@ -1,7 +1,7 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Locator, expect, test } from "@playwright/test";
-import { createDesktopFixture, type DesktopFixture, launchDesktop, readText } from "./helpers.js";
+import { type DesktopFixture, createDesktopFixture, launchDesktop, readText } from "./helpers.js";
 
 const forbiddenSurfaceText = [
   /\.myclaude/i,
@@ -130,6 +130,41 @@ async function seedStaleBasicsFixture(fixture: DesktopFixture): Promise<void> {
   );
 }
 
+async function seedChangedWorkspaceTarget(
+  fixture: DesktopFixture,
+  workspaceName: string
+): Promise<string> {
+  const workspace = join(fixture.root, workspaceName);
+  const rolesDir = join(workspace, ".myclaude", "roles");
+  await mkdir(rolesDir, { recursive: true });
+  await writeFile(
+    join(rolesDir, "backend-api-review.yml"),
+    [
+      "version: 1",
+      "profile:",
+      "  displayName: Backend Alt Workspace",
+      "  purpose: Review backend changes from another workspace",
+      "auth:",
+      "  profileId: work",
+      "env:",
+      "  SAFE_FLAG: other",
+      "settings:",
+      "  theme: blue",
+      "",
+    ].join("\n")
+  );
+  return workspace;
+}
+
+async function seedWorkspaceWithoutSelectedTarget(
+  fixture: DesktopFixture,
+  workspaceName: string
+): Promise<string> {
+  const workspace = join(fixture.root, workspaceName);
+  await mkdir(join(workspace, ".myclaude", "roles"), { recursive: true });
+  return workspace;
+}
+
 test("guided Profile Basics edits, previews, saves, reloads, and restores safe state", async () => {
   const fixture = await createDesktopFixture("guided-profile-basics-save-");
   await seedGuidedBasicsFixture(fixture);
@@ -147,7 +182,9 @@ test("guided Profile Basics edits, previews, saves, reloads, and restores safe s
     await expect(page.getByRole("status")).toContainText("Guided Profile Basics opened");
     await expect(panel.getByTestId("profile-basics-display-name")).toBeFocused();
     await expect(panel).toContainText("Guided Basics");
-    await expect(panel.getByTestId("profile-basics-preview")).toContainText("No Basics changes yet");
+    await expect(panel.getByTestId("profile-basics-preview")).toContainText(
+      "No Basics changes yet"
+    );
     await expectRedacted(panel);
 
     await page.keyboard.press("Escape");
@@ -229,6 +266,107 @@ test("guided Profile Basics edits, previews, saves, reloads, and restores safe s
     );
     expect(restoredSettings).toEqual({ theme: "light", review: { level: "deep" }, safeCount: 2 });
     await expectRedacted(panel.getByTestId("profile-basics-preview"));
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("guided Profile Basics resolves save target from the edited workspace", async () => {
+  const fixture = await createDesktopFixture("guided-profile-basics-workspace-save-");
+  await seedGuidedBasicsFixture(fixture);
+  const newWorkspace = await seedChangedWorkspaceTarget(fixture, "draft-workspace");
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("profile-basics-open").click();
+    const panel = page.getByTestId("profile-basics-panel");
+    const preview = panel.getByTestId("profile-basics-preview");
+    const save = panel.getByTestId("profile-basics-save");
+    await expect(panel).toBeVisible();
+
+    await panel.getByTestId("profile-basics-display-name").fill("Backend Draft Captain");
+    await expect(preview).toContainText("safe Basics", { timeout: 15_000 });
+    await expect(save).toBeEnabled();
+
+    await panel.getByTestId("profile-basics-workspace").fill(newWorkspace);
+    await expect(save).toBeDisabled();
+    await expect(preview).toContainText("safe Basics", { timeout: 15_000 });
+    await expect(save).toBeEnabled();
+
+    await panel
+      .getByTestId("profile-basics-purpose")
+      .fill("Coordinate the changed workspace safely");
+    await expect(save).toBeDisabled();
+    await expect(preview).toContainText("safe Basics", { timeout: 15_000 });
+    await expect(save).toBeEnabled();
+
+    await save.click();
+    await expect(panel).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Backend Draft Captain");
+
+    const originalProfile = await readText(
+      join(fixture.projectDir, ".myclaude", "roles", "backend-api-review.yml")
+    );
+    const changedProfile = await readText(
+      join(newWorkspace, ".myclaude", "roles", "backend-api-review.yml")
+    );
+    expect(originalProfile).toContain("displayName: Backend API Review");
+    expect(originalProfile).not.toContain("Backend Draft Captain");
+    expect(changedProfile).toContain("displayName: Backend Draft Captain");
+    expect(changedProfile).toContain("purpose: Coordinate the changed workspace safely");
+
+    const storedSelection = await page.evaluate(() =>
+      window.localStorage.getItem("agent-profile.selectedProfile")
+    );
+    expect(storedSelection).toContain(newWorkspace);
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Backend Draft Captain");
+    await page.getByTestId("profile-basics-open").click();
+    await expect(panel.getByTestId("profile-basics-workspace")).toHaveValue(newWorkspace);
+    await expect(panel.getByTestId("profile-basics-display-name")).toHaveValue(
+      "Backend Draft Captain"
+    );
+    await expectRedacted(panel);
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("guided Profile Basics blocks save when the edited workspace has no writable target", async () => {
+  const fixture = await createDesktopFixture("guided-profile-basics-missing-target-");
+  await seedGuidedBasicsFixture(fixture);
+  const missingWorkspace = await seedWorkspaceWithoutSelectedTarget(fixture, "missing-target");
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("profile-basics-open").click();
+    const panel = page.getByTestId("profile-basics-panel");
+    await expect(panel).toBeVisible();
+
+    await panel.getByTestId("profile-basics-display-name").fill("Should Not Save");
+    await expect(panel.getByTestId("profile-basics-preview")).toContainText("safe Basics", {
+      timeout: 15_000,
+    });
+    await panel.getByTestId("profile-basics-workspace").fill(missingWorkspace);
+    await expect(panel.getByTestId("profile-basics-save")).toBeDisabled();
+    await expect(panel.getByTestId("profile-basics-error")).toContainText(
+      "Selected Agent Profile basics are unavailable",
+      { timeout: 15_000 }
+    );
+    await expect(panel.getByTestId("profile-basics-preview")).toContainText("Needs attention");
+    await expectRedacted(panel.getByTestId("profile-basics-error"));
+
+    const originalProfile = await readText(
+      join(fixture.projectDir, ".myclaude", "roles", "backend-api-review.yml")
+    );
+    expect(originalProfile).toContain("displayName: Backend API Review");
+    expect(originalProfile).not.toContain("Should Not Save");
   } finally {
     await app.close();
     await fixture.cleanup();
