@@ -27,6 +27,7 @@ interface AgentProfileSidePanelProps {
   activeSection: AgentProfilePanelSection;
   onClose: () => void;
   onOpenClaudeAuth: () => void;
+  onOpenProfileTools: () => void;
   onOpenProfileWorkspace: (tab: ProfileWorkspaceTab) => void;
   onSectionChange: (section: AgentProfilePanelSection) => void;
   open: boolean;
@@ -48,6 +49,7 @@ export function AgentProfileSidePanel({
   activeSection,
   onClose,
   onOpenClaudeAuth,
+  onOpenProfileTools,
   onOpenProfileWorkspace,
   onSectionChange,
   open,
@@ -217,7 +219,11 @@ export function AgentProfileSidePanel({
             <IdentitySection onOpenClaudeAuth={onOpenClaudeAuth} profile={profile} />
           ) : null}
           {activeSection === "tools" ? (
-            <ToolsSection onOpenProfileWorkspace={onOpenProfileWorkspace} profile={profile} />
+            <ToolsSection
+              onOpenProfileTools={onOpenProfileTools}
+              onOpenProfileWorkspace={onOpenProfileWorkspace}
+              profile={profile}
+            />
           ) : null}
           {activeSection === "skills" ? <SkillsSection profile={profile} /> : null}
           {activeSection === "inspect" ? <InspectSection profile={profile} /> : null}
@@ -332,9 +338,11 @@ function IdentitySection({
 }
 
 function ToolsSection({
+  onOpenProfileTools,
   onOpenProfileWorkspace,
   profile,
 }: {
+  onOpenProfileTools: () => void;
   onOpenProfileWorkspace: (tab: ProfileWorkspaceTab) => void;
   profile: AgentProfileViewModel;
 }): React.ReactElement {
@@ -397,16 +405,28 @@ function ToolsSection({
         )}
       </section>
 
-      <Button
-        className="min-h-10 justify-start"
-        data-testid="agent-profile-panel-open-layers"
-        onClick={() => onOpenProfileWorkspace("layers")}
-        type="button"
-        variant="secondary"
-      >
-        <Layers3 className="h-4 w-4" aria-hidden="true" />
-        Edit tool configuration in Profile Workspace
-      </Button>
+      <div className="grid gap-2">
+        <Button
+          className="min-h-10 justify-start"
+          data-testid="agent-profile-panel-open-tools-editor"
+          onClick={onOpenProfileTools}
+          type="button"
+          variant="primary"
+        >
+          <Blocks className="h-4 w-4" aria-hidden="true" />
+          Add or edit MCP tools
+        </Button>
+        <Button
+          className="min-h-10 justify-start"
+          data-testid="agent-profile-panel-open-layers"
+          onClick={() => onOpenProfileWorkspace("layers")}
+          type="button"
+          variant="secondary"
+        >
+          <Layers3 className="h-4 w-4" aria-hidden="true" />
+          Edit tool configuration in Profile Workspace
+        </Button>
+      </div>
     </section>
   );
 }

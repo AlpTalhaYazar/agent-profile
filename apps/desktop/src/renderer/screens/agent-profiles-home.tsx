@@ -71,6 +71,7 @@ import {
 } from "../lib/normalize.js";
 import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
 import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
+import { ProfileMcpToolsPanel } from "../components/profile-mcp-tools-panel.js";
 import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
@@ -107,12 +108,14 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [basicsPanelOpen, setBasicsPanelOpen] = React.useState(false);
+  const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [createProfileError, setCreateProfileError] = React.useState<string | null>(null);
   const [librarySwitchError, setLibrarySwitchError] = React.useState<string | null>(null);
   const [switchingProfileId, setSwitchingProfileId] = React.useState<string | null>(null);
   const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const basicsButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const toolsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
 
@@ -172,6 +175,13 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     });
   }, []);
 
+  const closeToolsPanel = React.useCallback(() => {
+    setToolsPanelOpen(false);
+    window.requestAnimationFrame(() => {
+      toolsButtonRef.current?.focus();
+    });
+  }, []);
+
   const openBasicsPanel = React.useCallback(() => {
     setLaunchError(null);
     setLibrarySwitchError(null);
@@ -179,6 +189,12 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     setPanelSection("summary");
     setBasicsPanelOpen(true);
   }, [setPanelSection, setSelectedPanelProfileId]);
+
+  const openToolsPanel = React.useCallback(() => {
+    setLaunchError(null);
+    setLibrarySwitchError(null);
+    setToolsPanelOpen(true);
+  }, []);
 
   const openCreateDialog = React.useCallback(() => {
     setLaunchError(null);
@@ -607,6 +623,17 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
                   </Button>
                   <Button
                     className="min-h-10"
+                    data-testid="profile-tools-open"
+                    onClick={openToolsPanel}
+                    ref={toolsButtonRef}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Customize tools
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    className="min-h-10"
                     data-testid="home-secondary-action"
                     onClick={activeReadinessIssue ? handleFixPath : openProfileWorkspace}
                     type="button"
@@ -668,6 +695,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           activeSection={panelSection}
           onClose={closeProfileDetails}
           onOpenClaudeAuth={openClaudeAuth}
+          onOpenProfileTools={openToolsPanel}
           onOpenProfileWorkspace={openProfileWorkspaceTab}
           onSectionChange={setPanelSection}
           open={isPanelOpenForProfile}
@@ -689,6 +717,25 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           onSaved={handleBasicsSaved}
           onValidationStateChange={setValidationState}
           open={basicsPanelOpen}
+          profile={agentProfile}
+          scopeEntries={scopeEntries}
+          selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
+          selectedRole={agentProfile.details.inspectTarget.role ?? ""}
+        />
+        <ProfileMcpToolsPanel
+          currentEffective={effectiveState.effective}
+          cwd={cwd}
+          onOpenAdvanced={() => {
+            goToProfileWorkspaceTab("layers");
+          }}
+          onOpenChange={(open) => {
+            if (!open) closeToolsPanel();
+            else setToolsPanelOpen(true);
+          }}
+          onPreviewStateChange={setPreviewState}
+          onSaved={handleBasicsSaved}
+          onValidationStateChange={setValidationState}
+          open={toolsPanelOpen}
           profile={agentProfile}
           scopeEntries={scopeEntries}
           selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
