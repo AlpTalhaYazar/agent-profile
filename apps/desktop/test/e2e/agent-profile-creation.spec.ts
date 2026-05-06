@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
+import { createDesktopFixture, launchDesktop, readText, seedProfileFixture } from "./helpers.js";
 
 test("new agent profile dialog creates and restores a purpose-first profile", async () => {
   const fixture = await createDesktopFixture("agent-profile-create-dialog-");
@@ -50,6 +50,19 @@ test("new agent profile dialog creates and restores a purpose-first profile", as
     expect(existsSync(join(fixture.projectDir, ".myclaude", "roles", "frontend-polish.yml"))).toBe(
       true
     );
+    const createdProfileContent = await readText(
+      join(fixture.projectDir, ".myclaude", "roles", "frontend-polish.yml")
+    );
+    expect(createdProfileContent).toContain("profile:");
+    expect(createdProfileContent).toContain("displayName: Frontend Polish");
+    expect(createdProfileContent).toContain("purpose: Frontend Polish");
+    expect(createdProfileContent).toContain("auth:");
+    expect(createdProfileContent).toContain("profileId: work");
+    const library = page.getByTestId("agent-profile-library");
+    await expect(library).toContainText("Frontend Polish");
+    await expect(
+      library.getByTestId("agent-profile-library-item").filter({ hasText: "Frontend Polish" })
+    ).toContainText("Selected profile");
 
     await page.reload();
     await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
@@ -60,6 +73,50 @@ test("new agent profile dialog creates and restores a purpose-first profile", as
     await dialog.getByTestId("profile-create-purpose").fill("Frontend Polish");
     await expect(dialog).toContainText("already exists");
     await expect(dialog.getByTestId("profile-create-review-action")).toBeDisabled();
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("new agent profile dialog restores profiles created in a non-default workspace", async () => {
+  const fixture = await createDesktopFixture("agent-profile-create-alt-workspace-");
+  await seedProfileFixture(fixture);
+  const alternateProjectDir = join(fixture.root, "alternate-project");
+  await mkdir(alternateProjectDir, { recursive: true });
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("home-new-agent-profile").click();
+
+    const dialog = page.getByTestId("profile-create-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("profile-create-purpose").fill("Data Migration Review");
+    await dialog.getByTestId("profile-create-workspace").fill(alternateProjectDir);
+    await expect(dialog.getByTestId("profile-create-review-action")).toBeEnabled();
+    await dialog.getByTestId("profile-create-review-action").click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Data Migration Review");
+    await expect(
+      page.getByTestId("agent-profile-library-item").filter({ hasText: "Data Migration Review" })
+    ).toContainText("Selected profile");
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await expect(page.getByTestId("agent-profile-card")).toContainText("Data Migration Review");
+    await expect(
+      page.getByTestId("agent-profile-library-item").filter({ hasText: "Data Migration Review" })
+    ).toContainText("Selected profile");
+
+    const storedSelection = await page.evaluate(() =>
+      window.localStorage.getItem("agent-profile.selectedProfile")
+    );
+    expect(storedSelection).toContain(alternateProjectDir);
+    expect(
+      existsSync(join(alternateProjectDir, ".myclaude", "roles", "data-migration-review.yml"))
+    ).toBe(true);
   } finally {
     await app.close();
     await fixture.cleanup();

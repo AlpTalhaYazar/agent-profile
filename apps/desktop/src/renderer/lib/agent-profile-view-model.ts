@@ -14,6 +14,16 @@ import {
   validationStateAtom,
 } from "./atoms.js";
 import type {
+  ProfileIdentityAuthState,
+  ProfileIdentityMetadataSource,
+  ProfileIdentitySelection,
+} from "./profile-identity.js";
+import {
+  createAgentProfileId,
+  deriveProfileIdentityLibrary,
+  sanitizeProfileLabel,
+} from "./profile-identity.js";
+import type {
   AuthProfileOption,
   EffectiveConfig,
   EffectiveState,
@@ -158,6 +168,29 @@ export interface AgentProfileCapabilityProjection {
   skills: AgentProfileSkillsCapabilityProjection;
 }
 
+export interface AgentProfileLibraryItem {
+  id: AgentProfileId;
+  role: string;
+  displayName: string;
+  purpose: string;
+  metadataSource: ProfileIdentityMetadataSource;
+  authLabel: string;
+  authState: ProfileIdentityAuthState;
+  workspaceLabel: string;
+  capabilitySummary: string;
+  statusLabel: string;
+  statusTone: AgentProfileReadinessTone;
+  isSelected: boolean;
+  isSwitchable: boolean;
+  disabledReason: string | null;
+  selection: ProfileIdentitySelection;
+}
+
+export interface AgentProfileLibraryProjection {
+  items: AgentProfileLibraryItem[];
+  selectedId: AgentProfileId | null;
+}
+
 export interface AgentProfileViewModel {
   id: AgentProfileId;
   name: string;
@@ -202,6 +235,22 @@ export const agentProfileViewModelAtom = atom((get) =>
   })
 );
 
+export const agentProfileLibraryAtom = atom((get) =>
+  deriveAgentProfileLibraryViewModel({
+    selectedRole: get(selectedRoleAtom),
+    selectedAuthId: get(selectedAuthIdAtom),
+    cwd: get(cwdAtom),
+    authProfiles: get(authProfilesAtom),
+    scopeEntries: get(scopeEntriesAtom),
+    selectedScopePath: get(selectedScopePathAtom),
+    effectiveState: get(effectiveStateAtom),
+    previewState: get(previewStateAtom),
+    validationState: get(validationStateAtom),
+    isBootstrapping: get(isBootstrappingAtom),
+    isRefreshing: get(isRefreshingAtom),
+  })
+);
+
 export function deriveAgentProfileViewModel(
   input: AgentProfileViewModelInput
 ): AgentProfileViewModel {
@@ -228,8 +277,13 @@ export function deriveAgentProfileViewModel(
     isLoading: input.isBootstrapping || input.isRefreshing,
   });
   const launch = deriveLaunch({ role, authProfileId, cwd, readiness });
-  const name = deriveName(role);
-  const purposeLabel = derivePurposeLabel(role);
+  const selectedIdentity = deriveSelectedProfileCardIdentity({
+    role,
+    scopeEntries: input.scopeEntries,
+    selectedScopePath: input.selectedScopePath,
+  });
+  const name = selectedIdentity.name;
+  const purposeLabel = selectedIdentity.purposeLabel;
   const card = deriveCardProjection({ name, purposeLabel, auth, workspace, counts, readiness });
 
   return {
@@ -254,6 +308,156 @@ export function deriveAgentProfileViewModel(
     }),
     capabilities,
   };
+}
+
+export function deriveAgentProfileLibraryViewModel(
+  input: AgentProfileViewModelInput
+): AgentProfileLibraryProjection {
+  const selectedProfile = deriveAgentProfileViewModel(input);
+  const selectedRole = normalizeText(input.selectedRole);
+  const selectedAuthId = normalizeText(input.selectedAuthId);
+  const cwd = normalizeText(input.cwd);
+  const workspaceLabel = deriveWorkspaceSummary(cwd).label;
+  const entriesById = new Map(
+    input.scopeEntries.map((entry) => [createProfileIdentityLookupKey(entry), entry] as const)
+  );
+  const identities = deriveProfileIdentityLibrary({
+    scopeEntries: input.scopeEntries,
+    authProfiles: input.authProfiles,
+    cwd,
+  });
+
+  const selectedScopePath = input.selectedScopePath;
+  const selectedScopePathHasLibraryEntry = Boolean(
+    selectedScopePath &&
+      identities.some((identity) => entriesById.get(identity.id)?.path === selectedScopePath)
+  );
+  const items = identities.map((identity) => {
+    const matchingEntry = entriesById.get(identity.id) ?? null;
+    const isSelected = isSelectedProfileIdentity({
+      entry: matchingEntry,
+      selection: identity.selection,
+      selected: {
+        role: selectedRole,
+        authProfileId: selectedAuthId,
+        cwd,
+      },
+      selectedScopePath,
+      selectedScopePathHasLibraryEntry,
+    });
+    const scopeCounts = deriveScopeCounts(matchingEntry?.content ?? null);
+    const counts = isSelected ? selectedProfile.toolSkillCounts : scopeCounts;
+    const status = isSelected
+      ? {
+          label: selectedProfile.readiness.label,
+          tone: selectedProfile.readiness.tone,
+          disabledReason: null,
+        }
+      : deriveLibraryItemStatus(identity.auth.state);
+    const isSwitchable =
+      !isSelected &&
+      identity.auth.state === "bound" &&
+      Boolean(identity.selection.role && identity.selection.authProfileId && identity.selection.cwd);
+
+    return {
+      id: identity.id,
+      role: identity.role,
+      displayName: identity.displayName,
+      purpose: identity.purpose,
+      metadataSource: identity.metadataSource,
+      authLabel: identity.auth.label,
+      authState: identity.auth.state,
+      workspaceLabel,
+      capabilitySummary: formatLibraryCapabilitySummary(counts),
+      statusLabel: status.label,
+      statusTone: status.tone,
+      isSelected,
+      isSwitchable,
+      disabledReason: isSwitchable ? null : status.disabledReason,
+      selection: identity.selection,
+    } satisfies AgentProfileLibraryItem;
+  });
+
+  return {
+    items,
+    selectedId: items.find((item) => item.isSelected)?.id ?? null,
+  };
+}
+
+function createProfileIdentityLookupKey(entry: ScopeListEntry): AgentProfileId {
+  return createAgentProfileId(entry);
+}
+
+function isSelectedProfileIdentity(input: {
+  entry: ScopeListEntry | null;
+  selection: ProfileIdentitySelection;
+  selected: ProfileIdentitySelection;
+  selectedScopePath: string | null;
+  selectedScopePathHasLibraryEntry: boolean;
+}): boolean {
+  if (input.selectedScopePathHasLibraryEntry) return input.entry?.path === input.selectedScopePath;
+  if (!input.selected.role || !input.selected.cwd) return false;
+  if (input.selection.role !== input.selected.role || input.selection.cwd !== input.selected.cwd) {
+    return false;
+  }
+  if (!input.selection.authProfileId) return true;
+  return input.selection.authProfileId === input.selected.authProfileId;
+}
+
+function deriveScopeCounts(content: ScopeListEntry["content"]): AgentProfileToolSkillCounts {
+  const persona = content?.persona;
+  const claudeMd = safeArray(persona?.claudeMd).length;
+  const agents = safeArray(persona?.agents).length;
+  const skills = safeArray(persona?.skills).length;
+  const commands = safeArray(persona?.slashCmds).length;
+  const memory = safeArray(persona?.memory).length;
+  return {
+    tools: safeRecordKeys(content?.mcpServers).length,
+    envVars: safeRecordKeys(content?.env).length,
+    settings: safeRecordKeys(content?.settings).length,
+    skills,
+    agents,
+    commands,
+    memory,
+    claudeMd,
+    personaAssets: claudeMd + agents + skills + commands + memory,
+    validationIssues: 0,
+  };
+}
+
+function deriveLibraryItemStatus(authState: ProfileIdentityAuthState): {
+  label: string;
+  tone: AgentProfileReadinessTone;
+  disabledReason: string | null;
+} {
+  if (authState === "missing") {
+    return {
+      label: "Needs identity",
+      tone: "warning",
+      disabledReason: "Choose a Claude identity before switching to this Agent Profile.",
+    };
+  }
+  if (authState === "stale") {
+    return {
+      label: "Identity unavailable",
+      tone: "danger",
+      disabledReason: "This Agent Profile uses a Claude identity that is not available.",
+    };
+  }
+  return { label: "Ready to switch", tone: "success", disabledReason: null };
+}
+
+function formatLibraryCapabilitySummary(counts: AgentProfileToolSkillCounts): string {
+  const parts: string[] = [];
+  if (counts.tools > 0) {
+    parts.push(`${counts.tools} MCP server${counts.tools === 1 ? "" : "s"}`);
+  }
+  if (counts.personaAssets > 0) {
+    parts.push(
+      `${counts.personaAssets} skill/persona asset${counts.personaAssets === 1 ? "" : "s"}`
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : "No tools or skills yet";
 }
 
 function normalizeText(value: string): string {
@@ -295,9 +499,10 @@ function deriveAuthSummary(
     };
   }
 
+  const safeLabel = sanitizeProfileLabel(profile.displayName) ?? sanitizeProfileLabel(profile.id) ?? "Claude identity";
   return {
     profileId: profile.id,
-    label: profile.displayName || profile.id,
+    label: safeLabel,
     modeLabel: humanizeMode(profile.mode),
     secretSummary: formatSecretCount(profile.secretCount),
     state: "selected",
@@ -668,6 +873,23 @@ function deriveDetails(input: {
       authProfileId: input.authProfileId || null,
       cwd: input.cwd || null,
     },
+  };
+}
+
+function deriveSelectedProfileCardIdentity(input: {
+  role: string;
+  scopeEntries: readonly ScopeListEntry[];
+  selectedScopePath: string | null;
+}): { name: string; purposeLabel: string } {
+  const selectedEntry = input.selectedScopePath
+    ? (input.scopeEntries.find((entry) => entry.path === input.selectedScopePath) ?? null)
+    : (input.scopeEntries.find((entry) => entry.role === input.role && entry.scope.includes("role")) ??
+      null);
+  const displayName = sanitizeProfileLabel(selectedEntry?.content?.profile?.displayName);
+  const purpose = sanitizeProfileLabel(selectedEntry?.content?.profile?.purpose);
+  return {
+    name: displayName ?? deriveName(input.role),
+    purposeLabel: purpose ?? derivePurposeLabel(input.role),
   };
 }
 

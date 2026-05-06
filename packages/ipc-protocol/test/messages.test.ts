@@ -276,7 +276,7 @@ describe("Req schemas", () => {
   });
 
   describe("ReqProfileCreateScope", () => {
-    it("accepts project role create input", () => {
+    it("accepts project role create input with profile metadata and auth binding", () => {
       const result = ReqProfileCreateScope.safeParse({
         id: "c-7b",
         kind: "profile.createScope",
@@ -284,6 +284,11 @@ describe("Req schemas", () => {
         location: "project",
         layerType: "role",
         role: "backend",
+        authProfileId: "work",
+        profile: {
+          displayName: "Backend API Review",
+          purpose: "Review backend changes",
+        },
       });
       expect(result.success).toBe(true);
     });

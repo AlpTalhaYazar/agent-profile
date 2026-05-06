@@ -49,6 +49,13 @@ const ProfileSavePayload = z
   })
   .strict();
 
+const ProfileCreateScopeMetadataPayload = z
+  .object({
+    displayName: z.string().min(1).max(120).optional(),
+    purpose: z.string().min(1).max(280).optional(),
+  })
+  .strict();
+
 const ProfileCreateScopePayload = z
   .object({
     location: z.enum(["global", "project"]),
@@ -56,6 +63,8 @@ const ProfileCreateScopePayload = z
     role: z.string().min(1).optional(),
     cwd: z.string().min(1),
     force: z.boolean().optional(),
+    profile: ProfileCreateScopeMetadataPayload.optional(),
+    authProfileId: z.string().min(1).optional(),
   })
   .strict();
 

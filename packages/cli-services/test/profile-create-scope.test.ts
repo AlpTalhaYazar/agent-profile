@@ -73,6 +73,59 @@ describe("profileCreateScopeService", () => {
     }
   });
 
+  it("persists sanitized profile metadata and auth binding on created role scopes", () => {
+    const result = profileCreateScopeService({
+      home,
+      cwd,
+      location: "project",
+      layerType: "role",
+      role: "backend-api-review",
+      authProfileId: "work",
+      profile: {
+        displayName: "  Backend API Review  ",
+        purpose: "Review backend API changes\n before launch",
+      },
+    });
+
+    expect(result.content).toMatchObject({
+      profile: {
+        displayName: "Backend API Review",
+        purpose: "Review backend API changes before launch",
+      },
+      auth: { profileId: "work" },
+    });
+    const content = readFileSync(result.path, "utf8");
+    expect(content).toContain("profile:");
+    expect(content).toContain("displayName: Backend API Review");
+    expect(content).toContain("purpose: Review backend API changes before launch");
+    expect(content).toContain("auth:");
+    expect(content).toContain("profileId: work");
+  });
+
+  it("omits secret-like profile metadata from created content", () => {
+    const result = profileCreateScopeService({
+      home,
+      cwd,
+      location: "project",
+      layerType: "role",
+      role: "secret-review",
+      authProfileId: "work",
+      profile: {
+        displayName: "keyring://anthropic/work",
+        purpose: "Bearer ${secret:github.pat}",
+      },
+    });
+
+    const serializedContent = JSON.stringify(result.content);
+    const fileContent = readFileSync(result.path, "utf8");
+    expect(serializedContent).not.toContain("keyring://");
+    expect(serializedContent).not.toContain("${secret:");
+    expect(serializedContent).not.toContain("Bearer");
+    expect(fileContent).not.toContain("profile:");
+    expect(fileContent).not.toContain("keyring://");
+    expect(fileContent).not.toContain("${secret:");
+  });
+
   it("rejects conflicts unless force is set", () => {
     profileCreateScopeService({
       home,

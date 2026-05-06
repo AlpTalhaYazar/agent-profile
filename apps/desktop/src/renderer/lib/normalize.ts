@@ -5,6 +5,7 @@
  * the server returns a partially populated payload.
  */
 
+import { sanitizeProfileLabel } from "./profile-identity.js";
 import type {
   AuthProfileOption,
   EffectiveConfig,
@@ -15,6 +16,7 @@ import type {
   Provenance,
   ScopeDoc,
   ScopeDocPersona,
+  ScopeDocProfile,
   ScopeDocServerEntry,
   ScopeListEntry,
   ValidationIssue,
@@ -43,10 +45,12 @@ export function normalizeAuthProfiles(input: unknown): AuthProfileOption[] {
     if (!isRecord(candidate)) return [];
     const id = asString(candidate.id);
     if (!id) return [];
+    const displayName =
+      sanitizeProfileLabel(candidate.displayName) ?? sanitizeProfileLabel(id) ?? "Claude identity";
     return [
       {
         id,
-        displayName: asString(candidate.displayName) ?? id,
+        displayName,
         mode: asString(candidate.mode) ?? "unknown",
         secretCount: Array.isArray(candidate.secrets) ? candidate.secrets.length : 0,
         secretNames: normalizeSecretNames(candidate.secrets),
@@ -169,8 +173,10 @@ export function normalizeScopeDoc(input: unknown): ScopeDoc {
   // ScopeDoc schema requires version: 1 (literal); normalize unknown shapes to 1.
   const version = 1 as const;
   const persona = normalizePersona(record.persona);
+  const profile = normalizeProfileMetadata(record.profile);
   return {
     version,
+    ...(profile ? { profile } : {}),
     mcpServers: normalizeNullableServerRecord(record.mcpServers),
     env: normalizeStringRecord(record.env),
     settings: normalizeUnknownRecord(record.settings),
@@ -192,6 +198,16 @@ export function normalizePersona(input: unknown): ScopeDocPersona | undefined {
     slashCmds: normalizeStringArray(input.slashCmds),
     memory: normalizeStringArray(input.memory),
   };
+}
+
+export function normalizeProfileMetadata(input: unknown): ScopeDocProfile | undefined {
+  if (!isRecord(input)) return undefined;
+  const displayName = normalizeDisplayText(input.displayName);
+  const purpose = normalizeDisplayText(input.purpose);
+  const profile: ScopeDocProfile = {};
+  if (displayName) profile.displayName = displayName;
+  if (purpose) profile.purpose = purpose;
+  return Object.keys(profile).length > 0 ? profile : undefined;
 }
 
 export function removeAuthBinding(scopeDoc: ScopeDoc): ScopeDoc {
@@ -248,6 +264,12 @@ function normalizeSecretNames(input: unknown): string[] {
 
 function isSafeSecretName(value: string): boolean {
   return /^[A-Za-z0-9._/-]{1,120}$/.test(value) && !value.includes("//");
+}
+
+function normalizeDisplayText(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const normalized = input.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 ? normalized : null;
 }
 
 function uniqueSorted(values: string[]): string[] {

@@ -218,6 +218,8 @@ export function createWriteHandlers(deps: WriteHandlerDeps): HandlerMap {
         location: req.location,
         layerType: req.layerType,
         ...(req.role !== undefined ? { role: req.role } : {}),
+        ...(req.profile !== undefined ? { profile: req.profile } : {}),
+        ...(req.authProfileId !== undefined ? { authProfileId: req.authProfileId } : {}),
         force: req.force ?? false,
       });
       return {

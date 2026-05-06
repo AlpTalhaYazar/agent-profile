@@ -218,6 +218,24 @@ describe("ScopeDoc", () => {
       expect(result.data.disabledServers).toEqual([]);
     }
   });
+
+  it("preserves optional Agent Profile identity metadata", () => {
+    const result = ScopeDoc.safeParse({
+      version: 1,
+      profile: {
+        displayName: "Backend API Review",
+        purpose: "Review backend API changes before launch",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.profile).toEqual({
+        displayName: "Backend API Review",
+        purpose: "Review backend API changes before launch",
+      });
+    }
+  });
 });
 
 describe("AuthProfilesDoc", () => {

@@ -70,9 +70,27 @@ export const PersonaRefs = z
 export type PersonaRefsT = z.infer<typeof PersonaRefs>;
 
 /**
+ * Product-facing Agent Profile identity metadata stored on a scope file.
+ *
+ * This is deliberately display metadata only. Runtime execution still derives
+ * from role/auth/cwd plus the effective cascade.
+ */
+export const ProfileMetadata = z
+  .object({
+    displayName: z.string().trim().min(1).max(120).optional(),
+    purpose: z.string().trim().min(1).max(280).optional(),
+  })
+  .partial()
+  .optional();
+
+/** Inferred type for product-facing Agent Profile identity metadata. */
+export type ProfileMetadataT = z.infer<typeof ProfileMetadata>;
+
+/**
  * A single scope document — the canonical shape of one YAML config file.
  *
  * Version must be `1` for this schema version.
+ * - `profile`: optional product-facing Agent Profile identity metadata.
  * - `mcpServers`: named MCP server definitions; null value = tombstone.
  * - `env`: environment variables; values may contain secret refs.
  * - `settings`: arbitrary `settings.json` overlay keys.
@@ -83,6 +101,7 @@ export type PersonaRefsT = z.infer<typeof PersonaRefs>;
  */
 export const ScopeDoc = z.object({
   version: z.literal(1),
+  profile: ProfileMetadata,
   mcpServers: z
     .record(
       z.string().regex(/^[a-z0-9_-]+$/, "Server name must match [a-z0-9_-]+"),

@@ -360,7 +360,11 @@ function readScopeDoc(filePath: string): ParsedScopeContent {
 }
 
 function canonicalizeScopeDoc(doc: ScopeDocT): ScopeDocT {
-  const canonical: ScopeDocT = {
+  type ScopeDocWithProfile = ScopeDocT & {
+    profile?: { displayName?: string; purpose?: string };
+  };
+  const source = doc as ScopeDocWithProfile;
+  const canonical: ScopeDocWithProfile = {
     version: doc.version,
     mcpServers: sortRecord(doc.mcpServers),
     env: sortRecord(doc.env),
@@ -369,10 +373,13 @@ function canonicalizeScopeDoc(doc: ScopeDocT): ScopeDocT {
     disabledServers: [...doc.disabledServers],
   };
 
+  if (source.profile) {
+    canonical.profile = sortValue(source.profile) as { displayName?: string; purpose?: string };
+  }
   if (doc.auth) canonical.auth = sortValue(doc.auth) as ScopeDocT["auth"];
   if (doc.persona) canonical.persona = sortValue(doc.persona) as ScopeDocT["persona"];
 
-  return canonical;
+  return canonical as ScopeDocT;
 }
 
 function sortRecord<T>(record: Record<string, T>): Record<string, T> {

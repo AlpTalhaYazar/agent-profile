@@ -65,12 +65,19 @@ export interface SessionTerminalOpenResult {
   reason?: string;
 }
 
+export interface ProfileCreateScopeMetadata {
+  displayName?: string;
+  purpose?: string;
+}
+
 export interface ProfileCreateScopeInput {
   location: "global" | "project";
   layerType: "shared" | "role";
   role?: string;
   cwd: string;
   force?: boolean;
+  profile?: ProfileCreateScopeMetadata;
+  authProfileId?: string;
 }
 
 export interface ProfileCreateScopeResult {

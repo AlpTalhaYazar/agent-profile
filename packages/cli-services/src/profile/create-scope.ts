@@ -8,6 +8,11 @@ import { assertAllowlistedScopePath, writeCanonicalScopeFile } from "./shared.js
 export type ProfileScopeLocation = "global" | "project";
 export type ProfileScopeLayerType = "shared" | "role";
 
+export interface ProfileCreateScopeMetadata {
+  displayName?: string | undefined;
+  purpose?: string | undefined;
+}
+
 export interface ProfileCreateScopeInput {
   home: string;
   cwd: string;
@@ -15,6 +20,8 @@ export interface ProfileCreateScopeInput {
   layerType: ProfileScopeLayerType;
   role?: string;
   force?: boolean;
+  profile?: ProfileCreateScopeMetadata;
+  authProfileId?: string;
 }
 
 export interface ProfileCreateScopeResult {
@@ -26,6 +33,8 @@ export interface ProfileCreateScopeResult {
 }
 
 const ROLE_RE = /^[a-z0-9_-]+$/;
+const UNSAFE_METADATA_RE =
+  /keyring:\/\/|\$\{secret:|\$\{env:|secret:|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+/i;
 
 export function profileCreateScopeService(
   input: ProfileCreateScopeInput
@@ -39,7 +48,10 @@ export function profileCreateScopeService(
     throw new ServiceError("config-invalid", `Scope file already exists: ${targetPath}`);
   }
 
-  const content: ScopeDocT = {
+  type ScopeDocWithProfile = ScopeDocT & {
+    profile?: ProfileCreateScopeMetadata;
+  };
+  const content: ScopeDocWithProfile = {
     version: 1,
     mcpServers: {},
     env: {},
@@ -47,7 +59,9 @@ export function profileCreateScopeService(
     use: [],
     disabledServers: [],
   };
-  writeCanonicalScopeFile(targetPath, content);
+  if (normalized.profile) content.profile = normalized.profile;
+  if (normalized.authProfileId) content.auth = { profileId: normalized.authProfileId };
+  writeCanonicalScopeFile(targetPath, content as ScopeDocT);
 
   return {
     created: true,
@@ -58,12 +72,18 @@ export function profileCreateScopeService(
   };
 }
 
-function normalizeCreateScopeInput(input: ProfileCreateScopeInput): Required<
-  Pick<ProfileCreateScopeInput, "home" | "cwd" | "location" | "layerType">
-> & {
+interface NormalizedCreateScopeInput {
+  home: string;
+  cwd: string;
+  location: ProfileScopeLocation;
+  layerType: ProfileScopeLayerType;
   role: string;
   force: boolean;
-} {
+  profile?: ProfileCreateScopeMetadata;
+  authProfileId?: string;
+}
+
+function normalizeCreateScopeInput(input: ProfileCreateScopeInput): NormalizedCreateScopeInput {
   if (input.location !== "global" && input.location !== "project") {
     throw new ServiceError("config-invalid", "location must be global or project");
   }
@@ -81,6 +101,9 @@ function normalizeCreateScopeInput(input: ProfileCreateScopeInput): Required<
     }
   }
 
+  const profile = normalizeProfileMetadata(input.profile);
+  const authProfileId = normalizeAuthProfileId(input.authProfileId);
+
   return {
     home: input.home,
     cwd: input.cwd,
@@ -88,7 +111,38 @@ function normalizeCreateScopeInput(input: ProfileCreateScopeInput): Required<
     layerType: input.layerType,
     role: rawRole,
     force: input.force ?? false,
+    ...(profile ? { profile } : {}),
+    ...(authProfileId ? { authProfileId } : {}),
   };
+}
+
+function normalizeAuthProfileId(input: string | undefined): string | undefined {
+  if (input === undefined) return undefined;
+  const authProfileId = normalizeDisplayText(input, 120);
+  if (!authProfileId) return undefined;
+  if (UNSAFE_METADATA_RE.test(authProfileId) || authProfileId.includes("//")) {
+    throw new ServiceError("config-invalid", "Auth profile id is not valid");
+  }
+  return authProfileId;
+}
+
+function normalizeProfileMetadata(
+  input: ProfileCreateScopeMetadata | undefined
+): ProfileCreateScopeMetadata | undefined {
+  if (!input) return undefined;
+  const displayName = normalizeDisplayText(input.displayName, 120);
+  const purpose = normalizeDisplayText(input.purpose, 280);
+  const profile: ProfileCreateScopeMetadata = {};
+  if (displayName && !UNSAFE_METADATA_RE.test(displayName)) profile.displayName = displayName;
+  if (purpose && !UNSAFE_METADATA_RE.test(purpose)) profile.purpose = purpose;
+  return Object.keys(profile).length > 0 ? profile : undefined;
+}
+
+function normalizeDisplayText(input: string | undefined, maxLength: number): string | undefined {
+  if (input === undefined) return undefined;
+  const normalized = input.trim().replace(/\s+/g, " ");
+  if (!normalized) return undefined;
+  return normalized.slice(0, maxLength);
 }
 
 function targetPathForCreateScope(input: ReturnType<typeof normalizeCreateScopeInput>): string {

@@ -1,4 +1,5 @@
 import type { ProfileCreateScopeInput } from "../../shared/bridge.js";
+import { sanitizeProfileLabel } from "./profile-identity.js";
 import type { AuthProfileOption } from "./types.js";
 
 export type ProfileCreationField = "purpose" | "role" | "workspace" | "identity";
@@ -56,6 +57,8 @@ export interface ProfileSelectionRestoreInput {
 }
 
 const ROLE_SLUG_RE = /^[a-z0-9_-]+$/;
+const PROFILE_DISPLAY_NAME_MAX_LENGTH = 120;
+const PROFILE_PURPOSE_MAX_LENGTH = 280;
 
 /**
  * Convert purpose-first user language into the role slug accepted by
@@ -143,11 +146,26 @@ export function validateProfileCreationDraft(
 export function buildProfileCreateScopePayload(
   value: ProfileCreationResolvedDraft
 ): ProfileCreateScopeInput {
+  const profile = buildProfileMetadata(value.purpose);
   return {
     location: "project",
     layerType: "role",
     role: value.roleSlug,
     cwd: value.cwd,
+    authProfileId: value.authProfileId,
+    ...(profile ? { profile } : {}),
+  };
+}
+
+function buildProfileMetadata(
+  purpose: string
+): NonNullable<ProfileCreateScopeInput["profile"]> | undefined {
+  const displayName = sanitizeProfileLabel(purpose)?.slice(0, PROFILE_DISPLAY_NAME_MAX_LENGTH);
+  const profilePurpose = sanitizeProfileLabel(purpose)?.slice(0, PROFILE_PURPOSE_MAX_LENGTH);
+  if (!displayName && !profilePurpose) return undefined;
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(profilePurpose ? { purpose: profilePurpose } : {}),
   };
 }
 
@@ -199,6 +217,20 @@ export function chooseRestoredProfileSelection({
   if (!roleExists(stored.role, roles)) return fallback;
   if (!authProfiles.some((profile) => profile.id === stored.authProfileId)) return fallback;
   return stored;
+}
+
+export function formatProfileCreateError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/already exists/i.test(message)) {
+    return "An Agent Profile with that generated role already exists. Choose a different purpose.";
+  }
+  if (/role name/i.test(message)) {
+    return "The generated profile role is not valid. Adjust the purpose and try again.";
+  }
+  if (/workspace|cwd|directory|path/i.test(message)) {
+    return "The workspace could not be used for this Agent Profile. Choose another workspace and try again.";
+  }
+  return "Agent Profile could not be created. Check the inputs and try again.";
 }
 
 function normalizeProfileSelection(input: unknown): ProfileCreationSelection | null {

@@ -59,6 +59,13 @@ export const ReqProfileSave = z
   })
   .strict();
 
+const ProfileCreateScopeMetadata = z
+  .object({
+    displayName: NonEmptyString.max(120).optional(),
+    purpose: NonEmptyString.max(280).optional(),
+  })
+  .strict();
+
 /** Create an empty, canonical scope document at a supported global/project path. */
 export const ReqProfileCreateScope = z
   .object({
@@ -69,6 +76,8 @@ export const ReqProfileCreateScope = z
     role: z.string().min(1).optional(),
     cwd: NonEmptyString,
     force: z.boolean().optional(),
+    profile: ProfileCreateScopeMetadata.optional(),
+    authProfileId: NonEmptyString.optional(),
   })
   .strict();
 

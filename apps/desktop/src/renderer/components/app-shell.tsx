@@ -171,8 +171,7 @@ export function AppShell(): React.ReactElement {
           (typeof window.location.pathname === "string" ? window.location.pathname : "");
 
         const storedSelection = readProfileSelection(window.localStorage);
-        const usableStoredSelection = storedSelection?.cwd === nextCwd ? storedSelection : null;
-        const preferredCwd = usableStoredSelection?.cwd ?? nextCwd;
+        const preferredCwd = storedSelection?.cwd || nextCwd;
         const listed = bridge?.profile?.list
           ? await bridge.profile.list({ cwd: preferredCwd })
           : [];
@@ -181,7 +180,7 @@ export function AppShell(): React.ReactElement {
         const authList = bridge?.auth?.list ? await bridge.auth.list() : [];
         const normalizedAuthProfiles = normalizeAuthProfiles(authList);
         const restoredSelection = chooseRestoredProfileSelection({
-          stored: usableStoredSelection,
+          stored: storedSelection,
           roles,
           authProfiles: normalizedAuthProfiles,
           fallbackCwd: preferredCwd,

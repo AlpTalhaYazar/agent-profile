@@ -4,6 +4,7 @@ import {
   buildProfileSelection,
   chooseRestoredProfileSelection,
   deriveProfileRoleSlug,
+  formatProfileCreateError,
   readProfileSelection,
   validateProfileCreationDraft,
   writeProfileSelection,
@@ -125,12 +126,37 @@ describe("validateProfileCreationDraft", () => {
       layerType: "role",
       role: "backend-api-review",
       cwd: "/repo/project",
+      authProfileId: "work",
+      profile: {
+        displayName: "Backend API Review",
+        purpose: "Backend API Review",
+      },
     });
     expect(buildProfileSelection(result.value)).toEqual({
       role: "backend-api-review",
       authProfileId: "work",
       cwd: "/repo/project",
     });
+  });
+
+  test("omits secret-like identity metadata from the createScope payload", () => {
+    const payload = buildProfileCreateScopePayload({
+      purpose: "Bearer ${secret:github.pat}",
+      roleSlug: "backend-secret-review",
+      cwd: "/repo/project",
+      authProfileId: "work",
+    });
+
+    expect(payload).toMatchObject({
+      location: "project",
+      layerType: "role",
+      role: "backend-secret-review",
+      cwd: "/repo/project",
+      authProfileId: "work",
+    });
+    expect(payload).not.toHaveProperty("profile");
+    expect(JSON.stringify(payload)).not.toContain("${secret:");
+    expect(JSON.stringify(payload)).not.toContain("Bearer");
   });
 
   test("blocks duplicate generated role names without layer jargon", () => {
@@ -158,6 +184,23 @@ describe("validateProfileCreationDraft", () => {
 
     expect(result.ok).toBe(false);
     expect(result.issues).toContainEqual({ field, message });
+  });
+
+  test("formats service create errors without leaking raw paths or secret refs", () => {
+    const messages = [
+      formatProfileCreateError(
+        new Error("Scope file already exists: /Users/alice/repo/.myclaude/roles/backend.yml")
+      ),
+      formatProfileCreateError(new Error("keyring://anthropic/work ${secret:github.pat}")),
+    ];
+
+    expect(messages).toEqual([
+      "An Agent Profile with that generated role already exists. Choose a different purpose.",
+      "Agent Profile could not be created. Check the inputs and try again.",
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("/Users/alice");
+    expect(JSON.stringify(messages)).not.toContain("keyring://");
+    expect(JSON.stringify(messages)).not.toContain("${secret:");
   });
 
   test("blocks unknown Claude identity without leaking auth metadata", () => {

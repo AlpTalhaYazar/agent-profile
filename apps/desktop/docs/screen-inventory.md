@@ -12,6 +12,7 @@
 ## Supporting Views
 
 - First-run wizard remains a modal startup flow for empty installs and lands on Agent Profiles after setup completion.
+- Agent Profile library is the Agent Profiles home list of durable role-backed profiles. It shows purpose-first identity metadata, deterministic legacy fallbacks, selected-state marker, Claude identity/workspace chips, and safe capability summaries. Library switching updates the selected context and reload persistence; missing or stale identities render safe explanations instead of raw config details.
 - Agent Profile side panel is the selected-profile detail model from Agent Profiles: Summary, Identity, Tools/MCP, Skills/Persona, Inspect. It preserves focus, Escape close, 40px+ primary targets, and reduced-motion-safe transitions.
 - Side panel Summary is the default detail state and shows readiness, identity, workspace, safe capability counts, and one calm blocker/warning when the profile needs attention.
 - Side panel Identity explains the Claude identity/readiness relationship and links to Claude Auth for credential fixes.
@@ -25,6 +26,7 @@
 ## Relationships
 
 - Agent Profiles is the default shell screen and consumes the safe `AgentProfileViewModel` summary/readiness/launch contract, including calm blockers/warnings and fix targets.
+- Agent Profiles library consumes the safe profile identity projection over loaded scope/auth data. It never exposes raw scope labels, scope file paths, keyring refs, raw secret expressions, MCP headers/env values, OAuth internals, or raw effective config on the default surface.
 - Agent Profile side panel uses the opaque `AgentProfileViewModel.id` as its selection/reset boundary.
 - Profile Workspace owns the selected `role`, `authProfileId`, and `cwd` configuration controls for now, with dirty layer changes guarded by Save / Discard / Cancel before those contexts can change.
 - Profile Workspace still owns creation of writable scope layers and the top-level add flows for MCP servers and installed skills until later M001 slices relocate those edit flows into profile-owned detail.

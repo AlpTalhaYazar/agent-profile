@@ -12,10 +12,12 @@ export {
 export {
   ScopeDoc,
   PersonaRefs,
+  ProfileMetadata,
   McpServerEntry,
   McpServerPatch,
   type ScopeDocT,
   type PersonaRefsT,
+  type ProfileMetadataT,
   type McpServerEntryT,
   type McpServerPatchT,
 } from "./scope-doc.js";

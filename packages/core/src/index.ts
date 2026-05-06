@@ -21,6 +21,7 @@ export {
   ScopeDoc,
   PersonaRefs,
   AuthProfilesDoc,
+  ProfileMetadata,
   FragmentDoc,
   type McpServerT,
   type McpStdioServerT,
@@ -30,6 +31,7 @@ export {
   type McpServerPatchT,
   type ScopeDocT,
   type PersonaRefsT,
+  type ProfileMetadataT,
   type AuthProfilesDocT,
   type FragmentDocT,
 } from "./schema/index.js";

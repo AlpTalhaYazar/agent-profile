@@ -27,6 +27,11 @@ export interface ScopeDocPersona {
   memory?: string[];
 }
 
+export interface ScopeDocProfile {
+  displayName?: string;
+  purpose?: string;
+}
+
 export interface ScopeDocServerEntry {
   type?: string;
   command?: string;
@@ -41,6 +46,7 @@ export interface ScopeDocServerEntry {
 
 export interface ScopeDoc {
   version: 1;
+  profile?: ScopeDocProfile;
   mcpServers: Record<string, ScopeDocServerEntry | null>;
   auth?: { profileId: string };
   env: Record<string, string>;
@@ -125,6 +131,23 @@ export interface PreviewState {
 }
 
 export type JsonState = { text: string; parseError: null } | { text: string; parseError: string };
+
+export type ProfileBasicsTargetStatus = "writable" | "unavailable" | "invalid";
+export type ProfileBasicsField =
+  | "target"
+  | "displayName"
+  | "purpose"
+  | "authProfileId"
+  | "cwd"
+  | "env"
+  | "settings";
+
+export interface ProfileBasicsValidationIssue {
+  field: ProfileBasicsField;
+  path: string;
+  message: string;
+  severity: "error";
+}
 
 // ─── Persona Composer (Phase 2 milestone 6) ──────────────────────────────────
 

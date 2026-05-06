@@ -379,6 +379,16 @@ describe("main renderer IPC bridge", () => {
 
   it("delegates profile.createScope to the daemon", async () => {
     const close = vi.fn();
+    const createScopeContent = {
+      version: 1,
+      profile: { displayName: "Backend API Review", purpose: "Review backend changes" },
+      auth: { profileId: "work" },
+      mcpServers: {},
+      env: {},
+      settings: {},
+      use: [],
+      disabledServers: [],
+    };
     const request = vi.fn().mockResolvedValueOnce({
       id: "c-1",
       kind: "profile.createScope.ok",
@@ -386,7 +396,7 @@ describe("main renderer IPC bridge", () => {
       path: "/repo/.myclaude/roles/backend.yml",
       scope: "project-role",
       role: "backend",
-      content: { version: 1, mcpServers: {}, env: {}, settings: {}, use: [], disabledServers: [] },
+      content: createScopeContent,
     });
     connectToSocket.mockResolvedValue({ request, close });
     readCookie.mockResolvedValue("cookie-1");
@@ -408,6 +418,11 @@ describe("main renderer IPC bridge", () => {
           location: "project",
           layerType: "role",
           role: "backend",
+          authProfileId: "work",
+          profile: {
+            displayName: "Backend API Review",
+            purpose: "Review backend changes",
+          },
         }
       )
     ).resolves.toEqual({
@@ -415,13 +430,18 @@ describe("main renderer IPC bridge", () => {
       path: "/repo/.myclaude/roles/backend.yml",
       scope: "project-role",
       role: "backend",
-      content: { version: 1, mcpServers: {}, env: {}, settings: {}, use: [], disabledServers: [] },
+      content: createScopeContent,
     });
     expect(request).toHaveBeenCalledWith("profile.createScope", {
       cwd: "/repo",
       location: "project",
       layerType: "role",
       role: "backend",
+      authProfileId: "work",
+      profile: {
+        displayName: "Backend API Review",
+        purpose: "Review backend changes",
+      },
     });
     expect(close).toHaveBeenCalledTimes(1);
   });

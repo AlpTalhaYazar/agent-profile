@@ -136,7 +136,7 @@ export async function launchDesktop(fixture: DesktopFixture): Promise<{
   launchEnv.ELECTRON_RUN_AS_NODE = undefined;
   const app = await electron.launch({
     executablePath: electronExecutablePath,
-    args: [fixture.appDir],
+    args: [fixture.appDir, `--user-data-dir=${join(fixture.root, "user-data")}`],
     cwd: fixture.projectDir,
     env: {
       ...launchEnv,

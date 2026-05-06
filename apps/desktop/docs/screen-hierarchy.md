@@ -20,6 +20,7 @@
 - Keyboard-visible focus is explicit on shell controls, side-panel controls, profile actions, and Sessions rows; primary profile controls meet the 40px target-size quality bar.
 - Provenance and Persona command results navigate to Profile Workspace and open Debug.
 - Agent Profiles opens selected-profile detail in a side panel; repair/configuration actions link into Profile Workspace or Claude Auth for existing edit flows.
+- Agent Profiles library selection switches the current role/auth/workspace context only after resolving the selected target; missing or stale identities stay visible as safe non-switchable states.
 - Dirty Profile Workspace layer drafts block sidebar, keyboard shortcut, command palette, scope/layer, role, workspace, and Claude identity context changes until the user chooses Save, Discard, or Cancel.
 - The side panel closes with its close button or Escape and returns focus to the detail trigger.
 
@@ -28,12 +29,13 @@
 ### Agent Profiles
 
 1. Profile-first heading and calm product framing: choose a working profile, check readiness, launch Claude.
-2. Current Agent Profile card/list row: purpose/name, readiness, Claude identity, workspace, MCP/tool count, and skill/persona count.
-3. Primary action: `Launch Claude` when the profile is ready; it uses the `AgentProfileViewModel.launch.payload` and hands off to Sessions with the launched session active. Disabled states show a plain-language reason and do not launch.
-4. Detail action: open the contextual side panel without leaving the home surface.
-5. Secondary action: open Profile Workspace for configuration, Claude Auth when identity is the blocking fix path, or the side-panel Tools/Skills/Inspect section when a warning needs review.
-6. Calm failure surface: one plain-language blocker or warning appears on the card with the correct fix path.
-7. Default surface excludes raw JSON, provenance, layer internals, keyring refs, OAuth refs, MCP headers/env values, and debug detail.
+2. Current Agent Profile card: purpose-first display name, purpose label, readiness, Claude identity, workspace, MCP/tool count, and skill/persona count. If a role scope carries explicit profile metadata, that metadata is the headline; older role-only profiles use deterministic role-derived labels.
+3. Agent Profiles library: a selectable list of role profiles with purpose-first names, role/identity/workspace chips, safe capability summaries, selected-state marker, and visible non-switchable states for missing or stale Claude identities.
+4. Primary action: `Launch Claude` when the selected profile is ready; it uses the `AgentProfileViewModel.launch.payload` and hands off to Sessions with the launched session active. Disabled states show a plain-language reason and do not launch.
+5. Detail action: open the contextual side panel without leaving the home surface.
+6. Secondary action: open Profile Workspace for configuration, Claude Auth when identity is the blocking fix path, or the side-panel Tools/Skills/Inspect section when a warning needs review.
+7. Calm failure surface: one plain-language blocker or warning appears on the card with the correct fix path; library switch failures appear as a safe alert above the library without changing the current profile.
+8. Default surface excludes raw JSON, provenance, scope/layer labels, scope file paths, keyring refs, OAuth refs, MCP headers/env values, raw secret expressions, and debug detail.
 
 ### Agent Profile Side Panel
 

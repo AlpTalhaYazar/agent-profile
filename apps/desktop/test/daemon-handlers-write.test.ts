@@ -140,6 +140,11 @@ describe("daemon write handlers", () => {
         location: "project",
         layerType: "role",
         role: "backend",
+        authProfileId: "work",
+        profile: {
+          displayName: "Backend API Review",
+          purpose: "Review backend API changes",
+        },
       }),
       ctx
     );
@@ -150,7 +155,10 @@ describe("daemon write handlers", () => {
       role: "backend",
     });
     expect(await readFile(join(projectDir, ".myclaude", "roles", "backend.yml"), "utf8")).toContain(
-      "version: 1"
+      "displayName: Backend API Review"
+    );
+    expect(await readFile(join(projectDir, ".myclaude", "roles", "backend.yml"), "utf8")).toContain(
+      "profileId: work"
     );
 
     const globalShared = await handler(

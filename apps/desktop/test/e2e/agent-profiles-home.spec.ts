@@ -19,6 +19,7 @@ test("agent profiles home is the default profile-first surface", async () => {
     await expect(page.getByTestId("sidebar-home")).toHaveAttribute("aria-current", "page");
 
     const card = page.getByTestId("agent-profile-card");
+    const library = page.getByTestId("agent-profile-library");
     await expect(card).toBeVisible();
     await expect(card).toContainText("Backend Agent");
     await expect(card).toContainText("Ready to launch");
@@ -26,10 +27,16 @@ test("agent profiles home is the default profile-first surface", async () => {
     await expect(card).toContainText("1 MCP server");
     await expect(card).toContainText("0 skill/persona assets");
     await expect(page.getByTestId("home-launch-button")).toBeEnabled();
+    await expect(library).toBeVisible();
+    await expect(library.getByTestId("agent-profile-library-item")).toHaveCount(1);
+    await expect(library).toContainText("Backend Agent");
+    await expect(library.getByTestId("agent-profile-library-selected")).toHaveCount(1);
 
     await expect(page.getByText("Provenance")).toHaveCount(0);
     await expect(page.getByText("Effective preview")).toHaveCount(0);
     await expect(page.getByText("keyring://")).toHaveCount(0);
+    await expect(page.getByText("project-role")).toHaveCount(0);
+    await expect(page.getByText(".myclaude")).toHaveCount(0);
 
     await openProfileWorkspace(page);
     await openAgentProfilesHome(page);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  deriveAgentProfileLibraryViewModel,
   deriveAgentProfileViewModel,
   type AgentProfileViewModelInput,
 } from "../src/renderer/lib/agent-profile-view-model.js";
@@ -12,6 +13,14 @@ const workAuth: AuthProfileOption = {
   mode: "oauth",
   secretCount: 2,
   secretNames: ["github.pat", "browser.token"],
+};
+
+const secretLikeAuth: AuthProfileOption = {
+  id: "keyring://anthropic/work",
+  displayName: "Bearer ${secret:github.pat}",
+  mode: "apiKey",
+  secretCount: 0,
+  secretNames: [],
 };
 
 function effective(overrides: Partial<EffectiveConfig> = {}): EffectiveConfig {
@@ -91,6 +100,27 @@ describe("deriveAgentProfileViewModel", () => {
         mode: "oauth",
         secretCount: 4,
         secretNames: ["github.pat", "linear.token"],
+      },
+    ]);
+  });
+
+  test("redacts unsafe auth profile display names during normalization", () => {
+    expect(
+      normalizeAuthProfiles([
+        {
+          id: "keyring://anthropic/work",
+          displayName: "Bearer ${secret:github.pat}",
+          mode: "oauth",
+          secrets: [],
+        },
+      ])
+    ).toEqual([
+      {
+        id: "keyring://anthropic/work",
+        displayName: "Claude identity",
+        mode: "oauth",
+        secretCount: 0,
+        secretNames: [],
       },
     ]);
   });
@@ -328,6 +358,55 @@ describe("deriveAgentProfileViewModel", () => {
     expect(vm.capabilities.tools.validationIssueCount).toBe(2);
   });
 
+  test("redacts unsafe auth display names from home-facing current card output", () => {
+    const vm = deriveAgentProfileViewModel(
+      baseInput({
+        selectedAuthId: "keyring://anthropic/work",
+        authProfiles: [secretLikeAuth],
+      })
+    );
+
+    expect(vm.auth.label).toBe("Claude identity");
+    expect(vm.card.metadata).toContain("Claude identity");
+    const homeFacing = JSON.stringify({ authLabel: vm.auth.label, card: vm.card });
+    expect(homeFacing).not.toContain("keyring://");
+    expect(homeFacing).not.toContain("${secret:");
+    expect(homeFacing).not.toContain("Bearer");
+  });
+
+  test("uses selected scope profile metadata for the current card headline", () => {
+    const vm = deriveAgentProfileViewModel(
+      baseInput({
+        selectedRole: "backend-api-review",
+        selectedScopePath: "/repo/.myclaude/roles/backend-api-review.yml",
+        scopeEntries: [
+          {
+            scope: "project-role",
+            role: "backend-api-review",
+            path: "/repo/.myclaude/roles/backend-api-review.yml",
+            content: {
+              version: 1,
+              profile: {
+                displayName: "Backend API Review",
+                purpose: "Review backend API changes before launch",
+              },
+              mcpServers: {},
+              env: {},
+              settings: {},
+              use: [],
+              disabledServers: [],
+            },
+          },
+        ],
+      })
+    );
+
+    expect(vm.name).toBe("Backend API Review");
+    expect(vm.purposeLabel).toBe("Review backend API changes before launch");
+    expect(vm.card.title).toBe("Backend API Review");
+    expect(vm.card.eyebrow).toBe("Review backend API changes before launch");
+  });
+
   test("does not expose env values, MCP headers, secret refs, or token-like values in home-facing output", () => {
     const vm = deriveAgentProfileViewModel(
       baseInput({
@@ -369,6 +448,153 @@ describe("deriveAgentProfileViewModel", () => {
     expect(homeFacing).not.toContain("ANTHROPIC_API_KEY");
     expect(homeFacing).not.toContain("INTERNAL_TOKEN");
     expect(homeFacing).not.toContain("privateTool");
+  });
+
+  test("projects a purpose-first Agent Profiles library from scope entries without per-profile show data", () => {
+    const library = deriveAgentProfileLibraryViewModel(
+      baseInput({
+        selectedRole: "backend-api-review",
+        selectedAuthId: "work-oauth",
+        scopeEntries: [
+          {
+            scope: "project-shared",
+            role: "—",
+            path: "/repo/.myclaude/shared.yml",
+            content: null,
+          },
+          {
+            scope: "project-role",
+            role: "backend-api-review",
+            path: "/repo/.myclaude/roles/backend-api-review.yml",
+            content: {
+              version: 1,
+              profile: {
+                displayName: "Backend API Review",
+                purpose: "Review backend API changes before launch",
+              },
+              auth: { profileId: "work-oauth" },
+              mcpServers: { github: { type: "http", url: "https://github.example/mcp" } },
+              env: {},
+              settings: {},
+              persona: {
+                claudeMd: [],
+                agents: ["agents/reviewer.md"],
+                skills: ["skills/react/SKILL.md"],
+                slashCmds: [],
+                memory: [],
+              },
+              use: [],
+              disabledServers: [],
+            },
+          },
+          {
+            scope: "project-role",
+            role: "legacy-audit",
+            path: "/repo/.myclaude/roles/legacy-audit.yml",
+            content: {
+              version: 1,
+              profile: {
+                displayName: "keyring://anthropic/work",
+                purpose: "Bearer ${secret:github.pat}",
+              },
+              mcpServers: {},
+              env: {},
+              settings: {},
+              use: [],
+              disabledServers: [],
+            },
+          },
+          {
+            scope: "project-role",
+            role: "stale-review",
+            path: "/repo/.myclaude/roles/stale-review.yml",
+            content: {
+              version: 1,
+              auth: { profileId: "missing-auth" },
+              mcpServers: {},
+              env: {},
+              settings: {},
+              use: [],
+              disabledServers: [],
+            },
+          },
+        ],
+      })
+    );
+
+    expect(library.items).toHaveLength(3);
+    expect(library.selectedId).toBe(library.items[0]?.id);
+    expect(library.items[0]).toMatchObject({
+      displayName: "Backend API Review",
+      purpose: "Review backend API changes before launch",
+      role: "backend-api-review",
+      authLabel: "Work Claude",
+      authState: "bound",
+      workspaceLabel: "agent-profile",
+      capabilitySummary: "2 MCP servers · 6 skill/persona assets",
+      isSelected: true,
+      isSwitchable: false,
+      statusLabel: "Ready",
+      statusTone: "success",
+    });
+    expect(library.items[1]).toMatchObject({
+      displayName: "Legacy Audit Agent",
+      purpose: "Legacy Audit Claude profile",
+      authLabel: "No Claude identity",
+      authState: "missing",
+      isSelected: false,
+      isSwitchable: false,
+      statusLabel: "Needs identity",
+    });
+    expect(library.items[2]).toMatchObject({
+      displayName: "Stale Review Agent",
+      authLabel: "Unknown Claude identity",
+      authState: "stale",
+      isSwitchable: false,
+      statusLabel: "Identity unavailable",
+    });
+
+    const displaySurface = JSON.stringify(
+      library.items.map(({ selection: _selection, ...displayFields }) => displayFields)
+    );
+    expect(displaySurface).not.toContain("keyring://");
+    expect(displaySurface).not.toContain("${secret:");
+    expect(displaySurface).not.toContain("Bearer");
+    expect(displaySurface).not.toContain("project-role");
+    expect(displaySurface).not.toContain("/repo/.myclaude");
+  });
+
+  test("keeps large library projection bounded and switchable profiles explicit", () => {
+    const scopeEntries = Array.from({ length: 20 }, (_value, index) => ({
+      scope: "project-role",
+      role: `review-${index}`,
+      path: `/repo/.myclaude/roles/review-${index}.yml`,
+      content: {
+        version: 1 as const,
+        profile: { displayName: `Review ${index}`, purpose: `Review queue ${index}` },
+        auth: { profileId: "work-oauth" },
+        mcpServers: {},
+        env: {},
+        settings: {},
+        use: [],
+        disabledServers: [],
+      },
+    }));
+
+    const library = deriveAgentProfileLibraryViewModel(
+      baseInput({
+        selectedRole: "review-0",
+        selectedAuthId: "work-oauth",
+        scopeEntries,
+      })
+    );
+
+    expect(library.items).toHaveLength(20);
+    expect(library.items.filter((item) => item.isSelected)).toHaveLength(1);
+    expect(library.items.filter((item) => item.isSwitchable)).toHaveLength(19);
+    expect(library.items.every((item) => item.selection.authProfileId === "work-oauth")).toBe(
+      true
+    );
   });
 
   test("keeps the profile id opaque instead of embedding raw role, auth, or cwd", () => {

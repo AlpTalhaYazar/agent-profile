@@ -41,11 +41,16 @@ import {
   profileWorkspaceTabAtom,
   selectedAgentProfilePanelIdAtom,
 } from "../lib/atoms.js";
-import { agentProfileViewModelAtom } from "../lib/agent-profile-view-model.js";
+import {
+  agentProfileLibraryAtom,
+  agentProfileViewModelAtom,
+  type AgentProfileLibraryItem,
+} from "../lib/agent-profile-view-model.js";
 import {
   buildProfileCreateScopePayload,
   buildProfileSelection,
   deriveProfileRoleSlug,
+  formatProfileCreateError,
   validateProfileCreationDraft,
   writeProfileSelection,
   type ProfileCreationDraft,
@@ -66,7 +71,9 @@ import type { AuthProfileOption } from "../lib/types.js";
 
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
+  const profileLibrary = useAtomValue(agentProfileLibraryAtom);
   const authProfiles = useAtomValue(authProfilesAtom);
+  const scopeEntries = useAtomValue(scopeEntriesAtom);
   const [availableRoles, setAvailableRoles] = useAtom(availableRolesAtom);
   const [cwd, setCwd] = useAtom(cwdAtom);
   const [selectedPanelProfileId, setSelectedPanelProfileId] = useAtom(
@@ -89,6 +96,8 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [createProfileError, setCreateProfileError] = React.useState<string | null>(null);
+  const [librarySwitchError, setLibrarySwitchError] = React.useState<string | null>(null);
+  const [switchingProfileId, setSwitchingProfileId] = React.useState<string | null>(null);
   const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
@@ -137,6 +146,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
 
   const openCreateDialog = React.useCallback(() => {
     setLaunchError(null);
+    setLibrarySwitchError(null);
     setSelectedPanelProfileId(null);
     setPanelSection("summary");
     setCreateProfileError(null);
@@ -210,7 +220,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
         setPanelSection("summary");
         announce(`Created Agent Profile ${selection.role}`);
       } catch (error) {
-        const message = formatCreateProfileError(error);
+        const message = formatProfileCreateError(error);
         setCreateProfileError(message);
         announce(message);
       } finally {
@@ -225,6 +235,67 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
       setPanelSection,
       setPreviewState,
       setScopeEntries,
+      setSelectedAuthId,
+      setSelectedPanelProfileId,
+      setSelectedRole,
+      setSelectedScopePath,
+      setValidationState,
+    ]
+  );
+
+  const handleSelectProfile = React.useCallback(
+    async (item: AgentProfileLibraryItem) => {
+      if (item.isSelected) {
+        setLibrarySwitchError(null);
+        return;
+      }
+      if (!item.isSwitchable) {
+        const message =
+          item.disabledReason ?? "This Agent Profile needs attention before it can be selected.";
+        setLibrarySwitchError(message);
+        announce(message);
+        return;
+      }
+
+      const profileBridge = window.myclaude?.profile;
+      if (!profileBridge?.show) {
+        const message = "Profile switching is unavailable right now.";
+        setLibrarySwitchError(message);
+        announce(message);
+        return;
+      }
+
+      setSwitchingProfileId(item.id);
+      setLibrarySwitchError(null);
+      setLaunchError(null);
+      try {
+        const shown = await profileBridge.show(item.selection);
+        setCwd(item.selection.cwd);
+        setSelectedRole(item.selection.role);
+        setSelectedAuthId(item.selection.authProfileId);
+        setSelectedScopePath(findScopePathForRole(scopeEntries, item.selection.role));
+        setEffectiveState(normalizeEffectiveState(shown));
+        setValidationState({ status: "idle", issues: [], errorMessage: null });
+        setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
+        writeProfileSelection(window.localStorage, item.selection);
+        setSelectedPanelProfileId(null);
+        setPanelSection("summary");
+        announce(`Switched to Agent Profile ${item.displayName}`);
+      } catch (error) {
+        const message = formatProfileSwitchError(error);
+        setLibrarySwitchError(message);
+        announce(message);
+      } finally {
+        setSwitchingProfileId(null);
+      }
+    },
+    [
+      announce,
+      scopeEntries,
+      setCwd,
+      setEffectiveState,
+      setPanelSection,
+      setPreviewState,
       setSelectedAuthId,
       setSelectedPanelProfileId,
       setSelectedRole,
@@ -252,6 +323,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
 
     setIsLaunching(true);
     setLaunchError(null);
+    setLibrarySwitchError(null);
     try {
       const result = await bridge.launch(launchPayload);
       setActiveTerminalSessionId(result.sessionId);
@@ -451,6 +523,13 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
                 </div>
               ) : null}
             </article>
+
+            <AgentProfileLibrarySection
+              errorMessage={librarySwitchError}
+              items={profileLibrary.items}
+              onSelect={(item) => void handleSelectProfile(item)}
+              switchingProfileId={switchingProfileId}
+            />
           </section>
         </div>
         <AgentProfileSidePanel
@@ -485,6 +564,127 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
         open={createDialogOpen}
       />
     </ScreenSurface>
+  );
+}
+
+function AgentProfileLibrarySection({
+  errorMessage,
+  items,
+  onSelect,
+  switchingProfileId,
+}: {
+  errorMessage: string | null;
+  items: readonly AgentProfileLibraryItem[];
+  onSelect: (item: AgentProfileLibraryItem) => void;
+  switchingProfileId: string | null;
+}): React.ReactElement {
+  return (
+    <section
+      aria-labelledby="agent-profile-library-heading"
+      className="rounded-xl border border-default bg-surface p-5 shadow-xs"
+      data-testid="agent-profile-library"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-tertiary">
+            Profile library
+          </p>
+          <h3
+            className="mt-2 text-xl font-semibold tracking-[-0.02em] text-primary"
+            id="agent-profile-library-heading"
+          >
+            Switch to the profile that matches the work.
+          </h3>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-secondary">
+            Purpose names stay up front; identity, workspace, and capability signals stay calm and
+            inspectable.
+          </p>
+        </div>
+        <StatusChip tone="info">{formatCount(items.length, "profile")}</StatusChip>
+      </div>
+
+      {errorMessage ? (
+        <div
+          className="mt-4 rounded-lg border border-status-danger bg-status-danger-soft px-4 py-3 text-sm text-status-danger"
+          data-testid="agent-profile-library-error"
+          role="alert"
+        >
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {items.length > 0 ? (
+        <ul className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {items.map((item) => {
+            const isSwitching = switchingProfileId === item.id;
+            return (
+              <li key={item.id}>
+                <button
+                  aria-current={item.isSelected ? "true" : undefined}
+                  className={`group h-full min-h-36 w-full rounded-xl border px-4 py-4 text-left shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas ${
+                    item.isSelected
+                      ? "border-accent bg-accent-soft/70"
+                      : "border-subtle bg-canvas/50 hover:border-muted hover:bg-surface"
+                  }`}
+                  data-testid="agent-profile-library-item"
+                  disabled={Boolean(switchingProfileId)}
+                  onClick={() => onSelect(item)}
+                  type="button"
+                >
+                  <span className="flex min-w-0 items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block truncate text-base font-semibold text-primary">
+                        {item.displayName}
+                      </span>
+                      <span className="mt-1 block line-clamp-2 text-sm leading-5 text-secondary">
+                        {item.purpose}
+                      </span>
+                    </span>
+                    <StatusChip tone={item.statusTone}>
+                      {isSwitching ? "Switching…" : item.statusLabel}
+                    </StatusChip>
+                  </span>
+
+                  <span className="mt-4 flex flex-wrap gap-2">
+                    <LibraryChip label={item.role} />
+                    <LibraryChip label={item.authLabel} />
+                    <LibraryChip label={item.workspaceLabel} />
+                  </span>
+                  <span className="mt-3 block text-xs font-medium text-tertiary">
+                    {item.capabilitySummary}
+                  </span>
+                  {item.isSelected ? (
+                    <span
+                      className="mt-3 inline-flex text-xs font-semibold text-accent"
+                      data-testid="agent-profile-library-selected"
+                    >
+                      Selected profile
+                    </span>
+                  ) : null}
+                  {!item.isSelected && item.disabledReason ? (
+                    <span className="mt-3 block text-xs text-status-warning">
+                      {item.disabledReason}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="mt-5 rounded-lg border border-dashed border-subtle bg-canvas/50 px-4 py-6 text-sm text-secondary">
+          Create an Agent Profile to build your library.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LibraryChip({ label }: { label: string }): React.ReactElement {
+  return (
+    <span className="max-w-full truncate rounded-full border border-subtle bg-surface px-2.5 py-1 text-xs font-medium text-secondary">
+      {label}
+    </span>
   );
 }
 
@@ -758,26 +958,23 @@ function CreateAgentProfileDialog({
   );
 }
 
+function formatProfileSwitchError(error: unknown): string {
+  const message = getErrorMessage(error);
+  if (/identity|auth/i.test(message)) {
+    return "This Agent Profile needs an available Claude identity before it can be selected.";
+  }
+  if (/workspace|cwd|directory|path/i.test(message)) {
+    return "This Agent Profile workspace is unavailable. Choose another profile or workspace.";
+  }
+  return "Agent Profile could not be selected. Try again or review the profile details.";
+}
+
 function findScopePathForRole(
   entries: ReadonlyArray<{ role: string; path: string }>,
   role: string
 ): string | null {
   if (!role) return null;
   return entries.find((entry) => entry.role === role)?.path ?? entries[0]?.path ?? null;
-}
-
-function formatCreateProfileError(error: unknown): string {
-  const message = getErrorMessage(error);
-  if (/already exists/i.test(message)) {
-    return "An Agent Profile with that generated role already exists. Choose a different purpose.";
-  }
-  if (/role name/i.test(message)) {
-    return "The generated profile role is not valid. Adjust the purpose and try again.";
-  }
-  if (/workspace|cwd|directory|path/i.test(message)) {
-    return "The workspace could not be used for this Agent Profile. Choose another workspace and try again.";
-  }
-  return "Agent Profile could not be created. Check the inputs and try again.";
 }
 
 function ProfileCreationFact({
