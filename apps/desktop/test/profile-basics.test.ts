@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  formatProfileDraftGuardError,
+  resolveProfileDraftGuardSnapshot,
+} from "../src/renderer/lib/profile-draft-guard.js";
+import {
   buildProfileBasicsPatch,
   buildProfileBasicsDraftFromRows,
   createProfileBasicsDraft,
@@ -400,6 +404,78 @@ describe("profile basics target and draft contract", () => {
     expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: false })).toBe(true);
     expect(shouldGuardProfileBasicsClose({ isDirty: false, isSaving: false })).toBe(false);
     expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: true })).toBe(false);
+  });
+
+  test("shared navigation guard chooses Basics edits after layer drafts and exposes safe dialog copy", () => {
+    const basicsOnly = resolveProfileDraftGuardSnapshot({
+      hasLayerChanges: false,
+      layerCanSave: false,
+      layerSaveDisabledReason: null,
+      basics: { isDirty: true, canSave: true, saveDisabledReason: null },
+    });
+    const basicsBlocked = resolveProfileDraftGuardSnapshot({
+      hasLayerChanges: false,
+      layerCanSave: false,
+      layerSaveDisabledReason: null,
+      basics: {
+        isDirty: true,
+        canSave: false,
+        saveDisabledReason: "Fix the highlighted Basics fields before saving.",
+      },
+    });
+    const layerPriority = resolveProfileDraftGuardSnapshot({
+      hasLayerChanges: true,
+      layerCanSave: false,
+      layerSaveDisabledReason: "Fix the profile JSON before saving.",
+      basics: { isDirty: true, canSave: true, saveDisabledReason: null },
+    });
+
+    expect(basicsOnly).toMatchObject({
+      source: "basics",
+      hasChanges: true,
+      canSave: true,
+      saveDisabledReason: null,
+      title: "Save Profile Basics changes?",
+      discardAnnouncement: "Discarded Profile Basics changes.",
+    });
+    expect(basicsBlocked).toMatchObject({
+      source: "basics",
+      canSave: false,
+      saveDisabledReason: "Fix the highlighted Basics fields before saving.",
+    });
+    expect(layerPriority).toMatchObject({
+      source: "layers",
+      canSave: false,
+      saveDisabledReason: "Fix the profile JSON before saving.",
+      title: "Save profile changes?",
+    });
+  });
+
+  test("shared Basics navigation guard errors are redacted before user-visible display", () => {
+    const basicsMessage = formatProfileDraftGuardError(
+      new Error(
+        "save failed for /repo/project/.myclaude/roles/backend-api-review.yml project-role keyring://anthropic/work Bearer ghp_secretvalue"
+      ),
+      "basics"
+    );
+    const layerMessage = formatProfileDraftGuardError(
+      new Error(
+        "save failed for /repo/project/.myclaude/roles/backend-api-review.yml project-role keyring://anthropic/work Bearer ghp_secretvalue"
+      ),
+      "layers"
+    );
+
+    expect(basicsMessage).toBe(
+      "Profile Basics could not be saved. Review the fields and try again."
+    );
+    expect(layerMessage).toBe(
+      "Profile changes could not be saved. Review the draft and try again."
+    );
+    const serialized = JSON.stringify([basicsMessage, layerMessage]);
+    expect(serialized).not.toContain(".myclaude");
+    expect(serialized).not.toContain("project-role");
+    expect(serialized).not.toContain("keyring://");
+    expect(serialized).not.toContain("ghp_secretvalue");
   });
 });
 

@@ -11,6 +11,7 @@ import {
   Select,
   cn,
 } from "@agent-profile/ui";
+import { useSetAtom } from "jotai";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -38,8 +39,10 @@ import {
   type ProfileBasicsDraft,
   type ProfileBasicsEnvRow,
   type ProfileBasicsPreviewSummaryItem,
+  type ProfileBasicsTarget,
 } from "../lib/profile-basics.js";
 import { stableStringify } from "../lib/clone.js";
+import { profileBasicsNavigationGuardAtom } from "../lib/atoms.js";
 import type { AgentProfileViewModel } from "../lib/agent-profile-view-model.js";
 import { normalizeValidationIssues } from "../lib/normalize.js";
 import { mergeValidationIssues, normalizeProfilePreviewResponse } from "../lib/profile-preview.js";
@@ -73,6 +76,7 @@ interface ProfileBasicsPanelProps {
 }
 
 type BasicsAsyncStatus = "idle" | "loading" | "ready" | "error";
+type BasicsSaveResult = { ok: true } | { ok: false; message: string };
 
 export function ProfileBasicsPanel({
   authProfiles,
@@ -91,8 +95,10 @@ export function ProfileBasicsPanel({
   selectedRole,
 }: ProfileBasicsPanelProps): React.ReactElement {
   const announce = useAnnounce();
+  const setBasicsNavigationGuard = useSetAtom(profileBasicsNavigationGuardAtom);
   const initialFocusRef = React.useRef<HTMLInputElement | null>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const pendingLeaveContinuationRef = React.useRef<(() => void) | null>(null);
   const [draft, setDraft] = React.useState<ProfileBasicsDraft>(() =>
     createPanelDraft(scopeEntries, selectedRole, profile, selectedAuthId, cwd)
   );
@@ -171,8 +177,14 @@ export function ProfileBasicsPanel({
   const currentSerialized = serializeBasicsForm(draft, envRows);
   const isDirty = open && currentSerialized !== baselineSerialized;
   const hasBlockingIssues = issues.length > 0 || previewStatus === "error";
-  const saveDisabled =
-    target.status !== "writable" || hasBlockingIssues || isSaving || previewStatus === "loading";
+  const saveDisabledReason = getProfileBasicsSaveDisabledReason({
+    targetStatus: target.status,
+    hasBlockingIssues,
+    isSaving,
+    previewStatus,
+  });
+  const saveDisabled = Boolean(saveDisabledReason);
+  const canSaveBasics = isDirty && !saveDisabled;
 
   React.useEffect(() => {
     if (!open) return;
@@ -321,6 +333,7 @@ export function ProfileBasicsPanel({
   ]);
 
   const completeClose = React.useCallback(() => {
+    pendingLeaveContinuationRef.current = null;
     setDirtyPromptOpen(false);
     setSaveError(null);
     setPickerError(null);
@@ -334,14 +347,40 @@ export function ProfileBasicsPanel({
     announce("Guided Profile Basics closed");
   }, [announce, onOpenChange, onPreviewStateChange, onValidationStateChange]);
 
+  const completeCloseAndContinue = React.useCallback(
+    (continuation: (() => void) | null) => {
+      completeClose();
+      window.setTimeout(() => {
+        continuation?.();
+      }, 0);
+    },
+    [completeClose]
+  );
+
+  const requestLeave = React.useCallback(
+    (continuation: (() => void) | null = null) => {
+      if (shouldGuardProfileBasicsClose({ isDirty, isSaving })) {
+        pendingLeaveContinuationRef.current = continuation;
+        setDirtyPromptOpen(true);
+        announce("Profile Basics has unsaved changes");
+        return;
+      }
+      completeCloseAndContinue(continuation);
+    },
+    [announce, completeCloseAndContinue, isDirty, isSaving]
+  );
+
   const requestClose = React.useCallback(() => {
-    if (shouldGuardProfileBasicsClose({ isDirty, isSaving })) {
-      setDirtyPromptOpen(true);
-      announce("Profile Basics has unsaved changes");
-      return;
-    }
-    completeClose();
-  }, [announce, completeClose, isDirty, isSaving]);
+    requestLeave(null);
+  }, [requestLeave]);
+
+  const handleOpenAdvanced = React.useCallback(() => {
+    requestLeave(onOpenAdvanced);
+  }, [onOpenAdvanced, requestLeave]);
+
+  const handleOpenClaudeAuth = React.useCallback(() => {
+    requestLeave(onOpenClaudeAuth);
+  }, [onOpenClaudeAuth, requestLeave]);
 
   const updateDraft = React.useCallback((patch: Partial<ProfileBasicsDraft>) => {
     setSaveError(null);
@@ -367,63 +406,133 @@ export function ProfileBasicsPanel({
     }
   }, [updateDraft]);
 
+  const saveBasicsDraft = React.useCallback(async (): Promise<BasicsSaveResult> => {
+    if (target.status !== "writable") {
+      const message = target.message;
+      setSaveError(message);
+      announce(message);
+      return { ok: false, message };
+    }
+    if (!formValidation.ok || issues.length > 0) {
+      const message = "Fix the highlighted Basics fields before saving.";
+      setSaveError(message);
+      announce(message);
+      return { ok: false, message };
+    }
+
+    const patch = buildProfileBasicsPatch({
+      target,
+      draft: formValidation.draft,
+      authProfiles,
+    });
+    if (!patch.ok) {
+      const message = "Fix the highlighted Basics fields before saving.";
+      setSaveError(message);
+      announce(message);
+      return { ok: false, message };
+    }
+
+    const profileApi = window.myclaude?.profile;
+    if (!profileApi?.save) {
+      const message = "Profile Basics save is unavailable right now.";
+      setSaveError(message);
+      announce(message);
+      return { ok: false, message };
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await profileApi.save({ path: patch.path, content: patch.content });
+      await onSaved(patch.selection);
+      setBaselineSerialized(serializeBasicsForm(formValidation.draft, envRows));
+      announce("Guided Profile Basics saved");
+      return { ok: true };
+    } catch (error) {
+      const message = formatProfileBasicsBridgeError(
+        error,
+        "Profile Basics could not be saved. Review the fields and try again."
+      );
+      setSaveError(message);
+      announce(`Profile Basics save failed: ${message}`);
+      return { ok: false, message };
+    } finally {
+      setIsSaving(false);
+    }
+  }, [announce, authProfiles, envRows, formValidation, issues.length, onSaved, target]);
+
+  const saveBasicsAndClose = React.useCallback(async (): Promise<void> => {
+    const result = await saveBasicsDraft();
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    completeClose();
+  }, [completeClose, saveBasicsDraft]);
+
   const handleSave = React.useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (target.status !== "writable") {
-        const message = target.message;
-        setSaveError(message);
-        announce(message);
-        return;
-      }
-      if (!formValidation.ok || issues.length > 0) {
-        const message = "Fix the highlighted Basics fields before saving.";
-        setSaveError(message);
-        announce(message);
-        return;
-      }
-
-      const patch = buildProfileBasicsPatch({
-        target,
-        draft: formValidation.draft,
-        authProfiles,
-      });
-      if (!patch.ok) {
-        const message = "Fix the highlighted Basics fields before saving.";
-        setSaveError(message);
-        announce(message);
-        return;
-      }
-
-      const profileApi = window.myclaude?.profile;
-      if (!profileApi?.save) {
-        const message = "Profile Basics save is unavailable right now.";
-        setSaveError(message);
-        announce(message);
-        return;
-      }
-
-      setIsSaving(true);
-      setSaveError(null);
-      try {
-        await profileApi.save({ path: patch.path, content: patch.content });
-        await onSaved(patch.selection);
-        setBaselineSerialized(serializeBasicsForm(formValidation.draft, envRows));
-        announce("Guided Profile Basics saved");
+      const result = await saveBasicsDraft();
+      if (result.ok) {
         completeClose();
-      } catch (error) {
-        const message = formatProfileBasicsBridgeError(
-          error,
-          "Profile Basics could not be saved. Review the fields and try again."
-        );
-        setSaveError(message);
-        announce(`Profile Basics save failed: ${message}`);
-      } finally {
-        setIsSaving(false);
       }
     },
-    [announce, authProfiles, completeClose, envRows, formValidation, issues.length, onSaved, target]
+    [completeClose, saveBasicsDraft]
   );
+
+  const discardBasicsAndClose = React.useCallback(() => {
+    completeClose();
+  }, [completeClose]);
+
+  React.useEffect(() => {
+    if (!open) {
+      setBasicsNavigationGuard(null);
+      return;
+    }
+    setBasicsNavigationGuard({
+      isDirty,
+      isSaving,
+      canSave: canSaveBasics,
+      saveDisabledReason,
+      saveAndClose: saveBasicsAndClose,
+      discardAndClose: discardBasicsAndClose,
+    });
+  }, [
+    canSaveBasics,
+    discardBasicsAndClose,
+    isDirty,
+    isSaving,
+    open,
+    saveBasicsAndClose,
+    saveDisabledReason,
+    setBasicsNavigationGuard,
+  ]);
+
+  React.useEffect(
+    () => () => {
+      setBasicsNavigationGuard(null);
+    },
+    [setBasicsNavigationGuard]
+  );
+
+  const cancelDirtyPrompt = React.useCallback(() => {
+    setDirtyPromptOpen(false);
+    announce("Stayed in guided Profile Basics.");
+    window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
+  }, [announce]);
+
+  const discardDirtyPromptAndContinue = React.useCallback(() => {
+    const continuation = pendingLeaveContinuationRef.current;
+    announce("Discarded Profile Basics changes.");
+    completeCloseAndContinue(continuation);
+  }, [announce, completeCloseAndContinue]);
+
+  const saveDirtyPromptAndContinue = React.useCallback(async () => {
+    const continuation = pendingLeaveContinuationRef.current;
+    const result = await saveBasicsDraft();
+    if (!result.ok) return;
+    completeCloseAndContinue(continuation);
+  }, [completeCloseAndContinue, saveBasicsDraft]);
 
   const addEnvRow = React.useCallback(() => {
     setEnvRows((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }]);
@@ -520,7 +629,7 @@ export function ProfileBasicsPanel({
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     <Button
                       data-testid="profile-basics-open-advanced"
-                      onClick={onOpenAdvanced}
+                      onClick={handleOpenAdvanced}
                       type="button"
                       variant="secondary"
                     >
@@ -595,7 +704,7 @@ export function ProfileBasicsPanel({
                   ) : (
                     <div className="grid gap-3 rounded-md border border-status-warning bg-status-warning-soft px-3 py-3 text-sm text-status-warning">
                       <p>No Claude identities are available. Add one before saving Basics.</p>
-                      <Button onClick={onOpenClaudeAuth} type="button" variant="secondary">
+                      <Button onClick={handleOpenClaudeAuth} type="button" variant="secondary">
                         <KeyRound className="h-4 w-4" aria-hidden="true" />
                         Manage Claude Auth
                       </Button>
@@ -832,28 +941,58 @@ export function ProfileBasicsPanel({
         </form>
       </DialogContent>
 
-      <Dialog open={dirtyPromptOpen} onOpenChange={setDirtyPromptOpen}>
+      <Dialog
+        open={dirtyPromptOpen}
+        onOpenChange={(nextOpen) => (nextOpen ? undefined : cancelDirtyPrompt())}
+      >
         <DialogContent className="max-w-md" data-testid="profile-basics-dirty-dialog">
           <DialogHeader>
-            <DialogTitle>Discard Basics changes?</DialogTitle>
+            <DialogTitle>Save Profile Basics changes?</DialogTitle>
             <DialogDescription>
-              You have unsaved guided Basics edits. Keep editing, or discard them and return to the
-              Agent Profiles home.
+              You have unsaved guided Basics edits. Save before leaving, discard the draft, or stay
+              here to keep editing.
             </DialogDescription>
           </DialogHeader>
+          {saveDisabledReason ? (
+            <p className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning">
+              {saveDisabledReason}
+            </p>
+          ) : null}
+          {saveError ? (
+            <p
+              className="rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger"
+              role="alert"
+            >
+              {saveError}
+            </p>
+          ) : null}
           <DialogFooter className="flex-wrap">
             <Button
-              onClick={() => {
-                setDirtyPromptOpen(false);
-                window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
-              }}
+              data-testid="profile-basics-dirty-cancel"
+              disabled={isSaving}
+              onClick={cancelDirtyPrompt}
               type="button"
-              variant="secondary"
+              variant="ghost"
             >
               Keep editing
             </Button>
-            <Button onClick={completeClose} type="button" variant="danger">
+            <Button
+              data-testid="profile-basics-dirty-discard"
+              disabled={isSaving}
+              onClick={discardDirtyPromptAndContinue}
+              type="button"
+              variant="secondary"
+            >
               Discard changes
+            </Button>
+            <Button
+              data-testid="profile-basics-dirty-save"
+              disabled={!canSaveBasics || isSaving}
+              onClick={() => void saveDirtyPromptAndContinue()}
+              type="button"
+              variant="primary"
+            >
+              {isSaving ? "Saving…" : "Save Basics"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -890,6 +1029,24 @@ function serializeBasicsForm(
     settingsJson: draft.settingsJson,
     envRows: envRows.map((row) => ({ key: row.key, value: row.value })),
   });
+}
+
+function getProfileBasicsSaveDisabledReason({
+  hasBlockingIssues,
+  isSaving,
+  previewStatus,
+  targetStatus,
+}: {
+  targetStatus: ProfileBasicsTarget["status"];
+  hasBlockingIssues: boolean;
+  isSaving: boolean;
+  previewStatus: BasicsAsyncStatus;
+}): string | null {
+  if (targetStatus !== "writable") return "Profile Basics needs a writable profile target.";
+  if (hasBlockingIssues) return "Fix the highlighted Basics fields before saving.";
+  if (previewStatus === "loading") return "Wait for Profile Basics preview to finish checking.";
+  if (isSaving) return "Profile Basics is saving.";
+  return null;
 }
 
 function fieldErrorProps(

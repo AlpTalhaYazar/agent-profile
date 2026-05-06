@@ -71,9 +71,11 @@ import {
 } from "../lib/normalize.js";
 import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
 import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
+import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
 import type { AuthProfileOption } from "../lib/types.js";
+import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
 
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
@@ -98,6 +100,9 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const setValidationState = useSetAtom(validationStateAtom);
   const setPreviewState = useSetAtom(previewStateAtom);
   const announce = useAnnounce();
+  const draftGuard = useProfileDraftNavigationGuard({ announce });
+  const latestAgentProfileRef = React.useRef(agentProfile);
+  latestAgentProfileRef.current = agentProfile;
   const [isLaunching, setIsLaunching] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
@@ -132,13 +137,20 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     }
   }, [agentProfile.id, selectedPanelProfileId, setPanelSection]);
 
-  const openProfileWorkspaceTab = React.useCallback(
+  const goToProfileWorkspaceTab = React.useCallback(
     (tab: ProfileWorkspaceTab) => {
       setLaunchError(null);
       setProfileWorkspaceTab(tab);
       setCurrentScreen("editor");
     },
     [setCurrentScreen, setProfileWorkspaceTab]
+  );
+
+  const openProfileWorkspaceTab = React.useCallback(
+    (tab: ProfileWorkspaceTab) => {
+      draftGuard.request(() => goToProfileWorkspaceTab(tab));
+    },
+    [draftGuard, goToProfileWorkspaceTab]
   );
 
   const openProfileWorkspace = React.useCallback(() => {
@@ -177,10 +189,14 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     setCreateDialogOpen(true);
   }, [setPanelSection, setSelectedPanelProfileId]);
 
-  const openClaudeAuth = React.useCallback(() => {
+  const goToClaudeAuth = React.useCallback(() => {
     setLaunchError(null);
     setCurrentScreen("auth-vault");
   }, [setCurrentScreen]);
+
+  const openClaudeAuth = React.useCallback(() => {
+    draftGuard.request(goToClaudeAuth);
+  }, [draftGuard, goToClaudeAuth]);
 
   const handleFixPath = React.useCallback(() => {
     setLaunchError(null);
@@ -196,16 +212,14 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
       setSelectedPanelProfileId(agentProfile.id);
       return;
     }
-    setProfileWorkspaceTab("overview");
-    setCurrentScreen("editor");
+    openProfileWorkspaceTab("overview");
   }, [
     agentProfile.id,
     agentProfile.readiness.blockingReason?.fixTarget,
     agentProfile.readiness.warnings,
     openClaudeAuth,
-    setCurrentScreen,
+    openProfileWorkspaceTab,
     setPanelSection,
-    setProfileWorkspaceTab,
     setSelectedPanelProfileId,
   ]);
 
@@ -331,20 +345,8 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     ]
   );
 
-  const handleSelectProfile = React.useCallback(
+  const executeSelectProfile = React.useCallback(
     async (item: AgentProfileLibraryItem) => {
-      if (item.isSelected) {
-        setLibrarySwitchError(null);
-        return;
-      }
-      if (!item.isSwitchable) {
-        const message =
-          item.disabledReason ?? "This Agent Profile needs attention before it can be selected.";
-        setLibrarySwitchError(message);
-        announce(message);
-        return;
-      }
-
       const profileBridge = window.myclaude?.profile;
       if (!profileBridge?.show) {
         const message = "Profile switching is unavailable right now.";
@@ -392,10 +394,36 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     ]
   );
 
-  const handleLaunch = React.useCallback(async () => {
-    const launchPayload = agentProfile.launch.payload;
+  const handleSelectProfile = React.useCallback(
+    (item: AgentProfileLibraryItem, returnFocusTo?: HTMLElement | null) => {
+      if (item.isSelected) {
+        setLibrarySwitchError(null);
+        return;
+      }
+      if (!item.isSwitchable) {
+        const message =
+          item.disabledReason ?? "This Agent Profile needs attention before it can be selected.";
+        setLibrarySwitchError(message);
+        announce(message);
+        return;
+      }
+
+      draftGuard.request(
+        () => {
+          void executeSelectProfile(item);
+        },
+        { returnFocusTo }
+      );
+    },
+    [announce, draftGuard, executeSelectProfile]
+  );
+
+  const executeLaunch = React.useCallback(async () => {
+    const currentAgentProfile = latestAgentProfileRef.current;
+    const launchPayload = currentAgentProfile.launch.payload;
     if (!launchPayload) {
-      const message = agentProfile.launch.disabledReason ?? "Profile is not ready to launch.";
+      const message =
+        currentAgentProfile.launch.disabledReason ?? "Profile is not ready to launch.";
       setLaunchError(message);
       announce(`Launch blocked: ${message}`);
       return;
@@ -418,19 +446,24 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
       setCurrentScreen("sessions");
       announce("Claude session launched");
     } catch (error) {
-      const message = getErrorMessage(error);
+      const message = formatProfileLaunchError(error);
       setLaunchError(message);
       announce(`Launch failed: ${message}`);
     } finally {
       setIsLaunching(false);
     }
-  }, [
-    agentProfile.launch.disabledReason,
-    agentProfile.launch.payload,
-    announce,
-    setActiveTerminalSessionId,
-    setCurrentScreen,
-  ]);
+  }, [announce, setActiveTerminalSessionId, setCurrentScreen]);
+
+  const handleLaunch = React.useCallback(() => {
+    const currentAgentProfile = latestAgentProfileRef.current;
+    if (!currentAgentProfile.launch.payload) {
+      void executeLaunch();
+      return;
+    }
+    draftGuard.request(() => {
+      void executeLaunch();
+    });
+  }, [draftGuard, executeLaunch]);
 
   const readinessLabel = getReadinessLabel(
     agentProfile.readiness.status,
@@ -626,7 +659,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
             <AgentProfileLibrarySection
               errorMessage={librarySwitchError}
               items={profileLibrary.items}
-              onSelect={(item) => void handleSelectProfile(item)}
+              onSelect={(item, element) => handleSelectProfile(item, element)}
               switchingProfileId={switchingProfileId}
             />
           </section>
@@ -645,17 +678,13 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           currentEffective={effectiveState.effective}
           cwd={cwd}
           onOpenAdvanced={() => {
-            closeBasicsPanel();
-            openProfileWorkspaceTab("layers");
+            goToProfileWorkspaceTab("layers");
           }}
           onOpenChange={(open) => {
             if (!open) closeBasicsPanel();
             else setBasicsPanelOpen(true);
           }}
-          onOpenClaudeAuth={() => {
-            closeBasicsPanel();
-            openClaudeAuth();
-          }}
+          onOpenClaudeAuth={goToClaudeAuth}
           onPreviewStateChange={setPreviewState}
           onSaved={handleBasicsSaved}
           onValidationStateChange={setValidationState}
@@ -687,6 +716,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
         onOpenClaudeAuth={openClaudeAuth}
         open={createDialogOpen}
       />
+      <ProfileUnsavedChangesDialog guard={draftGuard} />
     </ScreenSurface>
   );
 }
@@ -699,7 +729,7 @@ function AgentProfileLibrarySection({
 }: {
   errorMessage: string | null;
   items: readonly AgentProfileLibraryItem[];
-  onSelect: (item: AgentProfileLibraryItem) => void;
+  onSelect: (item: AgentProfileLibraryItem, returnFocusTo?: HTMLElement | null) => void;
   switchingProfileId: string | null;
 }): React.ReactElement {
   return (
@@ -752,7 +782,9 @@ function AgentProfileLibrarySection({
                   }`}
                   data-testid="agent-profile-library-item"
                   disabled={Boolean(switchingProfileId)}
-                  onClick={() => onSelect(item)}
+                  onClick={(event: React.MouseEvent<HTMLButtonElement>) =>
+                    onSelect(item, event.currentTarget)
+                  }
                   type="button"
                 >
                   <span className="flex min-w-0 items-start justify-between gap-3">
@@ -1084,6 +1116,9 @@ function CreateAgentProfileDialog({
 
 function formatProfileSwitchError(error: unknown): string {
   const message = getErrorMessage(error);
+  if (containsUnsafeHomeDiagnosticText(message)) {
+    return "Agent Profile could not be selected. Try again or review the profile details.";
+  }
   if (/identity|auth/i.test(message)) {
     return "This Agent Profile needs an available Claude identity before it can be selected.";
   }
@@ -1091,6 +1126,26 @@ function formatProfileSwitchError(error: unknown): string {
     return "This Agent Profile workspace is unavailable. Choose another profile or workspace.";
   }
   return "Agent Profile could not be selected. Try again or review the profile details.";
+}
+
+function formatProfileLaunchError(error: unknown): string {
+  const message = getErrorMessage(error);
+  if (containsUnsafeHomeDiagnosticText(message)) {
+    return "Claude session could not be launched. Review profile readiness and try again.";
+  }
+  if (/identity|auth/i.test(message)) {
+    return "Claude session could not be launched because the selected identity needs attention.";
+  }
+  if (/workspace|cwd|directory|path/i.test(message)) {
+    return "Claude session could not be launched because the workspace is unavailable.";
+  }
+  return message || "Claude session could not be launched. Review profile readiness and try again.";
+}
+
+function containsUnsafeHomeDiagnosticText(message: string): boolean {
+  return /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|oauth|authorization/i.test(
+    message
+  );
 }
 
 function findScopePathForRole(

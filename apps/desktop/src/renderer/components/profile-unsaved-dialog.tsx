@@ -19,11 +19,8 @@ export function ProfileUnsavedChangesDialog({
     <Dialog open={guard.open} onOpenChange={(open) => (open ? undefined : guard.cancel())}>
       <DialogContent data-testid="profile-unsaved-dialog">
         <DialogHeader>
-          <DialogTitle>Save profile changes?</DialogTitle>
-          <DialogDescription>
-            This profile has unsaved layer changes. Save before leaving, discard the draft, or stay
-            here to keep editing.
-          </DialogDescription>
+          <DialogTitle>{guard.title}</DialogTitle>
+          <DialogDescription>{guard.description}</DialogDescription>
         </DialogHeader>
         {guard.saveDisabledReason ? (
           <p

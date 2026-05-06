@@ -48,6 +48,20 @@ export const previewStateAtom = atom<PreviewState>({
   diff: [],
   errorMessage: null,
 });
+
+export interface ProfileBasicsNavigationGuardController {
+  isDirty: boolean;
+  isSaving: boolean;
+  canSave: boolean;
+  saveDisabledReason: string | null;
+  saveAndClose: () => Promise<void>;
+  discardAndClose: () => void;
+}
+
+export const profileBasicsNavigationGuardAtom = atom<ProfileBasicsNavigationGuardController | null>(
+  null
+);
+
 export const appErrorAtom = atom<string | null>(null);
 export const isBootstrappingAtom = atom(true);
 export const isRefreshingAtom = atom(false);

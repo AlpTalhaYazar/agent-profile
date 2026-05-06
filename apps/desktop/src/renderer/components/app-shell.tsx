@@ -147,6 +147,13 @@ export function AppShell(): React.ReactElement {
     [currentScreen, draftGuard, setCurrentScreen]
   );
 
+  const requestGuardedAction = React.useCallback(
+    (continuation: () => void, options?: { returnFocusTo?: HTMLElement | null }) => {
+      draftGuard.request(continuation, options);
+    },
+    [draftGuard]
+  );
+
   // ─── Bootstrap effect (replaces the old system.version + system.defaultCwd
   // + auth.list chain with a single system.bootstrap round-trip) ────────────
   React.useEffect(() => {
@@ -439,9 +446,11 @@ export function AppShell(): React.ReactElement {
         label: "Open Provenance",
         keywords: ["provenance", "cascade", "inspect"],
         onSelect: () => {
-          setCurrentScreen("editor");
-          setProfileWorkspaceTab("debug");
-          setProfileDebugTab("provenance");
+          requestGuardedAction(() => {
+            setCurrentScreen("editor");
+            setProfileWorkspaceTab("debug");
+            setProfileDebugTab("provenance");
+          });
         },
       },
       {
@@ -450,9 +459,11 @@ export function AppShell(): React.ReactElement {
         label: "Open Persona",
         keywords: ["persona", "composer", "claude"],
         onSelect: () => {
-          setCurrentScreen("editor");
-          setProfileWorkspaceTab("debug");
-          setProfileDebugTab("persona");
+          requestGuardedAction(() => {
+            setCurrentScreen("editor");
+            setProfileWorkspaceTab("debug");
+            setProfileDebugTab("persona");
+          });
         },
       },
       ...scopeEntries.map((entry) => ({
@@ -462,9 +473,11 @@ export function AppShell(): React.ReactElement {
         description: entry.path,
         keywords: [entry.scope, entry.role, entry.path],
         onSelect: () => {
-          setCurrentScreen("editor");
-          setProfileWorkspaceTab("layers");
-          setSelectedScopePath(entry.path);
+          requestGuardedAction(() => {
+            setCurrentScreen("editor");
+            setProfileWorkspaceTab("layers");
+            setSelectedScopePath(entry.path);
+          });
         },
       })),
       ...authProfiles.map((profile) => ({
@@ -474,9 +487,11 @@ export function AppShell(): React.ReactElement {
         description: `${profile.id} · ${profile.mode}`,
         keywords: [profile.id, profile.displayName, profile.mode],
         onSelect: () => {
-          setCurrentScreen("editor");
-          setProfileWorkspaceTab("overview");
-          setSelectedAuthId(profile.id);
+          requestGuardedAction(() => {
+            setCurrentScreen("editor");
+            setProfileWorkspaceTab("overview");
+            setSelectedAuthId(profile.id);
+          });
         },
       })),
       {
@@ -517,13 +532,15 @@ export function AppShell(): React.ReactElement {
           description: section,
           keywords: [section, key, "provenance"],
           onSelect: () => {
-            setSelectedProvenanceField({
-              section: section as "env" | "settings" | "mcpServers",
-              key,
+            requestGuardedAction(() => {
+              setSelectedProvenanceField({
+                section: section as "env" | "settings" | "mcpServers",
+                key,
+              });
+              setCurrentScreen("editor");
+              setProfileWorkspaceTab("debug");
+              setProfileDebugTab("provenance");
             });
-            setCurrentScreen("editor");
-            setProfileWorkspaceTab("debug");
-            setProfileDebugTab("provenance");
           },
         });
       }
@@ -541,6 +558,7 @@ export function AppShell(): React.ReactElement {
     authProfiles,
     commandPaletteQuery,
     effectiveState.provenance,
+    requestGuardedAction,
     requestScreenChange,
     scopeEntries,
     setCurrentScreen,

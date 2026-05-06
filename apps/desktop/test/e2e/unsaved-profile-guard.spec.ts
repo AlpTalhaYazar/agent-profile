@@ -16,6 +16,8 @@ async function openLayerEditor(
   await openProfileWorkspace(page);
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Scope layers" })).toBeVisible();
+  const sharedLayer = page.locator("button").filter({ hasText: "shared.yml" }).first();
+  await sharedLayer.click();
   await expect(page.getByPlaceholder("Value").first()).toBeVisible();
 }
 
