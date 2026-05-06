@@ -7,8 +7,8 @@
  *    badge, role, and auth.
  *  - The Refresh button reloads the table.
  *
- * Kill / Relaunch / Drift round-trips need a live process and are exercised
- * by the unit suite (apps/desktop/test/daemon-handlers-write.test.ts).
+ * Live Kill and terminal attach are exercised by `phase2-live-session.spec.ts`;
+ * this spec verifies stale/profile/native action truthfulness from seeded records.
  */
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -149,7 +149,7 @@ authProfiles:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
 
     await page.getByTestId("sidebar-sessions").click();
     await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
@@ -167,14 +167,26 @@ authProfiles:
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByText("session-running").first()).toBeVisible();
 
-    // Selecting a stale profile session does not offer Kill; it can be run again.
+    // Selecting a stale profile session does not offer Kill or Open terminal; it can be run again,
+    // checked for drift, and exposes the original command for copying.
     await page.getByText("session-running").first().click();
     await expect(page.getByRole("button", { name: "Run again" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Check drift" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy command" })).toBeVisible();
+    await page.getByRole("button", { name: "Copy command" }).click();
+    await expect(page.getByRole("status")).toContainText("Session command copied");
+    await expect(page.getByRole("button", { name: "Open terminal" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Kill" })).toHaveCount(0);
+
+    await page.getByText("session-exited").first().click();
+    await expect(page.getByRole("button", { name: "Run again" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Check drift" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy command" })).toBeVisible();
 
     await page.getByText("native-session").first().click();
     await expect(page.getByRole("button", { name: "Resume" }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Run with current profile" })).toHaveCount(2);
+    await expect(page.getByRole("button", { name: "Check drift" })).toHaveCount(0);
   } finally {
     await app.close();
     await rm(root, { recursive: true, force: true });

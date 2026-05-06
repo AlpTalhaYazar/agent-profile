@@ -100,6 +100,7 @@ mcpServers:
 
   try {
     const page = await app.firstWindow();
+    await page.getByTestId("sidebar-editor").click();
     await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
     // Provenance now lives under Profile Workspace → Debug.

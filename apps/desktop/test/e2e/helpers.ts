@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { _electron as electron, expect } from "@playwright/test";
+import { _electron as electron, expect, type Page } from "@playwright/test";
 import electronExecutable from "electron";
 
 const electronExecutablePath = electronExecutable as unknown as string;
@@ -86,6 +86,48 @@ mcpServers:
   return { globalSharedPath };
 }
 
+export async function seedProfileCapabilityFixture(fixture: DesktopFixture): Promise<void> {
+  await seedProfileFixture(fixture);
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "authProfiles.yml"),
+    [
+      "version: 1",
+      "authProfiles:",
+      "  work:",
+      "    displayName: Work",
+      "    anthropic:",
+      "      mode: apiKey",
+      "      secretRef: keyring://anthropic/work",
+      "    mcpSecretRefs:",
+      "      github.pat: keyring://mcp/github",
+      "",
+    ].join("\n")
+  );
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "global", "shared.yml"),
+    [
+      "version: 1",
+      "mcpServers:",
+      "  github:",
+      "    type: http",
+      "    url: https://github.example/mcp",
+      "    headers:",
+      "      Authorization: Bearer ${secret:github.pat}",
+      "  linear:",
+      "    type: http",
+      "    url: https://linear.example/mcp",
+      "    headers:",
+      "      Authorization: Bearer ${secret:linear.token}",
+      "persona:",
+      "  skills:",
+      "    - skills/react/SKILL.md",
+      "  agents:",
+      "    - agents/reviewer.md",
+      "",
+    ].join("\n")
+  );
+}
+
 export async function launchDesktop(fixture: DesktopFixture): Promise<{
   app: Awaited<ReturnType<typeof electron.launch>>;
   page: Awaited<ReturnType<Awaited<ReturnType<typeof electron.launch>>["firstWindow"]>>;
@@ -110,4 +152,14 @@ export async function launchDesktop(fixture: DesktopFixture): Promise<{
 
 export async function readText(path: string): Promise<string> {
   return readFile(path, "utf8");
+}
+
+export async function openAgentProfilesHome(page: Page): Promise<void> {
+  await page.getByTestId("sidebar-home").click();
+  await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+}
+
+export async function openProfileWorkspace(page: Page): Promise<void> {
+  await page.getByTestId("sidebar-editor").click();
+  await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 }

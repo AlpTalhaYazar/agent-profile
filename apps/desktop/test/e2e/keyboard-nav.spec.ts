@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
+import {
+  createDesktopFixture,
+  launchDesktop,
+  openProfileWorkspace,
+  seedProfileFixture,
+} from "./helpers.js";
 
 const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
@@ -8,7 +13,7 @@ test("keyboard navigation and focus restoration work across shell controls", asy
   await seedProfileFixture(fixture);
   const { app, page } = await launchDesktop(fixture);
   try {
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
 
     await page.keyboard.press("Tab");
     await expect(page.locator(".skip-nav")).toBeFocused();
@@ -21,6 +26,7 @@ test("keyboard navigation and focus restoration work across shell controls", asy
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("command-palette")).toBeHidden();
 
+    await openProfileWorkspace(page);
     await page.getByRole("button", { name: "Layers" }).click();
     await expect(page.getByText("Scope layers")).toBeVisible();
     const scopeButtons = page
@@ -33,7 +39,7 @@ test("keyboard navigation and focus restoration work across shell controls", asy
     await expect(scopeButtons.nth(1)).toBeFocused();
     await page.keyboard.press("Enter");
 
-    await page.keyboard.press(`${modifier}+2`);
+    await page.keyboard.press(`${modifier}+3`);
     await expect(page.locator("#screen-heading")).toBeFocused();
     await expect(page.locator("#screen-heading")).toHaveText("Claude Auth");
 
@@ -43,10 +49,10 @@ test("keyboard navigation and focus restoration work across shell controls", asy
     await expect(page.getByTestId("shortcuts-help")).toBeHidden();
 
     await page.getByRole("button", { name: /Connect Claude/ }).click();
-    await expect(page.getByRole("heading", { name: "Connect Claude credential" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connect Claude identity" })).toBeVisible();
     await page.keyboard.press("Tab");
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("heading", { name: "Connect Claude credential" })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Connect Claude identity" })).toBeHidden();
   } finally {
     await app.close();
     await fixture.cleanup();

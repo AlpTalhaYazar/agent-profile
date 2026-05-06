@@ -1,20 +1,52 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { type Locator, type Page, expect, test } from "@playwright/test";
-import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
+import {
+  createDesktopFixture,
+  launchDesktop,
+  openProfileWorkspace,
+  seedProfileCapabilityFixture,
+} from "./helpers.js";
 
 const actualDir = resolve(process.cwd(), "../../.ai-page-designs");
 
 test("desktop visual contract matches the modernized hierarchy", async () => {
   const fixture = await createDesktopFixture("agent-profile-visual-contract-");
-  await seedProfileFixture(fixture);
+  await seedProfileCapabilityFixture(fixture);
   await seedVisualSessions(fixture);
   await mkdir(actualDir, { recursive: true });
   const { app, page } = await launchDesktop(fixture);
 
   try {
     await page.setViewportSize({ width: 1586, height: 992 });
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await expect(page.getByTestId("sidebar-home")).toHaveAttribute("aria-current", "page");
+    await assertNoHorizontalOverflow(page);
+    await assertVisibleBox(page.getByTestId("agent-profile-card"));
+    await assertVisibleBox(page.getByText("Ready with review").first());
+    await assertVisibleBox(page.getByTestId("home-readiness-warning"));
+    await assertVisibleBox(page.getByTestId("home-launch-button"));
+    await page.screenshot({ path: join(actualDir, "actual-agent-profiles-home-1586x992.png") });
+
+    await page.getByTestId("home-view-profile-details").click();
+    await assertVisibleBox(page.getByTestId("agent-profile-side-panel"));
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: join(actualDir, "actual-agent-profiles-side-panel-1586x992.png"),
+    });
+    await page.getByTestId("agent-profile-panel-section-tools").click();
+    await assertVisibleBox(page.getByTestId("agent-profile-panel-tools"));
+    await assertVisibleBox(page.getByText("Tools and MCP capability"));
+    await assertVisibleBox(page.getByText("linear.token"));
+    await expect(page.getByTestId("agent-profile-panel-tools")).not.toContainText("keyring://");
+    await expect(page.getByTestId("agent-profile-panel-tools")).not.toContainText("Bearer");
+    await page.screenshot({
+      path: join(actualDir, "actual-agent-profiles-tools-panel-1586x992.png"),
+    });
+    await page.getByTestId("agent-profile-side-panel-close").click();
+    await expect(page.getByTestId("agent-profile-side-panel")).toHaveCount(0);
+
+    await openProfileWorkspace(page);
     await expect(page.getByTestId("sidebar-editor")).toHaveAttribute("aria-current", "page");
     await assertNoHorizontalOverflow(page);
     await assertBoxInRange(page.locator("header").first(), {
@@ -27,7 +59,9 @@ test("desktop visual contract matches the modernized hierarchy", async () => {
       minWidth: 260,
       maxWidth: 290,
     });
-    await assertVisibleBox(page.getByText(/Ready to launch|Select context to launch/));
+    await assertVisibleBox(
+      page.getByText(/Ready to launch|Ready with review|Select context to launch/)
+    );
     await assertVisibleBox(page.getByRole("button", { name: /MCP Servers/ }));
     await assertVisibleBox(page.getByRole("button", { name: /Env Vars/ }));
     await assertVisibleBox(page.getByText("Launch readiness"));
@@ -48,8 +82,10 @@ test("desktop visual contract matches the modernized hierarchy", async () => {
     await expect(page.getByRole("heading", { name: "Claude Auth" })).toBeVisible();
     await expect(page.getByTestId("sidebar-auth-vault")).toHaveAttribute("aria-current", "page");
     await page.mouse.move(1270, 20);
-    await assertVisibleBox(page.getByText("Claude credentials").first());
-    await assertVisibleBox(page.getByText("Claude credential").first());
+    await assertVisibleBox(page.getByText("Claude identities").first());
+    await assertVisibleBox(page.getByTestId("claude-auth-identity-summary"));
+    await assertVisibleBox(page.getByTestId("claude-auth-tool-secret-support"));
+    await assertVisibleBox(page.getByText("Advanced tool secret support"));
     await page.screenshot({ path: join(actualDir, "actual-claude-auth-1280x800.png") });
 
     await page.getByTestId("sidebar-sessions").click();

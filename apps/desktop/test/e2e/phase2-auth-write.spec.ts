@@ -66,7 +66,7 @@ test("packaged Claude Auth add + rotate never writes plaintext secrets to authPr
     const page = await firstAppPage(browser);
     await page.bringToFront();
 
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
     await page.getByTestId("sidebar-auth-vault").click();
     await expect(page.getByRole("heading", { name: "Claude credentials" })).toBeVisible();
     await expect(page.getByText("0 configured")).toBeVisible();

@@ -1,12 +1,12 @@
 /**
  * @file auth-vault.spec.ts
  *
- * Smoke coverage for the Phase 2 milestone 5 Auth Vault screen:
- *  - Sidebar nav switches to "Auth Vault" and the screen renders.
- *  - Seeded auth profiles from authProfiles.yml are listed.
- *  - The "Add profile" dialog opens (the Main native key-entry step is
+ * Smoke coverage for the Claude Auth identity-management screen:
+ *  - Sidebar nav switches to "Claude Auth" and the screen renders identity-first.
+ *  - Seeded auth profiles from authProfiles.yml are listed as Claude identities.
+ *  - The "Connect Claude" dialog opens (the Main native key-entry step is
  *    deferred to a follow-up spec — covered manually for now).
- *  - The "Add secret" Renderer modal opens and shows the masked input toggle.
+ *  - The advanced tool-secret area preserves the secure Renderer modal path.
  */
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -17,7 +17,7 @@ import electronExecutable from "electron";
 
 const electronExecutablePath = electronExecutable as unknown as string;
 
-test("auth vault tab lists seeded profiles and opens form dialogs", async () => {
+test("claude auth manages identities and keeps tool secrets advanced", async () => {
   const launchEnv = { ...process.env };
   launchEnv.ELECTRON_RUN_AS_NODE = undefined;
 
@@ -86,11 +86,14 @@ env:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
 
     // Switch to the Claude Auth screen from the shell sidebar.
     await page.getByTestId("sidebar-auth-vault").click();
-    await expect(page.getByRole("heading", { name: "Claude credentials" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Claude identities" })).toBeVisible();
+    await expect(
+      page.getByText("Claude identities used by Agent Profiles launch and readiness")
+    ).toBeVisible();
 
     // Seeded profiles appear in the list (the sidebar buttons each include
     // the id and a metadata sub-line). Strict-mode resolution requires us to
@@ -102,12 +105,17 @@ env:
 
     // "Connect Claude" dialog opens.
     await page.getByRole("button", { name: "Connect Claude", exact: true }).first().click();
-    await expect(page.getByRole("heading", { name: "Connect Claude credential" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connect Claude identity" })).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // Selected profile reveals Claude credential and MCP secret actions.
+    // Selected profile reveals Claude identity health and keeps tool secrets advanced.
     await page.getByRole("button", { name: /work\s+Work \(Acme\)/ }).click();
+    await expect(page.getByTestId("claude-auth-identity-summary")).toBeVisible();
     await expect(page.getByRole("button", { name: /Rotate Claude key/ })).toBeVisible();
+    const toolSupport = page.getByTestId("claude-auth-tool-secret-support");
+    await expect(toolSupport).toBeVisible();
+    await expect(toolSupport.getByText("Advanced tool secret support")).toBeVisible();
+    await toolSupport.getByText("Advanced tool secret support").click();
     await expect(page.getByRole("button", { name: "Add or update MCP secret" })).toBeVisible();
     await page.getByRole("button", { name: "Add or update MCP secret" }).click();
     await expect(page.getByRole("heading", { name: /Add secret to "work"/ })).toBeVisible();

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 import electronExecutable from "electron";
-import { createDesktopFixture, launchDesktop, seedProfileFixture } from "./helpers.js";
+import { createDesktopFixture, launchDesktop, openProfileWorkspace, seedProfileFixture } from "./helpers.js";
 
 const electronExecutablePath = electronExecutable as unknown as string;
 
@@ -88,7 +88,9 @@ env:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await openProfileWorkspace(page);
+    await expect(page.getByText("Ready to launch").first()).toBeVisible();
+    await expect(page.getByText("0 MCP servers").first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Working directory/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /Role/ }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: /Claude credential/ })).toBeVisible();
@@ -116,7 +118,7 @@ env:
     await expect.poll(async () => readFile(globalSharedPath, "utf8")).toContain("EDITOR: vim");
 
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await openProfileWorkspace(page);
     await page.getByRole("button", { name: "Layers", exact: true }).click();
     await expect(page.getByPlaceholder("Value").first()).toHaveValue("vim", { timeout: 10_000 });
     await expect(page.getByText("EDITOR", { exact: true })).toBeVisible();
@@ -208,7 +210,7 @@ env:
 
   try {
     const page = await app.firstWindow();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await openProfileWorkspace(page);
 
     await page.getByRole("button", { name: /Role/ }).first().click();
     await page.getByRole("button", { name: "backend", exact: true }).click();
@@ -237,7 +239,7 @@ env:
       .not.toContain("ROLE_LAYER_ONLY");
 
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await openProfileWorkspace(page);
     await page.getByRole("button", { name: "Layers", exact: true }).click();
     await page.locator("button").filter({ hasText: projectRolePath }).click();
     await expect(page.locator('input[value="ROLE_LAYER_ONLY"]')).toBeVisible({ timeout: 10_000 });
@@ -261,7 +263,7 @@ test("working directory dropdown selects detected monorepo workspace candidates"
 
   const { app, page } = await launchDesktop(fixture);
   try {
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await openProfileWorkspace(page);
     await page.getByRole("button", { name: /Working directory/ }).click();
     await expect(page.getByText("Detected workspaces")).toBeVisible();
     await page.getByRole("button", { name: new RegExp(`Root.*${escapeRegex(repoDir)}`) }).click();

@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { chmodSync, existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +42,7 @@ test("packaged app launches a live Claude session and kills it cleanly", async (
     projectDir,
   });
   await writeClaudeStub(stubPath);
+  const realProjectDir = await realpath(projectDir);
   const appArgs = [
     "--inspect=0",
     `--remote-debugging-port=${remoteDebuggingPort}`,
@@ -71,13 +72,15 @@ test("packaged app launches a live Claude session and kills it cleanly", async (
     browser = await connectToPackagedApp(devToolsWsEndpoint);
     const page = await firstAppPage(browser);
     await page.bringToFront();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
 
     await page.getByRole("button", { name: "Launch Claude" }).first().click();
     await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
 
     const firstRow = page.locator("tbody tr").first();
     await expect(firstRow).toContainText(sessionIdPattern, { timeout: 20_000 });
+    await expect(firstRow).toContainText("backend");
+    await expect(firstRow).toContainText("work");
 
     const sessionText = await firstRow.innerText();
     const sessionId = sessionText.match(sessionIdPattern)?.[0];
@@ -90,6 +93,12 @@ test("packaged app launches a live Claude session and kills it cleanly", async (
     await expect
       .poll(async () => await terminalText(page), { timeout: 20_000 })
       .toContain(`[phase2-stub] session ${sessionId}`);
+    await expect
+      .poll(async () => await terminalText(page), { timeout: 20_000 })
+      .toContain(`[phase2-stub] cwd ${realProjectDir}`);
+    await expect
+      .poll(async () => await terminalText(page), { timeout: 20_000 })
+      .toContain("--strict-mcp-config");
 
     const runningRow = page.locator("tbody tr").filter({ hasText: sessionId }).first();
     const killButton = page.getByRole("button", { name: "Kill", exact: true }).first();

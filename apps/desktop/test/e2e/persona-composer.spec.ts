@@ -96,6 +96,7 @@ persona:
 
   try {
     const page = await app.firstWindow();
+    await page.getByTestId("sidebar-editor").click();
     await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
 
     // Persona now lives under Profile Workspace → Debug.

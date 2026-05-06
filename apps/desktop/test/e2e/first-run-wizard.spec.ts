@@ -25,13 +25,16 @@ test("first-run wizard creates setup marker and stays complete after relaunch", 
     await expect(page.getByRole("heading", { name: "Setup complete" })).toBeVisible();
     await page.getByTestId("wizard-go-to-editor").click();
     await expect(page.getByTestId("first-run-wizard")).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await expect(page.getByTestId("sidebar-home")).toHaveAttribute("aria-current", "page");
     expect(existsSync(join(fixture.myClaudeHome, ".setup-complete"))).toBe(true);
     await app.close();
 
     const relaunch = await launchDesktop(fixture);
     try {
       await expect(relaunch.page.getByTestId("first-run-wizard")).toBeHidden();
-      await expect(relaunch.page.getByTestId("sidebar-editor")).toBeVisible();
+      await expect(relaunch.page.getByTestId("sidebar-home")).toBeVisible();
+      await expect(relaunch.page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
     } finally {
       await relaunch.app.close();
     }
