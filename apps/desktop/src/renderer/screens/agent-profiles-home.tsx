@@ -1,10 +1,22 @@
-import { Button } from "@agent-profile/ui";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Field,
+  Input,
+  Select,
+} from "@agent-profile/ui";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   AlertTriangle,
   ArrowRight,
   FolderOpen,
   KeyRound,
+  Plus,
   Rocket,
   Sparkles,
   type LucideIcon,
@@ -14,19 +26,34 @@ import * as React from "react";
 import {
   activeTerminalSessionIdAtom,
   agentProfilePanelSectionAtom,
+  authProfilesAtom,
+  availableRolesAtom,
   currentScreenAtom,
+  cwdAtom,
   type ProfileWorkspaceTab,
   profileWorkspaceTabAtom,
   selectedAgentProfilePanelIdAtom,
 } from "../lib/atoms.js";
 import { agentProfileViewModelAtom } from "../lib/agent-profile-view-model.js";
+import {
+  buildProfileSelection,
+  deriveProfileRoleSlug,
+  validateProfileCreationDraft,
+  type ProfileCreationDraft,
+  type ProfileCreationField,
+  type ProfileCreationValidationIssue,
+} from "../lib/profile-creation.js";
 import { getErrorMessage } from "../lib/normalize.js";
 import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
+import type { AuthProfileOption } from "../lib/types.js";
 
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
+  const authProfiles = useAtomValue(authProfilesAtom);
+  const availableRoles = useAtomValue(availableRolesAtom);
+  const cwd = useAtomValue(cwdAtom);
   const [selectedPanelProfileId, setSelectedPanelProfileId] = useAtom(
     selectedAgentProfilePanelIdAtom
   );
@@ -37,6 +64,8 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const announce = useAnnounce();
   const [isLaunching, setIsLaunching] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
 
@@ -73,6 +102,20 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const openProfileWorkspace = React.useCallback(() => {
     openProfileWorkspaceTab("overview");
   }, [openProfileWorkspaceTab]);
+
+  const closeCreateDialog = React.useCallback(() => {
+    setCreateDialogOpen(false);
+    window.requestAnimationFrame(() => {
+      createButtonRef.current?.focus();
+    });
+  }, []);
+
+  const openCreateDialog = React.useCallback(() => {
+    setLaunchError(null);
+    setSelectedPanelProfileId(null);
+    setPanelSection("summary");
+    setCreateDialogOpen(true);
+  }, [setPanelSection, setSelectedPanelProfileId]);
 
   const openClaudeAuth = React.useCallback(() => {
     setLaunchError(null);
@@ -164,14 +207,26 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
         title="Agent Profiles"
         description="Choose a working profile, check readiness, and launch Claude from one calm place."
         actions={
-          <Button
-            data-testid="home-open-profile-workspace"
-            onClick={openProfileWorkspace}
-            type="button"
-            variant="secondary"
-          >
-            Open Profile Workspace
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Button
+              data-testid="home-new-agent-profile"
+              onClick={openCreateDialog}
+              ref={createButtonRef}
+              type="button"
+              variant="primary"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              New Agent Profile
+            </Button>
+            <Button
+              data-testid="home-open-profile-workspace"
+              onClick={openProfileWorkspace}
+              type="button"
+              variant="secondary"
+            >
+              Open Profile Workspace
+            </Button>
+          </div>
         }
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -324,8 +379,327 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           profile={agentProfile}
         />
       </div>
+      <CreateAgentProfileDialog
+        authProfiles={authProfiles}
+        currentAuthProfileId={
+          agentProfile.auth.state === "selected" ? (agentProfile.auth.profileId ?? "") : ""
+        }
+        currentCwd={cwd || agentProfile.workspace.detail || ""}
+        existingRoles={availableRoles}
+        onOpenChange={(open) => {
+          if (open) {
+            setCreateDialogOpen(true);
+            return;
+          }
+          closeCreateDialog();
+        }}
+        onOpenClaudeAuth={openClaudeAuth}
+        open={createDialogOpen}
+      />
     </ScreenSurface>
   );
+}
+
+function CreateAgentProfileDialog({
+  authProfiles,
+  currentAuthProfileId,
+  currentCwd,
+  existingRoles,
+  onOpenChange,
+  onOpenClaudeAuth,
+  open,
+}: {
+  authProfiles: readonly AuthProfileOption[];
+  currentAuthProfileId: string;
+  currentCwd: string;
+  existingRoles: readonly string[];
+  onOpenChange: (open: boolean) => void;
+  onOpenClaudeAuth: () => void;
+  open: boolean;
+}): React.ReactElement {
+  const announce = useAnnounce();
+  const initialFocusRef = React.useRef<HTMLInputElement | null>(null);
+  const [draft, setDraft] = React.useState<ProfileCreationDraft>(() =>
+    createInitialProfileDraft(currentCwd, currentAuthProfileId, authProfiles)
+  );
+  const [reviewReady, setReviewReady] = React.useState(false);
+  const [pickerError, setPickerError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setDraft(createInitialProfileDraft(currentCwd, currentAuthProfileId, authProfiles));
+    setReviewReady(false);
+    setPickerError(null);
+    const frameId = window.requestAnimationFrame(() => {
+      initialFocusRef.current?.focus();
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [authProfiles, currentAuthProfileId, currentCwd, open]);
+
+  const validation = validateProfileCreationDraft(draft, {
+    existingRoles,
+    authProfiles,
+  });
+  const resolved = validation.value;
+  const selection = buildProfileSelection(resolved);
+  const issuesByField = React.useMemo(
+    () => mapIssuesByField(validation.issues),
+    [validation.issues]
+  );
+  const rolePreview = resolved.roleSlug || deriveProfileRoleSlug(draft.purpose) || "profile-role";
+  const selectedAuth = authProfiles.find((profile) => profile.id === draft.authProfileId) ?? null;
+  const authOptions = authProfiles.map((profile) => ({
+    value: profile.id,
+    label: `${profile.displayName} · ${formatAuthMode(profile.mode)}`,
+  }));
+
+  const updateDraft = React.useCallback((patch: Partial<ProfileCreationDraft>) => {
+    setReviewReady(false);
+    setPickerError(null);
+    setDraft((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const handlePickWorkspace = React.useCallback(async () => {
+    const picker = window.myclaude?.system?.pickDirectory;
+    if (!picker) {
+      setPickerError("Workspace picker is unavailable. You can use the current workspace.");
+      return;
+    }
+    try {
+      const next = await picker();
+      if (next) {
+        updateDraft({ cwd: next });
+      }
+    } catch {
+      setPickerError("Workspace picker could not open. You can use the current workspace.");
+    }
+  }, [updateDraft]);
+
+  const handleConnectClaudeAuth = React.useCallback(() => {
+    onOpenChange(false);
+    onOpenClaudeAuth();
+  }, [onOpenChange, onOpenClaudeAuth]);
+
+  const handleReview = React.useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!validation.ok) {
+        setReviewReady(false);
+        announce("Agent Profile needs a little more detail before it can be created");
+        return;
+      }
+      setReviewReady(true);
+      announce("Agent Profile is ready to create");
+    },
+    [announce, validation.ok]
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl" data-testid="profile-create-dialog">
+        <form className="grid gap-5" onSubmit={handleReview}>
+          <DialogHeader>
+            <DialogTitle>Create a new Agent Profile</DialogTitle>
+            <DialogDescription>
+              Describe the work, choose where it runs, and bind the Claude identity it should use.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <Field
+              description="Use the job this profile should do, such as Backend API Review or Frontend Polish."
+              htmlFor="profile-create-purpose"
+              label="Purpose"
+              {...fieldErrorProps(issuesByField.purpose)}
+            >
+              <Input
+                aria-invalid={issuesByField.purpose ? true : undefined}
+                data-testid="profile-create-purpose"
+                id="profile-create-purpose"
+                onChange={(event) => updateDraft({ purpose: event.currentTarget.value })}
+                placeholder="Backend API Review"
+                ref={initialFocusRef}
+                value={draft.purpose}
+              />
+            </Field>
+
+            <div
+              className="rounded-lg border border-subtle bg-canvas/60 px-4 py-3"
+              data-testid="profile-create-preview"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+                    Profile role preview
+                  </p>
+                  <p className="mt-1 font-mono text-sm text-primary">{rolePreview}</p>
+                </div>
+                <StatusChip tone={issuesByField.role ? "warning" : "info"}>
+                  {issuesByField.role ? "Needs a safer name" : "Safe role name"}
+                </StatusChip>
+              </div>
+              {issuesByField.role ? (
+                <p className="mt-2 text-xs font-medium text-status-warning">{issuesByField.role}</p>
+              ) : (
+                <p className="mt-2 text-xs text-secondary">
+                  This safe name is generated from the purpose and keeps raw file details out of the
+                  default flow.
+                </p>
+              )}
+            </div>
+
+            <Field
+              description="The profile will start from this workspace."
+              htmlFor="profile-create-workspace"
+              label="Workspace"
+              {...fieldErrorProps(issuesByField.workspace ?? pickerError)}
+            >
+              <div className="flex gap-2">
+                <Input
+                  aria-invalid={issuesByField.workspace || pickerError ? true : undefined}
+                  className="font-mono text-xs"
+                  data-testid="profile-create-workspace"
+                  id="profile-create-workspace"
+                  onChange={(event) => updateDraft({ cwd: event.currentTarget.value })}
+                  value={draft.cwd}
+                />
+                <Button
+                  className="min-h-10 shrink-0"
+                  data-testid="profile-create-pick-workspace"
+                  onClick={() => void handlePickWorkspace()}
+                  type="button"
+                  variant="secondary"
+                >
+                  Choose…
+                </Button>
+              </div>
+            </Field>
+
+            <Field
+              description="Claude Auth owns credentials; this flow only chooses the identity."
+              label="Claude identity"
+              {...fieldErrorProps(issuesByField.identity)}
+            >
+              {authProfiles.length > 0 ? (
+                <Select
+                  aria-label="Claude identity"
+                  className="min-h-10"
+                  onValueChange={(value) => updateDraft({ authProfileId: value })}
+                  options={authOptions}
+                  value={draft.authProfileId}
+                />
+              ) : (
+                <div className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning">
+                  Add a Claude identity before creating an Agent Profile.
+                </div>
+              )}
+            </Field>
+          </div>
+
+          <section
+            aria-live="polite"
+            className="rounded-lg border border-default bg-surface px-4 py-3"
+            data-testid="profile-create-review"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+              Creation preview
+            </p>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <ProfileCreationFact label="Purpose" value={resolved.purpose || "Not set"} />
+              <ProfileCreationFact label="Role" value={selection.role || rolePreview} />
+              <ProfileCreationFact
+                label="Claude identity"
+                value={selectedAuth?.displayName ?? "Not selected"}
+              />
+            </dl>
+            {reviewReady ? (
+              <p
+                className="mt-3 rounded-md border border-status-success bg-status-success-soft px-3 py-2 text-sm text-status-success"
+                data-testid="profile-create-ready"
+              >
+                This Agent Profile is ready for the save step. Nothing has been changed yet.
+              </p>
+            ) : (
+              <p className="mt-3 text-xs text-secondary">
+                Review becomes available once purpose, workspace, and Claude identity are valid.
+              </p>
+            )}
+          </section>
+
+          <DialogFooter className="flex-wrap gap-3">
+            <Button onClick={() => onOpenChange(false)} type="button" variant="secondary">
+              Cancel
+            </Button>
+            {authProfiles.length === 0 ? (
+              <Button onClick={handleConnectClaudeAuth} type="button" variant="secondary">
+                Connect Claude identity
+              </Button>
+            ) : null}
+            <Button
+              data-testid="profile-create-review-action"
+              disabled={!validation.ok}
+              type="submit"
+              variant="primary"
+            >
+              Review Agent Profile
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProfileCreationFact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}): React.ReactElement {
+  return (
+    <div className="min-w-0 rounded-md border border-subtle bg-canvas/60 px-3 py-2">
+      <dt className="text-xs font-medium uppercase tracking-wide text-tertiary">{label}</dt>
+      <dd className="mt-1 truncate text-sm font-medium text-primary">{value}</dd>
+    </div>
+  );
+}
+
+function createInitialProfileDraft(
+  cwd: string,
+  currentAuthProfileId: string,
+  authProfiles: readonly AuthProfileOption[]
+): ProfileCreationDraft {
+  const selectedAuthProfileId = currentAuthProfileId || authProfiles[0]?.id || "";
+  return {
+    purpose: "",
+    cwd,
+    authProfileId: selectedAuthProfileId,
+  };
+}
+
+function mapIssuesByField(
+  issues: readonly ProfileCreationValidationIssue[]
+): Partial<Record<ProfileCreationField, string>> {
+  const byField: Partial<Record<ProfileCreationField, string>> = {};
+  for (const issue of issues) {
+    byField[issue.field] ??= issue.message;
+  }
+  return byField;
+}
+
+function fieldErrorProps(
+  error: string | null | undefined
+): { error: string } | Record<string, never> {
+  return error ? { error } : {};
+}
+
+function formatAuthMode(mode: string): string {
+  if (mode === "apiKey") return "API key";
+  if (mode === "oauth") return "OAuth";
+  return mode;
 }
 
 function ProfileFact({
