@@ -78,7 +78,7 @@ test("dirty profile navigation can save before leaving", async () => {
   }
 });
 
-test("dirty Profile Basics navigation can be cancelled and saved before leaving", async () => {
+test("dirty Profile Basics close can be cancelled and saved before leaving", async () => {
   const fixture = await createDesktopFixture("agent-profile-basics-unsaved-save-");
   await seedProfileFixture(fixture);
   const rolePath = join(fixture.projectDir, ".myclaude", "roles", "backend.yml");
@@ -94,24 +94,22 @@ test("dirty Profile Basics navigation can be cancelled and saved before leaving"
       timeout: 15_000,
     });
 
-    await page.keyboard.press(`${modifier}+3`);
-    await expect(page.getByTestId("profile-unsaved-dialog")).toBeVisible();
-    await expect(page.getByTestId("profile-unsaved-dialog")).toContainText(
+    await panel.getByTestId("profile-basics-cancel").click();
+    await expect(page.getByTestId("profile-basics-dirty-dialog")).toBeVisible();
+    await expect(page.getByTestId("profile-basics-dirty-dialog")).toContainText(
       "Save Profile Basics changes?"
     );
-    await page.getByTestId("profile-unsaved-cancel").click();
-    await expect(page.getByTestId("profile-unsaved-dialog")).toHaveCount(0);
+    await page.getByTestId("profile-basics-dirty-cancel").click();
+    await expect(page.getByTestId("profile-basics-dirty-dialog")).toHaveCount(0);
     await expect(panel).toBeVisible();
     await expect(panel.getByTestId("profile-basics-purpose")).toHaveValue(
       "Save Basics before navigation"
     );
 
-    await page.keyboard.press(`${modifier}+3`);
-    await expect(page.getByTestId("profile-unsaved-dialog")).toBeVisible();
-    await page.getByTestId("profile-unsaved-save").click();
-    await expect(page.getByRole("heading", { name: "Claude Auth" })).toBeVisible({
-      timeout: 15_000,
-    });
+    await panel.getByTestId("profile-basics-cancel").click();
+    await expect(page.getByTestId("profile-basics-dirty-dialog")).toBeVisible();
+    await page.getByTestId("profile-basics-dirty-save").click();
+    await expect(panel).toHaveCount(0, { timeout: 15_000 });
     await expect.poll(async () => readFile(rolePath, "utf8")).toContain(
       "purpose: Save Basics before navigation"
     );
