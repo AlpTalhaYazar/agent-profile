@@ -1,3 +1,4 @@
+import { createId, flattenObject, sortedUnion, stableStringify } from "./clone.js";
 import type { ProfileIdentitySelection } from "./profile-identity.js";
 import { sanitizeProfileLabel } from "./profile-identity.js";
 import type {
@@ -27,6 +28,34 @@ export interface ProfileBasicsDraft {
   env: Record<string, string>;
   settingsJson: string;
 }
+
+export interface ProfileBasicsEnvRow {
+  id: string;
+  key: string;
+  value: string;
+}
+
+export type ProfileBasicsPreviewSection = "profile" | "identity" | "environment" | "settings";
+
+export interface ProfileBasicsPreviewSummaryItem {
+  section: ProfileBasicsPreviewSection;
+  key: string;
+  change: "added" | "removed" | "changed";
+}
+
+export interface ProfileBasicsFormValidationInput extends ValidateProfileBasicsDraftInput {
+  target: ProfileBasicsTarget;
+  envRows: readonly ProfileBasicsEnvRow[];
+}
+
+export type ProfileBasicsFormValidationResult =
+  | { ok: true; draft: ProfileBasicsDraft; value: ProfileBasicsResolvedDraft; issues: [] }
+  | {
+      ok: false;
+      draft: ProfileBasicsDraft;
+      value: ProfileBasicsResolvedDraft;
+      issues: ProfileBasicsValidationIssue[];
+    };
 
 export interface ProfileBasicsResolvedDraft {
   displayName?: string;
@@ -177,6 +206,146 @@ export function createProfileBasicsDraft(
     env: { ...content.env },
     settingsJson: stringifySettings(content.settings),
   };
+}
+
+export function createProfileBasicsEnvRows(
+  env: Record<string, string>,
+  createRowId: () => string = createId
+): ProfileBasicsEnvRow[] {
+  return Object.entries(env).map(([key, value]) => ({ id: createRowId(), key, value }));
+}
+
+export function buildProfileBasicsDraftFromRows(
+  draft: ProfileBasicsDraft,
+  envRows: readonly ProfileBasicsEnvRow[]
+): { draft: ProfileBasicsDraft; issues: ProfileBasicsValidationIssue[] } {
+  const env: Record<string, string> = {};
+  const issues: ProfileBasicsValidationIssue[] = [];
+  const seen = new Set<string>();
+
+  for (const row of envRows) {
+    const key = row.key.trim();
+    const hasVisibleInput = key.length > 0 || row.value.trim().length > 0;
+    if (!hasVisibleInput) continue;
+
+    if (!key) {
+      issues.push({
+        field: "env",
+        path: "env",
+        message: "Environment variable names can use letters, numbers, and underscores.",
+        severity: "error",
+      });
+      continue;
+    }
+
+    if (seen.has(key)) {
+      issues.push({
+        field: "env",
+        path: `env.${key}`,
+        message: "Each environment variable name can only appear once.",
+        severity: "error",
+      });
+      continue;
+    }
+
+    seen.add(key);
+    env[key] = row.value;
+  }
+
+  return { draft: { ...draft, env }, issues };
+}
+
+export function validateProfileBasicsForm({
+  target,
+  draft,
+  envRows,
+  authProfiles,
+}: ProfileBasicsFormValidationInput): ProfileBasicsFormValidationResult {
+  const rowDraft = buildProfileBasicsDraftFromRows(draft, envRows);
+  const targetIssues: ProfileBasicsValidationIssue[] =
+    target.status === "writable"
+      ? []
+      : [
+          {
+            field: "target",
+            path: "target",
+            message: target.message,
+            severity: "error",
+          },
+        ];
+  const validation = validateProfileBasicsDraft({ draft: rowDraft.draft, authProfiles });
+  const issues = [...targetIssues, ...rowDraft.issues, ...validation.issues];
+
+  if (issues.length === 0 && validation.ok) {
+    return { ok: true, draft: rowDraft.draft, value: validation.value, issues: [] };
+  }
+  return { ok: false, draft: rowDraft.draft, value: validation.value, issues };
+}
+
+export function createSafeProfileBasicsPreviewSummary(
+  before: ScopeDoc | null,
+  after: ScopeDoc | null
+): ProfileBasicsPreviewSummaryItem[] {
+  if (!before || !after) return [];
+
+  const items: ProfileBasicsPreviewSummaryItem[] = [];
+  addScalarPreviewItem(
+    items,
+    "profile",
+    "display name",
+    before.profile?.displayName,
+    after.profile?.displayName
+  );
+  addScalarPreviewItem(
+    items,
+    "profile",
+    "purpose",
+    before.profile?.purpose,
+    after.profile?.purpose
+  );
+  addScalarPreviewItem(
+    items,
+    "identity",
+    "Claude identity",
+    before.auth?.profileId,
+    after.auth?.profileId
+  );
+
+  for (const key of sortedUnion(Object.keys(before.env), Object.keys(after.env))) {
+    addScalarPreviewItem(
+      items,
+      "environment",
+      safeSummaryKey(key, "environment variable"),
+      before.env[key],
+      after.env[key]
+    );
+  }
+
+  const beforeSettings = flattenObject(before.settings);
+  const afterSettings = flattenObject(after.settings);
+  for (const key of sortedUnion(
+    beforeSettings.map(([path]) => path),
+    afterSettings.map(([path]) => path)
+  )) {
+    const beforeValue = beforeSettings.find(([path]) => path === key)?.[1];
+    const afterValue = afterSettings.find(([path]) => path === key)?.[1];
+    addScalarPreviewItem(
+      items,
+      "settings",
+      safeSummaryKey(key, "advanced setting"),
+      beforeValue,
+      afterValue
+    );
+  }
+
+  return items;
+}
+
+export function shouldGuardProfileBasicsClose(input: {
+  isDirty: boolean;
+  isSaving: boolean;
+}): boolean {
+  return input.isDirty && !input.isSaving;
 }
 
 export function validateProfileBasicsDraft({
@@ -471,6 +640,32 @@ function containsUnsafeSettingsValue(value: unknown): boolean {
   return Object.entries(value).some(
     ([key, nestedValue]) => TOKEN_LIKE_RE.test(key) || containsUnsafeSettingsValue(nestedValue)
   );
+}
+
+function addScalarPreviewItem(
+  items: ProfileBasicsPreviewSummaryItem[],
+  section: ProfileBasicsPreviewSection,
+  key: string,
+  beforeValue: unknown,
+  afterValue: unknown
+): void {
+  if (beforeValue === undefined && afterValue === undefined) return;
+  if (stableStringify(beforeValue) === stableStringify(afterValue)) return;
+  items.push({
+    section,
+    key,
+    change: beforeValue === undefined ? "added" : afterValue === undefined ? "removed" : "changed",
+  });
+}
+
+function safeSummaryKey(value: string, fallback: string): string {
+  if (
+    TOKEN_LIKE_RE.test(value) ||
+    /secret|token|authorization|api[_-]?key|keyring|bearer/i.test(value)
+  ) {
+    return fallback;
+  }
+  return value.trim() || fallback;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

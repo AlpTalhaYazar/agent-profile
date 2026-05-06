@@ -65,12 +65,14 @@ import {
   normalizeScopeList,
 } from "../lib/normalize.js";
 import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
+import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
 import { useAnnounce } from "../components/live-announcer.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
 import type { AuthProfileOption } from "../lib/types.js";
 
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
+  const effectiveState = useAtomValue(effectiveStateAtom);
   const profileLibrary = useAtomValue(agentProfileLibraryAtom);
   const authProfiles = useAtomValue(authProfilesAtom);
   const scopeEntries = useAtomValue(scopeEntriesAtom);
@@ -94,11 +96,13 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const [isLaunching, setIsLaunching] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+  const [basicsPanelOpen, setBasicsPanelOpen] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [createProfileError, setCreateProfileError] = React.useState<string | null>(null);
   const [librarySwitchError, setLibrarySwitchError] = React.useState<string | null>(null);
   const [switchingProfileId, setSwitchingProfileId] = React.useState<string | null>(null);
   const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const basicsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
 
@@ -143,6 +147,21 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
       createButtonRef.current?.focus();
     });
   }, []);
+
+  const closeBasicsPanel = React.useCallback(() => {
+    setBasicsPanelOpen(false);
+    window.requestAnimationFrame(() => {
+      basicsButtonRef.current?.focus();
+    });
+  }, []);
+
+  const openBasicsPanel = React.useCallback(() => {
+    setLaunchError(null);
+    setLibrarySwitchError(null);
+    setSelectedPanelProfileId(null);
+    setPanelSection("summary");
+    setBasicsPanelOpen(true);
+  }, [setPanelSection, setSelectedPanelProfileId]);
 
   const openCreateDialog = React.useCallback(() => {
     setLaunchError(null);
@@ -229,6 +248,48 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     },
     [
       announce,
+      setAvailableRoles,
+      setCwd,
+      setEffectiveState,
+      setPanelSection,
+      setPreviewState,
+      setScopeEntries,
+      setSelectedAuthId,
+      setSelectedPanelProfileId,
+      setSelectedRole,
+      setSelectedScopePath,
+      setValidationState,
+    ]
+  );
+
+  const handleBasicsSaved = React.useCallback(
+    async (selection: { role: string; authProfileId: string; cwd: string }) => {
+      const profileBridge = window.myclaude?.profile;
+      if (!profileBridge?.list || !profileBridge.show) {
+        throw new Error("Profile refresh is unavailable right now.");
+      }
+
+      const [listed, shown] = await Promise.all([
+        profileBridge.list({ cwd: selection.cwd }),
+        profileBridge.show(selection),
+      ]);
+      const nextScopeEntries = normalizeScopeList(listed);
+      const nextRoles = collectRoles(nextScopeEntries);
+
+      setCwd(selection.cwd);
+      setScopeEntries(nextScopeEntries);
+      setAvailableRoles(nextRoles);
+      setSelectedRole(selection.role);
+      setSelectedAuthId(selection.authProfileId);
+      setSelectedScopePath(findScopePathForRole(nextScopeEntries, selection.role));
+      setEffectiveState(normalizeEffectiveState(shown));
+      setValidationState({ status: "idle", issues: [], errorMessage: null });
+      setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
+      writeProfileSelection(window.localStorage, selection);
+      setSelectedPanelProfileId(null);
+      setPanelSection("summary");
+    },
+    [
       setAvailableRoles,
       setCwd,
       setEffectiveState,
@@ -475,6 +536,17 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
                   </Button>
                   <Button
                     className="min-h-10"
+                    data-testid="profile-basics-open"
+                    onClick={openBasicsPanel}
+                    ref={basicsButtonRef}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Customize basics
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    className="min-h-10"
                     data-testid="home-secondary-action"
                     onClick={activeReadinessIssue ? handleFixPath : openProfileWorkspace}
                     type="button"
@@ -540,6 +612,31 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           onSectionChange={setPanelSection}
           open={isPanelOpenForProfile}
           profile={agentProfile}
+        />
+        <ProfileBasicsPanel
+          authProfiles={authProfiles}
+          currentEffective={effectiveState.effective}
+          cwd={cwd}
+          onOpenAdvanced={() => {
+            closeBasicsPanel();
+            openProfileWorkspaceTab("layers");
+          }}
+          onOpenChange={(open) => {
+            if (!open) closeBasicsPanel();
+            else setBasicsPanelOpen(true);
+          }}
+          onOpenClaudeAuth={() => {
+            closeBasicsPanel();
+            openClaudeAuth();
+          }}
+          onPreviewStateChange={setPreviewState}
+          onSaved={handleBasicsSaved}
+          onValidationStateChange={setValidationState}
+          open={basicsPanelOpen}
+          profile={agentProfile}
+          scopeEntries={scopeEntries}
+          selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
+          selectedRole={agentProfile.details.inspectTarget.role ?? ""}
         />
       </div>
       <CreateAgentProfileDialog
@@ -970,11 +1067,20 @@ function formatProfileSwitchError(error: unknown): string {
 }
 
 function findScopePathForRole(
-  entries: ReadonlyArray<{ role: string; path: string }>,
+  entries: ReadonlyArray<{ role: string; path: string; scope?: string; content?: unknown }>,
   role: string
 ): string | null {
   if (!role) return null;
-  return entries.find((entry) => entry.role === role)?.path ?? entries[0]?.path ?? null;
+  return (
+    entries.find((entry) => entry.role === role && entry.scope === "project-role" && entry.content)
+      ?.path ??
+    entries.find((entry) => entry.role === role && entry.scope === "project-role")?.path ??
+    entries.find((entry) => entry.role === role && entry.scope?.includes("role") && entry.content)
+      ?.path ??
+    entries.find((entry) => entry.role === role)?.path ??
+    entries[0]?.path ??
+    null
+  );
 }
 
 function ProfileCreationFact({

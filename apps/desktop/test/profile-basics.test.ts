@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest";
 import {
   buildProfileBasicsPatch,
+  buildProfileBasicsDraftFromRows,
   createProfileBasicsDraft,
+  createSafeProfileBasicsPreviewSummary,
   resolveProfileBasicsTarget,
+  shouldGuardProfileBasicsClose,
   validateProfileBasicsDraft,
+  validateProfileBasicsForm,
 } from "../src/renderer/lib/profile-basics.js";
 import type { AuthProfileOption, ScopeDoc, ScopeListEntry } from "../src/renderer/lib/types.js";
 
@@ -247,5 +251,151 @@ describe("profile basics target and draft contract", () => {
     expect(serializedIssues).not.toContain("ghp_envtoken");
     expect(serializedIssues).not.toContain("keyring://");
     expect(serializedIssues).not.toContain("secretRef");
+  });
+
+  test("validates guided form env rows before save so duplicate keys cannot be hidden by object coercion", () => {
+    const target = resolveProfileBasicsTarget({
+      scopeEntries: [entry()],
+      selectedRole: "backend-api-review",
+    });
+    expect(target.status).toBe("writable");
+    if (target.status !== "writable") throw new Error("expected writable target");
+
+    const draft = createProfileBasicsDraft(target, {
+      role: "backend-api-review",
+      authProfileId: "work",
+      cwd: "/repo/project",
+      displayName: "Backend API Review",
+      purpose: "Review backend API changes before launch",
+    });
+
+    const rowDraft = buildProfileBasicsDraftFromRows(draft, [
+      { id: "one", key: "FEATURE_FLAG", value: "on" },
+      { id: "two", key: "FEATURE_FLAG", value: "off" },
+      { id: "blank", key: "", value: "" },
+    ]);
+    const validation = validateProfileBasicsForm({
+      target,
+      authProfiles: [workAuth],
+      draft,
+      envRows: [
+        { id: "one", key: "FEATURE_FLAG", value: "on" },
+        { id: "two", key: "FEATURE_FLAG", value: "off" },
+      ],
+    });
+
+    expect(rowDraft.draft.env).toEqual({ FEATURE_FLAG: "on" });
+    expect(rowDraft.issues).toContainEqual({
+      field: "env",
+      path: "env.FEATURE_FLAG",
+      message: "Each environment variable name can only appear once.",
+      severity: "error",
+    });
+    expect(validation.ok).toBe(false);
+    expect(validation.issues.map((issue) => issue.message)).toContain(
+      "Each environment variable name can only appear once."
+    );
+  });
+
+  test("guided form blocks empty auth lists, missing selected profiles, and invalid settings JSON", () => {
+    const target = resolveProfileBasicsTarget({
+      scopeEntries: [entry()],
+      selectedRole: "backend-api-review",
+    });
+    expect(target.status).toBe("writable");
+    if (target.status !== "writable") throw new Error("expected writable target");
+
+    const draft = createProfileBasicsDraft(target, {
+      role: "backend-api-review",
+      authProfileId: "work",
+      cwd: "/repo/project",
+      displayName: "Backend API Review",
+      purpose: "Review backend API changes before launch",
+    });
+
+    const emptyAuth = validateProfileBasicsForm({
+      target,
+      authProfiles: [],
+      draft,
+      envRows: [],
+    });
+    const missingSelectedProfile = validateProfileBasicsForm({
+      target: resolveProfileBasicsTarget({ scopeEntries: [entry()], selectedRole: "" }),
+      authProfiles: [workAuth],
+      draft,
+      envRows: [],
+    });
+    const invalidJson = validateProfileBasicsForm({
+      target,
+      authProfiles: [workAuth],
+      draft: { ...draft, settingsJson: "{not json" },
+      envRows: [],
+    });
+
+    expect(emptyAuth.ok).toBe(false);
+    expect(emptyAuth.issues.map((issue) => issue.field)).toContain("authProfileId");
+    expect(missingSelectedProfile.ok).toBe(false);
+    expect(missingSelectedProfile.issues).toContainEqual({
+      field: "target",
+      path: "target",
+      message: "Choose an Agent Profile before editing basics.",
+      severity: "error",
+    });
+    expect(invalidJson.ok).toBe(false);
+    expect(invalidJson.issues).toContainEqual({
+      field: "settings",
+      path: "settings",
+      message: "Settings must be valid JSON.",
+      severity: "error",
+    });
+  });
+
+  test("safe preview summaries report impact without token-like values, secret refs, or raw scope paths", () => {
+    const before = scopeDoc({
+      auth: { profileId: "work" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-before",
+        FEATURE_FLAG: "off",
+      },
+      settings: {
+        model: "claude-opus",
+        secretRef: "keyring://anthropic/work",
+      },
+    });
+    const after = scopeDoc({
+      auth: { profileId: "personal" },
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-after",
+        FEATURE_FLAG: "on",
+      },
+      settings: {
+        model: "claude-sonnet",
+      },
+    });
+
+    const summary = createSafeProfileBasicsPreviewSummary(before, after);
+    expect(summary).toEqual(
+      expect.arrayContaining([
+        { section: "identity", key: "Claude identity", change: "changed" },
+        { section: "environment", key: "environment variable", change: "changed" },
+        { section: "environment", key: "FEATURE_FLAG", change: "changed" },
+        { section: "settings", key: "model", change: "changed" },
+        { section: "settings", key: "advanced setting", change: "removed" },
+      ])
+    );
+
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain("sk-ant-before");
+    expect(serialized).not.toContain("sk-ant-after");
+    expect(serialized).not.toContain("keyring://");
+    expect(serialized).not.toContain("secretRef");
+    expect(serialized).not.toContain(".myclaude");
+    expect(serialized).not.toContain("project-role");
+  });
+
+  test("dirty close guard only prompts for unsaved editable Basics state", () => {
+    expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: false })).toBe(true);
+    expect(shouldGuardProfileBasicsClose({ isDirty: false, isSaving: false })).toBe(false);
+    expect(shouldGuardProfileBasicsClose({ isDirty: true, isSaving: true })).toBe(false);
   });
 });
