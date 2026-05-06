@@ -1,6 +1,12 @@
 import { createId, sortedUnion, stableStringify } from "./clone.js";
 import { getErrorMessage } from "./normalize.js";
-import type { ScopeDoc, ScopeDocPersona, ScopeDocServerEntry, ScopeListEntry, TransportType } from "./types.js";
+import type {
+  ScopeDoc,
+  ScopeDocPersona,
+  ScopeDocServerEntry,
+  ScopeListEntry,
+  TransportType,
+} from "./types.js";
 
 export interface ResolveProfileMcpToolsTargetInput {
   scopeEntries: readonly ScopeListEntry[];
@@ -135,7 +141,8 @@ export function resolveProfileMcpToolsTarget({
     return {
       status: "invalid",
       role,
-      message: "Selected Agent Profile tools could not be prepared. Refresh the profile and try again.",
+      message:
+        "Selected Agent Profile tools could not be prepared. Refresh the profile and try again.",
     };
   }
 
@@ -177,14 +184,16 @@ export function createDefaultProfileMcpToolDraft(
   };
 }
 
-export function createGitHubProfileMcpToolDraft(input: {
-  id?: string;
-  name?: string;
-  url?: string;
-  secretName?: string;
-} = {}): ProfileMcpToolDraft {
+export function createGitHubProfileMcpToolDraft(
+  input: {
+    id?: string;
+    name?: string;
+    url?: string;
+    secretName?: string;
+  } = {}
+): ProfileMcpToolDraft {
   return createDefaultProfileMcpToolDraft({
-    id: input.id,
+    ...(input.id !== undefined ? { id: input.id } : {}),
     name: input.name ?? "github",
     transport: "http",
     commandOrUrl: input.url ?? "https://api.githubcopilot.com/mcp/",
@@ -204,7 +213,12 @@ export function validateProfileMcpToolsForm(input: {
 }): ProfileMcpToolsFormValidationResult {
   const issues: ProfileMcpToolsValidationIssue[] = [];
   if (input.target.status !== "writable") {
-    issues.push({ field: "target", path: "target", message: input.target.message, severity: "error" });
+    issues.push({
+      field: "target",
+      path: "target",
+      message: input.target.message,
+      severity: "error",
+    });
   }
 
   const values: ProfileMcpToolsResolvedTool[] = [];
@@ -307,7 +321,9 @@ export function buildProfileMcpToolsPatch(input: {
       ok: false,
       path: null,
       content: null,
-      issues: [{ field: "target", path: "target", message: input.target.message, severity: "error" }],
+      issues: [
+        { field: "target", path: "target", message: input.target.message, severity: "error" },
+      ],
     };
   }
 
@@ -329,8 +345,8 @@ export function createSafeProfileMcpToolsPreviewSummary(
   if (!before || !after) return [];
   const items: ProfileMcpToolsPreviewSummaryItem[] = [];
   for (const name of sortedUnion(Object.keys(before.mcpServers), Object.keys(after.mcpServers))) {
-    const beforeServer = before.mcpServers[name];
-    const afterServer = after.mcpServers[name];
+    const beforeServer = before.mcpServers[name] ?? null;
+    const afterServer = after.mcpServers[name] ?? null;
     if (!beforeServer && !afterServer) continue;
     if (stableStringify(beforeServer) === stableStringify(afterServer)) continue;
     const server = afterServer ?? beforeServer;
@@ -338,20 +354,27 @@ export function createSafeProfileMcpToolsPreviewSummary(
       change: !beforeServer ? "added" : !afterServer ? "removed" : "changed",
       name: safeServerName(name),
       transport: server ? inferTransport(server) : "MCP",
-      detail: formatSafeToolDetail(!beforeServer ? "added" : !afterServer ? "removed" : "changed", server),
+      detail: formatSafeToolDetail(
+        !beforeServer ? "added" : !afterServer ? "removed" : "changed",
+        server
+      ),
     });
   }
   return items;
 }
 
-export function shouldGuardProfileMcpToolsClose(input: { isDirty: boolean; isSaving: boolean }): boolean {
+export function shouldGuardProfileMcpToolsClose(input: {
+  isDirty: boolean;
+  isSaving: boolean;
+}): boolean {
   return input.isDirty && !input.isSaving;
 }
 
 export function formatProfileMcpToolsBridgeError(error: unknown, fallback: string): string {
   const message = getErrorMessage(error);
   if (containsUnsafeDiagnosticText(message)) return fallback;
-  if (/mcp|tool|server/i.test(message)) return "Profile Tools could not be checked. Review the fields and try again.";
+  if (/mcp|tool|server/i.test(message))
+    return "Profile Tools could not be checked. Review the fields and try again.";
   return fallback;
 }
 
@@ -369,7 +392,10 @@ function createDraftFromServer(
     originalName: name,
     name: safeServerName(name),
     transport,
-    commandOrUrl: transport === "stdio" ? sanitizeVisibleValue(server.command) : sanitizeVisibleValue(server.url),
+    commandOrUrl:
+      transport === "stdio"
+        ? sanitizeVisibleValue(server.command)
+        : sanitizeVisibleValue(server.url),
     argsText: (server.args ?? []).filter((arg) => !containsUnsafeDiagnosticText(arg)).join("\n"),
     envRows: envProjection.rows,
     headerRows: headerProjection.rows,
@@ -411,7 +437,10 @@ function normalizeSecretRows(
       issues.push({
         field,
         path: toolPath(tool, field),
-        message: field === "env" ? "Use safe MCP environment variable names." : "Use safe MCP header names.",
+        message:
+          field === "env"
+            ? "Use safe MCP environment variable names."
+            : "Use safe MCP header names.",
         severity: "error",
       });
       continue;
@@ -420,7 +449,10 @@ function normalizeSecretRows(
       issues.push({
         field,
         path: toolPath(tool, field),
-        message: field === "env" ? "Each MCP environment name can only appear once." : "Each MCP header name can only appear once.",
+        message:
+          field === "env"
+            ? "Each MCP environment name can only appear once."
+            : "Each MCP header name can only appear once.",
         severity: "error",
       });
       continue;
@@ -430,12 +462,16 @@ function normalizeSecretRows(
       issues.push({
         field,
         path: toolPath(tool, field),
-        message: "Use a logical secret name such as github.pat instead of a raw token or keyring URI.",
+        message:
+          "Use a logical secret name such as github.pat instead of a raw token or keyring URI.",
         severity: "error",
       });
       continue;
     }
-    next[key] = key.toLowerCase() === "authorization" ? `Bearer ${secretRef(secretName)}` : secretRef(secretName);
+    next[key] =
+      key.toLowerCase() === "authorization"
+        ? `Bearer ${secretRef(secretName)}`
+        : secretRef(secretName);
   }
   return next;
 }
@@ -518,7 +554,9 @@ function extractSecretName(value: unknown): string | null {
 }
 
 function isSafeLogicalSecretName(value: string): boolean {
-  return SECRET_NAME_RE.test(value) && !value.includes("//") && !containsUnsafeDiagnosticText(value);
+  return (
+    SECRET_NAME_RE.test(value) && !value.includes("//") && !containsUnsafeDiagnosticText(value)
+  );
 }
 
 function secretRef(name: string): string {
@@ -526,7 +564,8 @@ function secretRef(name: string): string {
 }
 
 function inferTransport(entry: ScopeDocServerEntry): TransportType {
-  if (entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse") return entry.type;
+  if (entry.type === "http" || entry.type === "streamable-http" || entry.type === "sse")
+    return entry.type;
   if (typeof entry.url === "string" && entry.url.length > 0) return "http";
   return "stdio";
 }
@@ -542,7 +581,9 @@ function formatSafeToolDetail(
   const parts: string[] = [];
   if (headerCount > 0) parts.push(`${headerCount} header secret${headerCount === 1 ? "" : "s"}`);
   if (envCount > 0) parts.push(`${envCount} env secret${envCount === 1 ? "" : "s"}`);
-  return parts.length > 0 ? `${prefix} ${parts.join(" and ")}` : `${prefix} ${inferTransport(server)} tool`;
+  return parts.length > 0
+    ? `${prefix} ${parts.join(" and ")}`
+    : `${prefix} ${inferTransport(server)} tool`;
 }
 
 function safeServerName(value: string): string {

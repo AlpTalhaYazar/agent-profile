@@ -16,67 +16,68 @@ import {
   ArrowRight,
   FolderOpen,
   KeyRound,
+  type LucideIcon,
   Plus,
   Rocket,
   Sparkles,
-  type LucideIcon,
   Wrench,
 } from "lucide-react";
 import * as React from "react";
+import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
+import { useAnnounce } from "../components/live-announcer.js";
+import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
+import { ProfileMcpToolsPanel } from "../components/profile-mcp-tools-panel.js";
+import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
+import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
 import {
+  type AgentProfileLibraryItem,
+  agentProfileLibraryAtom,
+  agentProfileViewModelAtom,
+} from "../lib/agent-profile-view-model.js";
+import {
+  type ProfileWorkspaceTab,
   activeTerminalSessionIdAtom,
   agentProfilePanelSectionAtom,
   authProfilesAtom,
+  authVaultFocusRequestAtom,
   availableRolesAtom,
+  currentScreenAtom,
   cwdAtom,
   effectiveStateAtom,
   previewStateAtom,
+  profileWorkspaceTabAtom,
   scopeEntriesAtom,
+  selectedAgentProfilePanelIdAtom,
   selectedAuthIdAtom,
   selectedRoleAtom,
   selectedScopePathAtom,
   validationStateAtom,
-  currentScreenAtom,
-  type ProfileWorkspaceTab,
-  profileWorkspaceTabAtom,
-  selectedAgentProfilePanelIdAtom,
 } from "../lib/atoms.js";
-import {
-  agentProfileLibraryAtom,
-  agentProfileViewModelAtom,
-  type AgentProfileLibraryItem,
-} from "../lib/agent-profile-view-model.js";
-import {
-  formatProfileBasicsBridgeError,
-  resolveProfileBasicsReloadSelection,
-  resolveProfileBasicsReloadState,
-} from "../lib/profile-basics.js";
-import {
-  buildProfileCreateScopePayload,
-  buildProfileSelection,
-  deriveProfileRoleSlug,
-  formatProfileCreateError,
-  validateProfileCreationDraft,
-  writeProfileSelection,
-  type ProfileCreationDraft,
-  type ProfileCreationField,
-  type ProfileCreationResolvedDraft,
-  type ProfileCreationValidationIssue,
-} from "../lib/profile-creation.js";
 import {
   collectRoles,
   getErrorMessage,
   normalizeEffectiveState,
   normalizeScopeList,
 } from "../lib/normalize.js";
-import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js";
-import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
-import { ProfileMcpToolsPanel } from "../components/profile-mcp-tools-panel.js";
-import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
-import { useAnnounce } from "../components/live-announcer.js";
-import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
-import type { AuthProfileOption } from "../lib/types.js";
+import {
+  formatProfileBasicsBridgeError,
+  resolveProfileBasicsReloadSelection,
+  resolveProfileBasicsReloadState,
+} from "../lib/profile-basics.js";
+import {
+  type ProfileCreationDraft,
+  type ProfileCreationField,
+  type ProfileCreationResolvedDraft,
+  type ProfileCreationValidationIssue,
+  buildProfileCreateScopePayload,
+  buildProfileSelection,
+  deriveProfileRoleSlug,
+  formatProfileCreateError,
+  validateProfileCreationDraft,
+  writeProfileSelection,
+} from "../lib/profile-creation.js";
 import { useProfileDraftNavigationGuard } from "../lib/profile-draft-guard.js";
+import type { AuthProfileOption } from "../lib/types.js";
 
 export function AgentProfilesHomeScreen(): React.ReactElement {
   const agentProfile = useAtomValue(agentProfileViewModelAtom);
@@ -91,6 +92,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   );
   const [panelSection, setPanelSection] = useAtom(agentProfilePanelSectionAtom);
   const setActiveTerminalSessionId = useSetAtom(activeTerminalSessionIdAtom);
+  const setAuthVaultFocusRequest = useSetAtom(authVaultFocusRequestAtom);
   const setCurrentScreen = useSetAtom(currentScreenAtom);
   const setProfileWorkspaceTab = useSetAtom(profileWorkspaceTabAtom);
   const setScopeEntries = useSetAtom(scopeEntriesAtom);
@@ -213,6 +215,51 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const openClaudeAuth = React.useCallback(() => {
     draftGuard.request(goToClaudeAuth);
   }, [draftGuard, goToClaudeAuth]);
+
+  const requestToolSecretRepair = React.useCallback(
+    (secretName: string) => {
+      const profileId = agentProfile.auth.profileId?.trim() ?? "";
+      const logicalName = secretName.trim();
+      setLaunchError(null);
+      setLibrarySwitchError(null);
+
+      if (!profileId) {
+        announce("Choose a Claude identity before repairing tool secrets.");
+        openClaudeAuth();
+        return;
+      }
+
+      if (!logicalName) {
+        announce("Choose a valid logical tool secret before repairing in Auth.");
+        openClaudeAuth();
+        return;
+      }
+
+      draftGuard.request(() => {
+        setAuthVaultFocusRequest({
+          profileId,
+          secretName: logicalName,
+          source: "profile-tools-repair",
+          nonce: Date.now(),
+        });
+        setSelectedAuthId(profileId);
+        setSelectedPanelProfileId(null);
+        setPanelSection("summary");
+        setCurrentScreen("auth-vault");
+      });
+    },
+    [
+      agentProfile.auth.profileId,
+      announce,
+      draftGuard,
+      openClaudeAuth,
+      setAuthVaultFocusRequest,
+      setCurrentScreen,
+      setPanelSection,
+      setSelectedAuthId,
+      setSelectedPanelProfileId,
+    ]
+  );
 
   const handleFixPath = React.useCallback(() => {
     setLaunchError(null);
@@ -697,6 +744,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           onOpenClaudeAuth={openClaudeAuth}
           onOpenProfileTools={openToolsPanel}
           onOpenProfileWorkspace={openProfileWorkspaceTab}
+          onRepairToolSecret={requestToolSecretRepair}
           onSectionChange={setPanelSection}
           open={isPanelOpenForProfile}
           profile={agentProfile}
@@ -733,6 +781,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
             else setToolsPanelOpen(true);
           }}
           onPreviewStateChange={setPreviewState}
+          onRepairMissingSecret={requestToolSecretRepair}
           onSaved={handleBasicsSaved}
           onValidationStateChange={setValidationState}
           open={toolsPanelOpen}

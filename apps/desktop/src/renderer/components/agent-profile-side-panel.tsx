@@ -9,9 +9,9 @@ import {
   KeyRound,
   Layers3,
   ListChecks,
+  type LucideIcon,
   Settings2,
   Sparkles,
-  type LucideIcon,
   Wrench,
   X,
 } from "lucide-react";
@@ -29,6 +29,7 @@ interface AgentProfileSidePanelProps {
   onOpenClaudeAuth: () => void;
   onOpenProfileTools: () => void;
   onOpenProfileWorkspace: (tab: ProfileWorkspaceTab) => void;
+  onRepairToolSecret: (secretName: string) => void;
   onSectionChange: (section: AgentProfilePanelSection) => void;
   open: boolean;
   profile: AgentProfileViewModel;
@@ -51,6 +52,7 @@ export function AgentProfileSidePanel({
   onOpenClaudeAuth,
   onOpenProfileTools,
   onOpenProfileWorkspace,
+  onRepairToolSecret,
   onSectionChange,
   open,
   profile,
@@ -222,6 +224,7 @@ export function AgentProfileSidePanel({
             <ToolsSection
               onOpenProfileTools={onOpenProfileTools}
               onOpenProfileWorkspace={onOpenProfileWorkspace}
+              onRepairToolSecret={onRepairToolSecret}
               profile={profile}
             />
           ) : null}
@@ -340,15 +343,18 @@ function IdentitySection({
 function ToolsSection({
   onOpenProfileTools,
   onOpenProfileWorkspace,
+  onRepairToolSecret,
   profile,
 }: {
   onOpenProfileTools: () => void;
   onOpenProfileWorkspace: (tab: ProfileWorkspaceTab) => void;
+  onRepairToolSecret: (secretName: string) => void;
   profile: AgentProfileViewModel;
 }): React.ReactElement {
   const tools = profile.capabilities.tools;
   const hasReferencedSecrets = tools.secretStatuses.length > 0;
   const hasMissingSecrets = tools.missingSecretNames.length > 0;
+  const authRepairAvailable = Boolean(profile.auth.profileId && hasAuthSetSecretBridge());
 
   return (
     <section className="grid gap-4" data-testid="agent-profile-panel-tools">
@@ -394,15 +400,38 @@ function ToolsSection({
                 key={status.name}
               >
                 <span className="truncate font-medium text-primary">{status.name}</span>
-                <StatusChip tone={status.state === "present" ? "success" : "warning"}>
-                  {status.state === "present" ? "Present" : "Missing"}
-                </StatusChip>
+                <span className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <StatusChip tone={status.state === "present" ? "success" : "warning"}>
+                    {status.state === "present" ? "Present" : "Missing"}
+                  </StatusChip>
+                  {status.state === "missing" ? (
+                    <Button
+                      data-testid={`agent-profile-tool-secret-repair-${toSafeTestId(status.name)}`}
+                      disabled={!authRepairAvailable}
+                      onClick={() => onRepairToolSecret(status.name)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Repair in Auth
+                    </Button>
+                  ) : null}
+                </span>
               </li>
             ))}
           </ul>
         ) : (
           <p className="mt-2 text-sm text-secondary">No MCP secret references detected.</p>
         )}
+        {hasMissingSecrets && !authRepairAvailable ? (
+          <p
+            className="mt-3 rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning"
+            data-testid="agent-profile-tool-secret-repair-unavailable"
+          >
+            Auth support is unavailable for this profile. Open Claude Auth when the bridge is
+            available to add or update the missing tool secret.
+          </p>
+        ) : null}
       </section>
 
       <div className="grid gap-2">
@@ -583,6 +612,19 @@ function getReadinessLabel(status: string, fallback: string): string {
   if (status === "ready") return "Ready to launch";
   if (status === "warning") return "Ready with review";
   return fallback;
+}
+
+function hasAuthSetSecretBridge(): boolean {
+  return typeof window !== "undefined" && typeof window.myclaude?.auth?.setSecret === "function";
+}
+
+function toSafeTestId(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "secret"
+  );
 }
 
 function mapReadinessTone(tone: string): "neutral" | "success" | "warning" | "danger" | "info" {

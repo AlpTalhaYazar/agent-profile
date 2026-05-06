@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@agent-profile/ui";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { KeyRound, Plus, RefreshCw, RotateCw, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import * as React from "react";
 import type { AuthMode, OAuthMeta, SecretBackedAuthMode } from "../../shared/bridge.js";
@@ -48,6 +49,21 @@ import {
   ScreenHeader,
   ScreenSurface,
 } from "../components/screen-ui.js";
+import {
+  authProfilesAtom,
+  authVaultFocusRequestAtom,
+  cwdAtom,
+  effectiveStateAtom,
+  previewStateAtom,
+  selectedAuthIdAtom,
+  selectedRoleAtom,
+  validationStateAtom,
+} from "../lib/atoms.js";
+import {
+  getErrorMessage,
+  normalizeAuthProfiles,
+  normalizeEffectiveState,
+} from "../lib/normalize.js";
 import { type RovingItemProps, useRovingTabIndex } from "../lib/use-roving-tab-index.js";
 
 interface AuthProfileView {
@@ -70,6 +86,15 @@ const AUTH_MODES = [
 ] as const;
 
 const DETECTED_ROW_ID = "claude-code-detected";
+const LOGICAL_TOOL_SECRET_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
+
+function isSafeLogicalToolSecretName(value: string): boolean {
+  return LOGICAL_TOOL_SECRET_NAME_RE.test(value) && !value.includes("//");
+}
+
+function normalizeLogicalToolSecretName(value: string): string {
+  return value.trim();
+}
 
 function normalizeAuthList(input: unknown): AuthProfileView[] {
   if (input === null || typeof input !== "object") return [];
@@ -139,6 +164,15 @@ function getAuthBridge(): (AuthBridge & AuthBridgeExtras) | undefined {
   return window.myclaude?.auth as (AuthBridge & AuthBridgeExtras) | undefined;
 }
 
+const UNSAFE_AUTH_ERROR_TEXT_RE =
+  /keyring:\/\/|\$\{secret:|bearer\s+\S+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-ant-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+/i;
+
+function formatSafeAuthError(error: unknown, fallback: string): string {
+  const message = getErrorMessage(error);
+  if (!message || UNSAFE_AUTH_ERROR_TEXT_RE.test(message)) return fallback;
+  return message;
+}
+
 export function AuthVaultScreen(): React.ReactElement {
   const [profiles, setProfiles] = React.useState<AuthProfileView[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -146,6 +180,14 @@ export function AuthVaultScreen(): React.ReactElement {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const announce = useAnnounce();
+  const [focusRequest, setFocusRequest] = useAtom(authVaultFocusRequestAtom);
+  const selectedAgentAuthId = useAtomValue(selectedAuthIdAtom);
+  const selectedRole = useAtomValue(selectedRoleAtom);
+  const cwd = useAtomValue(cwdAtom);
+  const setGlobalAuthProfiles = useSetAtom(authProfilesAtom);
+  const setEffectiveState = useSetAtom(effectiveStateAtom);
+  const setPreviewState = useSetAtom(previewStateAtom);
+  const setValidationState = useSetAtom(validationStateAtom);
 
   const reload = React.useCallback(async () => {
     const bridge = window.myclaude?.auth;
@@ -158,6 +200,7 @@ export function AuthVaultScreen(): React.ReactElement {
     try {
       const list = await bridge.list();
       const next = normalizeAuthList(list);
+      setGlobalAuthProfiles(normalizeAuthProfiles(list));
 
       try {
         const detectResult = await getOAuthBridge()?.detect?.();
@@ -208,7 +251,20 @@ export function AuthVaultScreen(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [selectedId]);
+  }, [selectedId, setGlobalAuthProfiles]);
+
+  const refreshSelectedAgentProfile = React.useCallback(
+    async (profileId: string) => {
+      if (selectedAgentAuthId !== profileId || !selectedRole || !cwd) return;
+      const profileBridge = window.myclaude?.profile;
+      if (!profileBridge?.show) return;
+      const shown = await profileBridge.show({ role: selectedRole, authProfileId: profileId, cwd });
+      setEffectiveState(normalizeEffectiveState(shown));
+      setValidationState({ status: "idle", issues: [], errorMessage: null });
+      setPreviewState({ status: "idle", effective: null, diff: [], errorMessage: null });
+    },
+    [cwd, selectedAgentAuthId, selectedRole, setEffectiveState, setPreviewState, setValidationState]
+  );
 
   React.useEffect(() => {
     void reload();
@@ -248,11 +304,61 @@ export function AuthVaultScreen(): React.ReactElement {
   // Modal control
   const [addProfileOpen, setAddProfileOpen] = React.useState(false);
   const [addSecretOpen, setAddSecretOpen] = React.useState(false);
+  const [addSecretTargetProfileId, setAddSecretTargetProfileId] = React.useState<string | null>(
+    null
+  );
+  const [addSecretInitialName, setAddSecretInitialName] = React.useState("");
   const [rotateOpen, setRotateOpen] = React.useState(false);
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [renameTarget, setRenameTarget] = React.useState<AuthProfileView | null>(null);
   const [adoptingId, setAdoptingId] = React.useState<string | null>(null);
   const [editingSecret, setEditingSecret] = React.useState<string | null>(null);
+
+  const openAddSecretForProfile = React.useCallback((profileId: string, initialName = "") => {
+    setAddSecretTargetProfileId(profileId);
+    setAddSecretInitialName(initialName);
+    setAddSecretOpen(true);
+  }, []);
+
+  const closeAddSecretDialog = React.useCallback((open: boolean) => {
+    setAddSecretOpen(open);
+    if (!open) {
+      setAddSecretTargetProfileId(null);
+      setAddSecretInitialName("");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!focusRequest || loading) return;
+    const requestedName = normalizeLogicalToolSecretName(focusRequest.secretName ?? "");
+    if (!requestedName || !isSafeLogicalToolSecretName(requestedName)) {
+      setError("That tool secret name is not supported. Use a logical name such as github.pat.");
+      setFocusRequest(null);
+      announce("Tool secret repair needs a valid logical name");
+      return;
+    }
+
+    const requestedProfile = profiles.find((profile) => profile.id === focusRequest.profileId);
+    if (!requestedProfile || requestedProfile.detected) {
+      setSelectedId(profiles.find((profile) => !profile.detected)?.id ?? profiles[0]?.id ?? null);
+      setError(
+        "Selected Claude identity is no longer available. Refresh Agent Profiles and choose an identity before repairing this tool secret."
+      );
+      setFocusRequest(null);
+      announce("Tool secret repair needs an available Claude identity");
+      return;
+    }
+
+    setSelectedId(requestedProfile.id);
+    openAddSecretForProfile(requestedProfile.id, requestedName);
+    setError(null);
+    setFocusRequest(null);
+    announce(`Auth repair opened for ${requestedName}`);
+  }, [announce, focusRequest, loading, openAddSecretForProfile, profiles, setFocusRequest]);
+
+  const addSecretTarget = addSecretTargetProfileId
+    ? (profiles.find((profile) => profile.id === addSecretTargetProfileId) ?? null)
+    : selected;
 
   return (
     <ScreenSurface aria-busy={loading || busy}>
@@ -431,7 +537,7 @@ export function AuthVaultScreen(): React.ReactElement {
                       <Button
                         aria-label="Add or update MCP secret"
                         disabled={busy || selectedIsDetected}
-                        onClick={() => setAddSecretOpen(true)}
+                        onClick={() => openAddSecretForProfile(selected.id)}
                         size="sm"
                         type="button"
                         variant="secondary"
@@ -506,28 +612,39 @@ export function AuthVaultScreen(): React.ReactElement {
         }}
       />
 
-      {selected !== null ? (
+      {addSecretTarget !== null ? (
         <SetSecretDialog
-          key={`add-${selected.id}`}
+          key={`add-${addSecretTarget.id}-${addSecretInitialName}`}
           open={addSecretOpen}
-          onOpenChange={setAddSecretOpen}
-          profileId={selected.id}
+          onOpenChange={closeAddSecretDialog}
+          profileId={addSecretTarget.id}
           mode="add"
           busy={busy}
+          initialName={addSecretInitialName}
           onSubmit={async ({ name, value }) => {
             setBusy(true);
             try {
-              await window.myclaude?.auth?.setSecret({
-                profileId: selected.id,
+              const auth = window.myclaude?.auth;
+              if (!auth?.setSecret) throw new Error("Auth bridge unavailable");
+              await auth.setSecret({
+                profileId: addSecretTarget.id,
                 name,
                 value,
                 register: true,
               });
               await reload();
-              setAddSecretOpen(false);
-              announce("Secret added");
+              await refreshSelectedAgentProfile(addSecretTarget.id);
+              closeAddSecretDialog(false);
+              setError(null);
+              announce("Tool secret saved");
             } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
+              setError(
+                formatSafeAuthError(
+                  err,
+                  "Tool secret could not be saved. Try again from Auth support."
+                )
+              );
+              announce("Tool secret save failed");
             } finally {
               setBusy(false);
             }
@@ -628,17 +745,27 @@ export function AuthVaultScreen(): React.ReactElement {
           onSubmit={async ({ value }) => {
             setBusy(true);
             try {
-              await window.myclaude?.auth?.setSecret({
+              const auth = window.myclaude?.auth;
+              if (!auth?.setSecret) throw new Error("Auth bridge unavailable");
+              await auth.setSecret({
                 profileId: selected.id,
                 name: editingSecret,
                 value,
                 register: true,
               });
               await reload();
+              await refreshSelectedAgentProfile(selected.id);
               setEditingSecret(null);
-              announce("Secret updated");
+              setError(null);
+              announce("Tool secret updated");
             } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
+              setError(
+                formatSafeAuthError(
+                  err,
+                  "Tool secret could not be updated. Try again from Auth support."
+                )
+              );
+              announce("Tool secret update failed");
             } finally {
               setBusy(false);
             }
@@ -1033,6 +1160,7 @@ interface SetSecretDialogProps {
   profileId: string;
   mode: "add" | "rotate";
   busy: boolean;
+  initialName?: string;
   onSubmit: (input: { name: string; value: string }) => Promise<void>;
 }
 
@@ -1042,18 +1170,30 @@ function SetSecretDialog({
   profileId,
   mode,
   busy,
+  initialName = "",
   onSubmit,
 }: SetSecretDialogProps): React.ReactElement {
-  const [name, setName] = React.useState(mode === "rotate" ? "anthropic" : "");
+  const defaultName = mode === "rotate" ? "anthropic" : initialName;
+  const [name, setName] = React.useState(defaultName);
   const [value, setValue] = React.useState("");
+  const [nameError, setNameError] = React.useState<string | null>(null);
+  const nameId = React.useId();
+  const valueId = React.useId();
 
   React.useEffect(() => {
-    if (!open) {
-      setName(mode === "rotate" ? "anthropic" : "");
+    if (open) {
+      setName(mode === "rotate" ? "anthropic" : initialName);
       setValue("");
+      setNameError(null);
+      return;
     }
-  }, [open, mode]);
+    setName(mode === "rotate" ? "anthropic" : initialName);
+    setValue("");
+    setNameError(null);
+  }, [open, mode, initialName]);
 
+  const normalizedName = normalizeLogicalToolSecretName(name);
+  const nameIsSafe = mode === "rotate" || isSafeLogicalToolSecretName(normalizedName);
   const canSubmit = name.length > 0 && value.length > 0 && !busy;
   const title =
     mode === "rotate" ? `Rotate Claude key for "${profileId}"` : `Add secret to "${profileId}"`;
@@ -1071,12 +1211,28 @@ function SetSecretDialog({
         </DialogHeader>
         <div className="grid gap-3">
           {mode === "add" ? (
-            <Field label="Secret name" description="Logical key — e.g. github.pat, postgres.acme">
-              <Input value={name} onChange={(ev) => setName(ev.target.value)} autoFocus />
+            <Field
+              {...(nameError ? { error: nameError } : {})}
+              htmlFor={nameId}
+              label="Secret name"
+              description="Logical key — e.g. github.pat, postgres.acme"
+            >
+              <Input
+                data-testid="auth-secret-name-input"
+                id={nameId}
+                value={name}
+                onChange={(ev) => {
+                  setName(ev.target.value);
+                  setNameError(null);
+                }}
+                autoFocus
+              />
             </Field>
           ) : null}
-          <Field label="Secret value">
+          <Field htmlFor={valueId} label="Secret value">
             <PasswordInput
+              data-testid="auth-secret-value-input"
+              id={valueId}
               value={value}
               onChange={(ev) => setValue(ev.target.value)}
               autoFocus={mode === "rotate"}
@@ -1092,7 +1248,13 @@ function SetSecretDialog({
             variant={mode === "rotate" ? "danger" : "primary"}
             disabled={!canSubmit}
             onClick={() => {
-              const submitted = { name, value };
+              if (!nameIsSafe) {
+                setNameError(
+                  "Use a logical secret name such as github.pat. Do not paste refs or values."
+                );
+                return;
+              }
+              const submitted = { name: normalizedName, value };
               setValue("");
               void onSubmit(submitted);
             }}

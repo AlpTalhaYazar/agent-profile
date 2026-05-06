@@ -99,7 +99,15 @@ export type ProfileWorkspaceTab = "overview" | "layers" | "debug";
 export type ProfileDebugTab = "provenance" | "persona";
 export type AgentProfilePanelSection = "summary" | "identity" | "tools" | "skills" | "inspect";
 
+export interface AuthVaultFocusRequest {
+  profileId: string;
+  secretName?: string;
+  source: "profile-tools-repair";
+  nonce: number;
+}
+
 export const currentScreenAtom = atom<AppScreen>("home");
+export const authVaultFocusRequestAtom = atom<AuthVaultFocusRequest | null>(null);
 export const profileWorkspaceTabAtom = atom<ProfileWorkspaceTab>("overview");
 export const profileDebugTabAtom = atom<ProfileDebugTab>("provenance");
 export const selectedAgentProfilePanelIdAtom = atom<string | null>(null);
