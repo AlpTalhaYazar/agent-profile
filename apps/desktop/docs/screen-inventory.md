@@ -14,6 +14,7 @@
 - First-run wizard remains a modal startup flow for empty installs and lands on Agent Profiles after setup completion.
 - Agent Profile library is the Agent Profiles home list of durable role-backed profiles. It shows purpose-first identity metadata, deterministic legacy fallbacks, selected-state marker, Claude identity/workspace chips, and safe capability summaries. Library switching updates the selected context and reload persistence; missing or stale identities render safe explanations instead of raw config details.
 - Agent Profile side panel is the selected-profile detail model from Agent Profiles: Summary, Identity, Tools/MCP, Skills/Persona, Inspect. It preserves focus, Escape close, 40px+ primary targets, and reduced-motion-safe transitions.
+- Guided Profile Basics is the selected-profile editing surface from Agent Profiles. It exposes `profile-basics-open`, `profile-basics-panel`, `profile-basics-preview`, `profile-basics-save`, `profile-basics-cancel`, and `profile-basics-error` for automation while keeping raw Layers secondary.
 - Side panel Summary is the default detail state and shows readiness, identity, workspace, safe capability counts, and one calm blocker/warning when the profile needs attention.
 - Side panel Identity explains the Claude identity/readiness relationship and links to Claude Auth for credential fixes.
 - Side panel Tools/MCP shows safe MCP server names, logical secret names, present/missing status, and validation counts without raw values or refs.
@@ -27,8 +28,10 @@
 
 - Agent Profiles is the default shell screen and consumes the safe `AgentProfileViewModel` summary/readiness/launch contract, including calm blockers/warnings and fix targets.
 - Agent Profiles library consumes the safe profile identity projection over loaded scope/auth data. It never exposes raw scope labels, scope file paths, keyring refs, raw secret expressions, MCP headers/env values, OAuth internals, or raw effective config on the default surface.
+- Guided Profile Basics consumes the selected profile's writable project-owned target and the selected identity/workspace context. It saves display name, purpose, Claude identity, environment, and settings through the existing profile save bridge, then refreshes the selected card and library without adding a separate profile store.
+- Guided Profile Basics dirty drafts participate in the same shell-level guard as Profile Workspace drafts, so sidebar navigation, command palette moves, launch, and library switching require Save, Discard, or Cancel before continuing.
 - Agent Profile side panel uses the opaque `AgentProfileViewModel.id` as its selection/reset boundary.
-- Profile Workspace owns the selected `role`, `authProfileId`, and `cwd` configuration controls for now, with dirty layer changes guarded by Save / Discard / Cancel before those contexts can change.
+- Profile Workspace owns advanced configuration controls and raw layer editing. Guided Profile Basics owns the default profile-name, purpose, identity, workspace, env-row, and settings JSON flow for the selected Agent Profile while delegating unavailable targets back to Profile Workspace.
 - Profile Workspace still owns creation of writable scope layers and the top-level add flows for MCP servers and installed skills until later M001 slices relocate those edit flows into profile-owned detail.
 - Claude Auth feeds available credential profiles into Agent Profiles readiness, Agent Profile side panel identity summary, and Profile Workspace selectors; it does not act as the primary tool/MCP status surface.
 - Claude Auth keeps tool-secret writes behind an explicit advanced tool-support area for cases where a profile's Tools/MCP section asks for a stored logical token.

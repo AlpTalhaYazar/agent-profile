@@ -145,6 +145,16 @@ test("Agent Profiles library switches profiles, restores after reload, and hides
     await expect(frontendItem).toContainText("Selected profile");
     await expect(page.getByTestId("agent-profile-library-error")).toHaveCount(0);
 
+    await page.getByTestId("profile-basics-open").click();
+    await expect(page.getByTestId("profile-basics-panel")).toBeVisible();
+    await expect(page.getByTestId("profile-basics-panel")).toContainText(
+      "Customize Frontend Polish"
+    );
+    await expect(page.getByTestId("profile-basics-preview")).not.toContainText("project-role");
+    await expect(page.getByTestId("profile-basics-preview")).not.toContainText("keyring://");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("profile-basics-panel")).toHaveCount(0);
+
     await page.reload();
     await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
     await expect(page.getByTestId("agent-profile-card")).toContainText("Frontend Polish");

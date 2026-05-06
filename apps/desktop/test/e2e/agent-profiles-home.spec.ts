@@ -27,6 +27,15 @@ test("agent profiles home is the default profile-first surface", async () => {
     await expect(card).toContainText("1 MCP server");
     await expect(card).toContainText("0 skill/persona assets");
     await expect(page.getByTestId("home-launch-button")).toBeEnabled();
+    await expect(page.getByTestId("profile-basics-open")).toBeVisible();
+    await expect(page.getByTestId("profile-basics-open")).toBeEnabled();
+    await page.getByTestId("profile-basics-open").click();
+    await expect(page.getByTestId("profile-basics-panel")).toBeVisible();
+    await expect(page.getByTestId("profile-basics-display-name")).toBeFocused();
+    await expect(page.getByTestId("profile-basics-panel")).toContainText("Guided Basics");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("profile-basics-panel")).toHaveCount(0);
+    await expect(page.getByTestId("profile-basics-open")).toBeFocused();
     await expect(library).toBeVisible();
     await expect(library.getByTestId("agent-profile-library-item")).toHaveCount(1);
     await expect(library).toContainText("Backend Agent");

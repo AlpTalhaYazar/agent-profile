@@ -78,6 +78,49 @@ test("dirty profile navigation can save before leaving", async () => {
   }
 });
 
+test("dirty Profile Basics navigation can be cancelled and saved before leaving", async () => {
+  const fixture = await createDesktopFixture("agent-profile-basics-unsaved-save-");
+  await seedProfileFixture(fixture);
+  const rolePath = join(fixture.projectDir, ".myclaude", "roles", "backend.yml");
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("profile-basics-open").click();
+    const panel = page.getByTestId("profile-basics-panel");
+    await expect(panel).toBeVisible();
+    await panel.getByTestId("profile-basics-purpose").fill("Save Basics before navigation");
+    await expect(panel.getByTestId("profile-basics-preview")).toContainText("safe Basics", {
+      timeout: 15_000,
+    });
+
+    await page.keyboard.press(`${modifier}+3`);
+    await expect(page.getByTestId("profile-unsaved-dialog")).toBeVisible();
+    await expect(page.getByTestId("profile-unsaved-dialog")).toContainText(
+      "Save Profile Basics changes?"
+    );
+    await page.getByTestId("profile-unsaved-cancel").click();
+    await expect(page.getByTestId("profile-unsaved-dialog")).toHaveCount(0);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByTestId("profile-basics-purpose")).toHaveValue(
+      "Save Basics before navigation"
+    );
+
+    await page.keyboard.press(`${modifier}+3`);
+    await expect(page.getByTestId("profile-unsaved-dialog")).toBeVisible();
+    await page.getByTestId("profile-unsaved-save").click();
+    await expect(page.getByRole("heading", { name: "Claude Auth" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect.poll(async () => readFile(rolePath, "utf8")).toContain(
+      "purpose: Save Basics before navigation"
+    );
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
 test("dirty profile layer and identity switches are guarded", async () => {
   const fixture = await createDesktopFixture("agent-profile-unsaved-context-");
   const { globalSharedPath } = await seedProfileFixture(fixture);

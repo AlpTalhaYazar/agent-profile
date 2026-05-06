@@ -1,14 +1,7 @@
 import {
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Field,
   Input,
-  Select,
   cn,
 } from "@agent-profile/ui";
 import { useSetAtom } from "jotai";
@@ -93,7 +86,7 @@ export function ProfileBasicsPanel({
   scopeEntries,
   selectedAuthId,
   selectedRole,
-}: ProfileBasicsPanelProps): React.ReactElement {
+}: ProfileBasicsPanelProps): React.ReactElement | null {
   const announce = useAnnounce();
   const setBasicsNavigationGuard = useSetAtom(profileBasicsNavigationGuardAtom);
   const initialFocusRef = React.useRef<HTMLInputElement | null>(null);
@@ -534,6 +527,21 @@ export function ProfileBasicsPanel({
     completeCloseAndContinue(continuation);
   }, [completeCloseAndContinue, saveBasicsDraft]);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (dirtyPromptOpen) {
+        cancelDirtyPrompt();
+        return;
+      }
+      requestClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cancelDirtyPrompt, dirtyPromptOpen, open, requestClose]);
+
   const addEnvRow = React.useCallback(() => {
     setEnvRows((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }]);
   }, []);
@@ -572,19 +580,20 @@ export function ProfileBasicsPanel({
       ? "Guided Basics will update the selected Agent Profile without exposing raw Layers."
       : target.message;
 
+  if (!open) return null;
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) requestClose();
-      }}
-    >
-      <DialogContent
-        className="max-h-[90vh] max-w-5xl overflow-hidden p-0"
+    <>
+      <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm" aria-hidden="true" />
+      <div
+        aria-labelledby="profile-basics-title"
+        aria-modal="true"
+        className="fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-5xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg focus-visible:outline-none"
         data-testid="profile-basics-panel"
+        role="dialog"
       >
         <form className="flex max-h-[90vh] min-h-0 flex-col" onSubmit={handleSave}>
-          <DialogHeader className="border-b border-subtle bg-surface/95 px-6 py-5">
+          <header className="border-b border-subtle bg-surface/95 px-6 py-5">
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="flex min-w-0 gap-3">
                 <IconFrame icon={Sparkles} size="sm" tone="accent" />
@@ -592,13 +601,16 @@ export function ProfileBasicsPanel({
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-tertiary">
                     Guided Basics
                   </p>
-                  <DialogTitle className="mt-1 text-xl tracking-[-0.02em] text-primary">
+                  <h2
+                    className="mt-1 text-xl font-semibold tracking-[-0.02em] text-primary"
+                    id="profile-basics-title"
+                  >
                     Customize {profile.name}
-                  </DialogTitle>
-                  <DialogDescription className="mt-1 text-sm leading-6 text-secondary">
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-secondary">
                     Edit profile-owned name, purpose, Claude identity, workspace, environment, and
                     settings without opening raw Layers by default.
-                  </DialogDescription>
+                  </p>
                 </div>
               </div>
               <Button
@@ -611,7 +623,7 @@ export function ProfileBasicsPanel({
                 <X className="h-4 w-4" aria-hidden="true" />
               </Button>
             </div>
-          </DialogHeader>
+          </header>
 
           <div className="app-scrollbar grid min-h-0 flex-1 gap-0 overflow-auto lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.85fr)]">
             <div className="grid gap-5 px-6 py-5">
@@ -682,18 +694,24 @@ export function ProfileBasicsPanel({
                 >
                   {authProfiles.length > 0 ? (
                     <div className="grid gap-2">
-                      <Select
+                      <select
                         aria-label="Claude identity"
-                        className="min-h-10"
+                        className="min-h-10 rounded-md border border-default bg-canvas px-3 text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={target.status !== "writable" || isSaving}
-                        onValueChange={(value) => updateDraft({ authProfileId: value })}
-                        options={authProfiles.map((authProfile) => ({
-                          value: authProfile.id,
-                          label: formatAuthOptionLabel(authProfile),
-                        }))}
-                        placeholder="Choose a Claude identity"
+                        onChange={(event) =>
+                          updateDraft({ authProfileId: event.currentTarget.value })
+                        }
                         value={selectedAuthValue}
-                      />
+                      >
+                        <option disabled value="">
+                          Choose a Claude identity
+                        </option>
+                        {authProfiles.map((authProfile) => (
+                          <option key={authProfile.id} value={authProfile.id}>
+                            {formatAuthOptionLabel(authProfile)}
+                          </option>
+                        ))}
+                      </select>
                       {hasStaleAuth ? (
                         <p className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-xs font-medium text-status-warning">
                           The previously selected Claude identity is unavailable. Choose an
@@ -917,7 +935,7 @@ export function ProfileBasicsPanel({
             </aside>
           </div>
 
-          <DialogFooter className="flex-wrap border-t border-subtle bg-surface/95 px-6 py-4">
+          <div className="flex flex-row flex-wrap justify-end gap-2 border-t border-subtle bg-surface/95 px-6 py-4">
             <Button
               data-testid="profile-basics-cancel"
               disabled={isSaving}
@@ -937,67 +955,75 @@ export function ProfileBasicsPanel({
               <Save className="h-4 w-4" aria-hidden="true" />
               {isSaving ? "Saving…" : "Save Basics"}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
-      </DialogContent>
+      </div>
 
-      <Dialog
-        open={dirtyPromptOpen}
-        onOpenChange={(nextOpen) => (nextOpen ? undefined : cancelDirtyPrompt())}
-      >
-        <DialogContent className="max-w-md" data-testid="profile-basics-dirty-dialog">
-          <DialogHeader>
-            <DialogTitle>Save Profile Basics changes?</DialogTitle>
-            <DialogDescription>
-              You have unsaved guided Basics edits. Save before leaving, discard the draft, or stay
-              here to keep editing.
-            </DialogDescription>
-          </DialogHeader>
-          {saveDisabledReason ? (
-            <p className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning">
-              {saveDisabledReason}
-            </p>
-          ) : null}
-          {saveError ? (
-            <p
-              className="rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger"
-              role="alert"
-            >
-              {saveError}
-            </p>
-          ) : null}
-          <DialogFooter className="flex-wrap">
-            <Button
-              data-testid="profile-basics-dirty-cancel"
-              disabled={isSaving}
-              onClick={cancelDirtyPrompt}
-              type="button"
-              variant="ghost"
-            >
-              Keep editing
-            </Button>
-            <Button
-              data-testid="profile-basics-dirty-discard"
-              disabled={isSaving}
-              onClick={discardDirtyPromptAndContinue}
-              type="button"
-              variant="secondary"
-            >
-              Discard changes
-            </Button>
-            <Button
-              data-testid="profile-basics-dirty-save"
-              disabled={!canSaveBasics || isSaving}
-              onClick={() => void saveDirtyPromptAndContinue()}
-              type="button"
-              variant="primary"
-            >
-              {isSaving ? "Saving…" : "Save Basics"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </Dialog>
+      {dirtyPromptOpen ? (
+        <>
+          <div className="fixed inset-0 z-[60] bg-overlay/80 backdrop-blur-sm" aria-hidden="true" />
+          <div
+            aria-labelledby="profile-basics-dirty-title"
+            aria-modal="true"
+            className="fixed left-1/2 top-1/2 z-[61] grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-md border border-border bg-popover p-6 text-popover-foreground shadow-lg"
+            data-testid="profile-basics-dirty-dialog"
+            role="dialog"
+          >
+            <header className="flex flex-col gap-1.5">
+              <h2 className="text-base font-semibold text-foreground" id="profile-basics-dirty-title">
+                Save Profile Basics changes?
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                You have unsaved guided Basics edits. Save before leaving, discard the draft, or stay
+                here to keep editing.
+              </p>
+            </header>
+            {saveDisabledReason ? (
+              <p className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning">
+                {saveDisabledReason}
+              </p>
+            ) : null}
+            {saveError ? (
+              <p
+                className="rounded-md border border-status-danger bg-status-danger-soft px-3 py-2 text-sm text-status-danger"
+                role="alert"
+              >
+                {saveError}
+              </p>
+            ) : null}
+            <div className="flex flex-row flex-wrap justify-end gap-2">
+              <Button
+                data-testid="profile-basics-dirty-cancel"
+                disabled={isSaving}
+                onClick={cancelDirtyPrompt}
+                type="button"
+                variant="ghost"
+              >
+                Keep editing
+              </Button>
+              <Button
+                data-testid="profile-basics-dirty-discard"
+                disabled={isSaving}
+                onClick={discardDirtyPromptAndContinue}
+                type="button"
+                variant="secondary"
+              >
+                Discard changes
+              </Button>
+              <Button
+                data-testid="profile-basics-dirty-save"
+                disabled={!canSaveBasics || isSaving}
+                onClick={() => void saveDirtyPromptAndContinue()}
+                type="button"
+                variant="primary"
+              >
+                {isSaving ? "Saving…" : "Save Basics"}
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 

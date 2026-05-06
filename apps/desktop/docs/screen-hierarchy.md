@@ -6,6 +6,7 @@
 - Agent Profiles is the default desktop surface after first-run conditions are satisfied.
 - Agent Profiles is optimized for the primary loop: choose the current working profile, understand readiness, inspect detail progressively, and launch Claude.
 - Selecting an Agent Profile opens a contextual side panel that preserves the home context and starts summary-first.
+- The selected profile also exposes Guided Basics from Agent Profiles for profile-owned name, purpose, Claude identity, workspace, environment, and settings edits with safe preview/save/cancel behavior.
 - Profile Workspace remains the secondary configuration surface for the selected profile until the side panel owns deeper edit flows in later milestones; dirty layer drafts are protected by a Save / Discard / Cancel guard.
 - Profile Workspace has three tabs: Overview, Layers, Debug.
 - Overview remains the configuration/readiness bridge for existing profile behavior.
@@ -20,8 +21,9 @@
 - Keyboard-visible focus is explicit on shell controls, side-panel controls, profile actions, and Sessions rows; primary profile controls meet the 40px target-size quality bar.
 - Provenance and Persona command results navigate to Profile Workspace and open Debug.
 - Agent Profiles opens selected-profile detail in a side panel; repair/configuration actions link into Profile Workspace or Claude Auth for existing edit flows.
+- Agent Profiles opens Guided Basics through `profile-basics-open`; downstream tests/debuggers can inspect `profile-basics-panel`, `profile-basics-preview`, `profile-basics-save`, `profile-basics-cancel`, and `profile-basics-error` without entering raw Layers.
 - Agent Profiles library selection switches the current role/auth/workspace context only after resolving the selected target; missing or stale identities stay visible as safe non-switchable states.
-- Dirty Profile Workspace layer drafts block sidebar, keyboard shortcut, command palette, scope/layer, role, workspace, and Claude identity context changes until the user chooses Save, Discard, or Cancel.
+- Dirty Profile Workspace layer drafts and Guided Basics drafts block sidebar, keyboard shortcut, command palette, scope/layer, role, workspace, Claude identity, launch, and library-switch context changes until the user chooses Save, Discard, or Cancel.
 - The side panel closes with its close button or Escape and returns focus to the detail trigger.
 
 ## Page Hierarchies
@@ -32,10 +34,11 @@
 2. Current Agent Profile card: purpose-first display name, purpose label, readiness, Claude identity, workspace, MCP/tool count, and skill/persona count. If a role scope carries explicit profile metadata, that metadata is the headline; older role-only profiles use deterministic role-derived labels.
 3. Agent Profiles library: a selectable list of role profiles with purpose-first names, role/identity/workspace chips, safe capability summaries, selected-state marker, and visible non-switchable states for missing or stale Claude identities.
 4. Primary action: `Launch Claude` when the selected profile is ready; it uses the `AgentProfileViewModel.launch.payload` and hands off to Sessions with the launched session active. Disabled states show a plain-language reason and do not launch.
-5. Detail action: open the contextual side panel without leaving the home surface.
-6. Secondary action: open Profile Workspace for configuration, Claude Auth when identity is the blocking fix path, or the side-panel Tools/Skills/Inspect section when a warning needs review.
-7. Calm failure surface: one plain-language blocker or warning appears on the card with the correct fix path; library switch failures appear as a safe alert above the library without changing the current profile.
-8. Default surface excludes raw JSON, provenance, scope/layer labels, scope file paths, keyring refs, OAuth refs, MCP headers/env values, raw secret expressions, and debug detail.
+5. Guided Basics action: open profile-owned Basics editing from the selected card without leaving Agent Profiles. The surface edits display name, purpose, Claude identity, workspace, environment rows, and settings JSON; preview and save readiness use safe product language and stable selectors for automation.
+6. Detail action: open the contextual side panel without leaving the home surface.
+7. Secondary action: open Profile Workspace for configuration, Claude Auth when identity is the blocking fix path, or the side-panel Tools/Skills/Inspect section when a warning needs review.
+8. Calm failure surface: one plain-language blocker or warning appears on the card with the correct fix path; library switch failures appear as a safe alert above the library without changing the current profile.
+9. Default surface excludes raw JSON, provenance, scope/layer labels, scope file paths, keyring refs, OAuth refs, MCP headers/env values, raw secret expressions, and debug detail.
 
 ### Agent Profile Side Panel
 
@@ -47,6 +50,15 @@
 6. Inspect section: safe counts and health signals only — scope layer count, issue count, MCP server count, persona asset count.
 7. Motion and control quality: subtle opacity/transform transitions in standard mode; reduced-motion mode suppresses transform animation and collapses transition duration; close and section controls keep 40px+ hit targets.
 8. Hidden by default: raw config, provenance chains, exact MCP/env values, keyring refs, OAuth refs, `${secret:...}` expressions, headers, and raw effective state.
+
+### Guided Profile Basics
+
+1. Entry point: `profile-basics-open` on the selected Agent Profile card opens `profile-basics-panel` and focuses the display-name field.
+2. Editable basics: display name, purpose, Claude identity, workspace, environment rows, and settings JSON are presented in product language; raw Layers remain an advanced escape hatch rather than the default path.
+3. Preview and readiness: `profile-basics-preview` reports safe section/key/change summaries and save readiness. It may show changed/added/removed profile, identity, environment, and settings keys, but not before/after values or raw effective config.
+4. Validation and failure visibility: `profile-basics-error` shows invalid settings JSON, missing writable target, stale/missing identity, preview/validate/save failures, duplicate env rows, and secret-like input blocks with calm redacted copy.
+5. Save/cancel behavior: `profile-basics-save` persists through the same profile save bridge as Profile Workspace, refreshes the selected profile, restores the chosen identity/workspace state, and closes. `profile-basics-cancel` opens a local dirty dialog when needed; external navigation uses the shared Save / Discard / Cancel guard.
+6. Redaction contract: default Basics summaries, preview, errors, library rows, and selected cards do not expose keyring refs, raw secret expressions, raw MCP headers/env values, OAuth internals, raw scope labels, or raw effective config.
 
 ### Profile Workspace
 

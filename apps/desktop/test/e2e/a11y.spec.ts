@@ -90,6 +90,9 @@ test("profile save updates live region", async () => {
   try {
     await openProfileWorkspace(page);
     await page.getByRole("button", { name: "Layers" }).click();
+    await expect(page.getByRole("heading", { name: "Scope layers" })).toBeVisible();
+    await page.locator("button").filter({ hasText: "shared.yml" }).first().click();
+    await expect(page.getByPlaceholder("Value").first()).toBeVisible();
     await page.getByPlaceholder("Value").first().fill("vim");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Profile saved", { timeout: 15_000 });
