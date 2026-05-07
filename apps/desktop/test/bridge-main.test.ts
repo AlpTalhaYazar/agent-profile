@@ -273,6 +273,81 @@ describe("main renderer IPC bridge", () => {
     expect(connectToSocket).not.toHaveBeenCalled();
   });
 
+  it("delegates persona.preview to the daemon and forwards only the safe preview shape", async () => {
+    const close = vi.fn();
+    const request = vi.fn().mockResolvedValueOnce({
+      id: "c-1",
+      kind: "persona.preview.ok",
+      issues: [],
+      preview: {
+        categoryCounts: [
+          { category: "claudeMd", count: 1 },
+          { category: "agents", count: 1 },
+          { category: "skills", count: 0 },
+          { category: "slashCmds", count: 0 },
+          { category: "memory", count: 0 },
+        ],
+        basenames: [
+          { category: "claudeMd", basename: "CLAUDE.md" },
+          { category: "agents", basename: "reviewer.md" },
+        ],
+        missingSources: [{ category: "skills", basename: "ghost-skill.md", count: 1 }],
+        collisions: [{ category: "agents", basename: "reviewer.md", hiddenCount: 1 }],
+        metrics: {
+          claudeMdSectionCount: 1,
+          claudeMdCharacterCount: 18,
+          fileCount: 1,
+          fileCharacterCount: 16,
+          totalCharacterCount: 34,
+          truncatedItemCount: 0,
+        },
+      },
+      failure: null,
+    });
+    connectToSocket.mockResolvedValue({ request, close });
+    readCookie.mockResolvedValue("cookie-1");
+
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+      startupCwd: "/repo",
+    });
+
+    const personaPreview = handlerMap.get("persona.preview");
+    if (!personaPreview) throw new Error("missing persona.preview handler");
+
+    const payload = {
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+      draft: {
+        path: "/repo/.myclaude/roles/backend.yml",
+        content: { version: 1, persona: { agents: ["agents/reviewer.md"] } },
+      },
+    };
+
+    const result = await personaPreview(
+      { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+      payload
+    );
+
+    expect(result).toMatchObject({
+      issues: [],
+      preview: {
+        basenames: expect.arrayContaining([{ category: "agents", basename: "reviewer.md" }]),
+        missingSources: [{ category: "skills", basename: "ghost-skill.md", count: 1 }],
+        collisions: [{ category: "agents", basename: "reviewer.md", hiddenCount: 1 }],
+      },
+      failure: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("sourcePath");
+    expect(JSON.stringify(result)).not.toContain("originScope");
+    expect(JSON.stringify(result)).not.toContain("content");
+    expect(request).toHaveBeenCalledWith("persona.preview", payload);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("delegates persona.render to the daemon and forwards the projected wire shape", async () => {
     const close = vi.fn();
     const request = vi.fn().mockResolvedValueOnce({
@@ -340,6 +415,25 @@ describe("main renderer IPC bridge", () => {
       cwd: "/repo",
     });
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an invalid persona.preview payload before opening a daemon connection", async () => {
+    const { registerRendererIpcHandlers } = await import("../src/main/ipc/register.js");
+    registerRendererIpcHandlers({
+      expectedFrameUrl: "file:///trusted/index.html",
+      myClaudeHome: "/Users/test/.myclaude",
+    });
+
+    const personaPreview = handlerMap.get("persona.preview");
+    if (!personaPreview) throw new Error("missing persona.preview handler");
+
+    await expect(
+      personaPreview(
+        { senderFrame: { url: "file:///trusted/index.html" }, sender: {} },
+        { role: "backend", authProfileId: "work", cwd: "/repo", draft: { path: "" } }
+      )
+    ).rejects.toThrow(/invalid payload/);
+    expect(connectToSocket).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid persona.render payload before opening a daemon connection", async () => {

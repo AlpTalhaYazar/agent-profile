@@ -22,7 +22,12 @@ import {
   RespAuthSetSecretOk,
   RespAuthUpdateMetaOk,
 } from "./auth.js";
-import { ReqPersonaRender, RespPersonaRenderOk } from "./persona.js";
+import {
+  ReqPersonaPreview,
+  ReqPersonaRender,
+  RespPersonaPreviewOk,
+  RespPersonaRenderOk,
+} from "./persona.js";
 import {
   ReqProfileCreateScope,
   ReqProfileList,
@@ -263,6 +268,12 @@ export const endpoints = [
     request: ReqPersonaRender,
     responseKind: "persona.render.ok",
     response: RespPersonaRenderOk,
+  }),
+  endpoint({
+    requestKind: "persona.preview",
+    request: ReqPersonaPreview,
+    responseKind: "persona.preview.ok",
+    response: RespPersonaPreviewOk,
   }),
   endpoint({
     requestKind: "system.bootstrap",

@@ -197,6 +197,12 @@ export interface MyClaudeBridge {
       authProfileId: string;
       cwd: string;
     }) => Promise<unknown>;
+    preview: (input: {
+      role: string;
+      authProfileId: string;
+      cwd: string;
+      draft: { path: string; content: unknown };
+    }) => Promise<unknown>;
   };
   skills: {
     search: (input: SkillSearchInput) => Promise<SkillsSearchResult>;

@@ -33,6 +33,7 @@ export const CHANNELS = {
   },
   persona: {
     render: "persona.render",
+    preview: "persona.preview",
   },
   skills: {
     search: "skills.search",

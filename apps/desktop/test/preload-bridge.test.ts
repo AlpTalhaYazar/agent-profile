@@ -56,6 +56,7 @@ describe("preload bridge", () => {
     expect(api).toHaveProperty("profile.preview");
     expect(api).toHaveProperty("profile.save");
     expect(api).toHaveProperty("profile.createScope");
+    expect(api).toHaveProperty("persona.preview");
     expect(api).toHaveProperty("persona.render");
     expect(api).toHaveProperty("skills.search");
     expect(api).toHaveProperty("skills.detail");
@@ -119,6 +120,12 @@ describe("preload bridge", () => {
       layerType: "role",
       role: "backend",
     });
+    await api.persona.preview({
+      role: "backend",
+      authProfileId: "work",
+      cwd: "/repo",
+      draft: { path: "/repo/.myclaude/roles/backend.yml", content: { version: 1 } },
+    });
     await api.persona.render({ role: "backend", authProfileId: "work", cwd: "/repo" });
     await api.skills.search({ query: "postgres", limit: 10 });
     await api.skills.detail({ id: "postgres" });
@@ -180,6 +187,15 @@ describe("preload bridge", () => {
       [
         "profile.createScope",
         { cwd: "/repo", location: "project", layerType: "role", role: "backend" },
+      ],
+      [
+        "persona.preview",
+        {
+          role: "backend",
+          authProfileId: "work",
+          cwd: "/repo",
+          draft: { path: "/repo/.myclaude/roles/backend.yml", content: { version: 1 } },
+        },
       ],
       ["persona.render", { role: "backend", authProfileId: "work", cwd: "/repo" }],
       ["skills.search", { query: "postgres", limit: 10 }],

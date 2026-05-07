@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { personaRenderService } from "../src/persona/render.js";
+import { personaPreviewService, personaRenderService } from "../src/persona/index.js";
 
 let scratchRoot: string;
 
@@ -296,5 +296,135 @@ persona:
     expect(result.missingSources).toHaveLength(1);
     expect(result.missingSources[0]?.category).toBe("claudeMd");
     expect(result.missingSources[0]?.sourcePath).toBe(ghostMd);
+  });
+});
+
+describe("personaPreviewService — draft-aware safe projection", () => {
+  it("renders unsaved draft refs and returns only safe basename summaries", async () => {
+    const { home } = setupHome();
+    const projectDir = join(scratchRoot, "project");
+    mkdirSync(join(projectDir, ".myclaude", "roles"), { recursive: true });
+
+    const claudeMd = join(projectDir, "persona", "CLAUDE.md");
+    const lowerAgent = join(home, "persona", "global", "reviewer.md");
+    const draftAgent = join(projectDir, "persona", "project", "reviewer.md");
+    const missingSkill = join(projectDir, "persona", "skills", "ghost-skill.md");
+
+    writeContent({ path: claudeMd, content: "# Draft persona\n" });
+    writeContent({ path: lowerAgent, content: "# Lower reviewer\n" });
+    writeContent({ path: draftAgent, content: "# Draft reviewer\n" });
+
+    const result = await personaPreviewService({
+      role: "backend",
+      home,
+      cwd: projectDir,
+      draft: {
+        path: join(projectDir, ".myclaude", "roles", "backend.yml"),
+        content: {
+          version: 1,
+          persona: {
+            claudeMd: [claudeMd],
+            agents: [lowerAgent, draftAgent],
+            skills: [missingSkill],
+          },
+        },
+      },
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.failure).toBeNull();
+    expect(result.preview).toMatchObject({
+      categoryCounts: [
+        { category: "claudeMd", count: 1 },
+        { category: "agents", count: 1 },
+        { category: "skills", count: 0 },
+        { category: "slashCmds", count: 0 },
+        { category: "memory", count: 0 },
+      ],
+      basenames: [
+        { category: "claudeMd", basename: "CLAUDE.md" },
+        { category: "agents", basename: "reviewer.md" },
+      ],
+      missingSources: [{ category: "skills", basename: "ghost-skill.md", count: 1 }],
+      collisions: [{ category: "agents", basename: "reviewer.md", hiddenCount: 1 }],
+    });
+    expect(result.preview?.metrics).toMatchObject({
+      claudeMdSectionCount: 1,
+      fileCount: 1,
+    });
+
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(scratchRoot);
+    expect(serialized).not.toContain("sourcePath");
+    expect(serialized).not.toContain("originScope");
+    expect(serialized).not.toContain("content");
+    expect(serialized).not.toContain("launch-overrides");
+    expect(serialized).not.toContain("# Draft");
+  });
+
+  it("previews the draft as a replacement for the selected role scope persona refs", async () => {
+    const { home } = setupHome();
+    const projectDir = join(scratchRoot, "project");
+    mkdirSync(join(projectDir, ".myclaude", "roles"), { recursive: true });
+
+    const savedAgent = join(projectDir, "persona", "agents", "saved-reviewer.md");
+    const draftAgent = join(projectDir, "persona", "agents", "draft-reviewer.md");
+    writeContent({ path: savedAgent, content: "# Saved reviewer\n" });
+    writeContent({ path: draftAgent, content: "# Draft reviewer\n" });
+    writeYaml({
+      scopeDir: join(projectDir, ".myclaude", "roles"),
+      scopeFilename: "backend.yml",
+      yaml: `version: 1
+persona:
+  agents:
+    - ${savedAgent}
+`,
+    });
+
+    const result = await personaPreviewService({
+      role: "backend",
+      home,
+      cwd: projectDir,
+      draft: {
+        path: join(projectDir, ".myclaude", "roles", "backend.yml"),
+        content: {
+          version: 1,
+          persona: {
+            agents: [draftAgent],
+          },
+        },
+      },
+    });
+
+    expect(result.failure).toBeNull();
+    expect(result.preview?.basenames).toEqual([
+      { category: "agents", basename: "draft-reviewer.md" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("saved-reviewer.md");
+    expect(JSON.stringify(result)).not.toContain(savedAgent);
+  });
+
+  it("returns validation issues for malformed draft content without rendering", async () => {
+    const { home } = setupHome();
+
+    const result = await personaPreviewService({
+      role: "backend",
+      home,
+      cwd: home,
+      draft: {
+        path: join(home, "config", "global", "roles", "backend.yml"),
+        content: { version: 2 },
+      },
+    });
+
+    expect(result.preview).toBeNull();
+    expect(result.failure).toMatchObject({
+      code: "invalid-draft",
+      retryable: true,
+    });
+    expect(result.issues).toEqual([
+      expect.objectContaining({ path: "version", code: "invalid_value" }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain(join(home, "config"));
   });
 });

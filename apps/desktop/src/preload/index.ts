@@ -56,6 +56,7 @@ const bridge: MyClaudeBridge = {
   },
   persona: {
     render: (opts): Promise<unknown> => ipcRenderer.invoke(CHANNELS.persona.render, opts),
+    preview: (opts): Promise<unknown> => ipcRenderer.invoke(CHANNELS.persona.preview, opts),
   },
   skills: {
     search: (opts) => ipcRenderer.invoke(CHANNELS.skills.search, opts),

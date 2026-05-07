@@ -34,6 +34,7 @@ import {
   type AuthGetSecretRefResult,
   type AuthListResult,
   type DaemonStatus,
+  type PersonaPreviewResult,
   type PersonaRenderResult,
   type ProfileListResult,
   type ProfilePreviewResult,
@@ -43,6 +44,7 @@ import {
   authListService,
   daemonStatusService,
   loadAuthProfiles,
+  personaPreviewService,
   personaRenderService,
   profileListService,
   profilePreviewService,
@@ -55,6 +57,7 @@ import type {
   ReqAuthGetSecretRefT,
   ReqAuthListT,
   ReqDaemonStatusT,
+  ReqPersonaPreviewT,
   ReqPersonaRenderT,
   ReqProfileListT,
   ReqProfilePreviewT,
@@ -220,6 +223,21 @@ export function createHandlers(
         home: myClaudeHome,
       });
       return projectPersonaRender(result);
+    }),
+
+    "persona.preview": wrap<ReqPersonaPreviewT>("persona.preview", async (req) => {
+      const result: PersonaPreviewResult = await personaPreviewService({
+        role: req.role,
+        authProfileId: req.authProfileId,
+        cwd: req.cwd,
+        home: myClaudeHome,
+        draft: req.draft,
+      });
+      return {
+        issues: result.issues,
+        preview: result.preview,
+        failure: result.failure,
+      };
     }),
 
     "sessions.list": wrap<ReqSessionsListT>("sessions.list", async (req) => {

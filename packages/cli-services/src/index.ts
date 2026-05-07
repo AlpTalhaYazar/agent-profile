@@ -78,7 +78,10 @@ export {
 // ─── Persona ──────────────────────────────────────────────────────────────────
 
 export {
+  personaPreviewService,
   personaRenderService,
+  type PersonaPreviewInput,
+  type PersonaPreviewResult,
   type PersonaRenderInput as PersonaRenderServiceInput,
 } from "./persona/index.js";
 

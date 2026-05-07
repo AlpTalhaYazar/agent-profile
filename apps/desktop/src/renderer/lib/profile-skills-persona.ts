@@ -480,7 +480,8 @@ function summarizeChangedRefs(
     change === "removed"
       ? beforeRefs.filter((ref) => !afterKeys.has(normalizeRefKey(ref)))
       : afterRefs.filter((ref) => !beforeKeys.has(normalizeRefKey(ref)));
-  if (candidates.length === 1) return safeAssetLabel(category, candidates[0]);
+  const [candidate] = candidates;
+  if (candidate) return safeAssetLabel(category, candidate);
   const count = change === "removed" ? beforeRefs.length : afterRefs.length;
   return `${count} ${CATEGORY_LABELS[category]}${count === 1 ? "" : "s"}`;
 }
@@ -514,11 +515,10 @@ function extractSafeAssetLabel(
     return null;
   }
 
-  const last = segments[segments.length - 1];
-  const candidate =
-    category === "skills" && /^skill\.md$/i.test(last) && segments.length > 1
-      ? segments[segments.length - 2]
-      : last;
+  const last = segments.at(-1);
+  if (!last) return null;
+  const parent = segments.length > 1 ? segments.at(-2) : undefined;
+  const candidate = category === "skills" && /^skill\.md$/i.test(last) ? (parent ?? last) : last;
   return sanitizeSummarySegment(candidate);
 }
 
