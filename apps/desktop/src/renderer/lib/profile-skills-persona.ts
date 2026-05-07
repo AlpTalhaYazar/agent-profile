@@ -18,8 +18,12 @@ export const PROFILE_SKILLS_PERSONA_CATEGORIES = [
   "memory",
 ] as const;
 
-export type ProfileSkillsPersonaCategory = (typeof PROFILE_SKILLS_PERSONA_CATEGORIES)[number];
+export type ProfileSkillsPersonaCategory =
+  (typeof PROFILE_SKILLS_PERSONA_CATEGORIES)[number];
 export type ProfileSkillsPersonaField = "target" | "category" | "ref";
+export type ProfileSkillsPersonaTrustedSource =
+  | "installed-skill"
+  | "catalog-install";
 
 export interface ResolveProfileSkillsPersonaTargetInput {
   scopeEntries: readonly ScopeListEntry[];
@@ -37,6 +41,7 @@ export interface ProfileSkillsPersonaDraftRow {
   ref: string;
   originalRef?: string | null;
   displayLabel?: string;
+  trustedSource?: ProfileSkillsPersonaTrustedSource;
 }
 
 export interface ProfileSkillsPersonaDraft {
@@ -140,7 +145,7 @@ const CATEGORY_LABELS: Record<ProfileSkillsPersonaCategory, string> = {
 const TOKEN_LIKE_RE =
   /keyring:\/\/|\$\{secret:|\$\{env:|\bsecretRef\b|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+/i;
 const UNSAFE_DIAGNOSTIC_RE =
-  /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+|oauth|authorization|\/Users\/|\b[A-Za-z]:\\/i;
+  /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+|oauth|authorization|\/Users\/|\/tmp\/|\b[A-Za-z]:\\|\bnpx\b/i;
 const ABSOLUTE_PATH_RE = /^(?:\/|~\/|[A-Za-z]:[\\/]|\\\\)/;
 const URI_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
@@ -150,7 +155,10 @@ export function resolveProfileSkillsPersonaTarget({
 }: ResolveProfileSkillsPersonaTargetInput): ProfileSkillsPersonaTarget {
   const role = normalizeRoleKey(selectedRole);
   if (!role) {
-    return unavailableTarget(null, "Choose an Agent Profile before editing skills and persona.");
+    return unavailableTarget(
+      null,
+      "Choose an Agent Profile before editing skills and persona.",
+    );
   }
 
   let malformedProjectRole = false;
@@ -163,7 +171,13 @@ export function resolveProfileSkillsPersonaTarget({
 
     if (entry.scope !== "project-role") continue;
     if (entry.content) {
-      return { status: "writable", role, path: entry.path, content: entry.content, message: null };
+      return {
+        status: "writable",
+        role,
+        path: entry.path,
+        content: entry.content,
+        message: null,
+      };
     }
     malformedProjectRole = true;
   }
@@ -181,7 +195,7 @@ export function resolveProfileSkillsPersonaTarget({
     role,
     sawRoleLayer
       ? "This Agent Profile needs a writable project layer before guided skills and persona can be saved."
-      : "Selected Agent Profile skills and persona are unavailable. Choose another profile and try again."
+      : "Selected Agent Profile skills and persona are unavailable. Choose another profile and try again.",
   );
 }
 
@@ -197,7 +211,7 @@ export function resolveProfileSkillsPersonaTargetFromList({
 
 export function createProfileSkillsPersonaDraft(
   target: ProfileSkillsPersonaTarget,
-  createRowId: () => string = createId
+  createRowId: () => string = createId,
 ): ProfileSkillsPersonaDraft {
   if (target.status !== "writable") return { rows: [] };
 
@@ -215,7 +229,7 @@ export function createProfileSkillsPersonaDraft(
         category,
         ref,
         originalRef: ref,
-        displayLabel: safeAssetLabel(category, ref),
+        displayLabel: safeAssetLabel(category, ref, { allowAbsolute: true }),
       });
     }
   }
@@ -223,7 +237,7 @@ export function createProfileSkillsPersonaDraft(
 }
 
 export function createDefaultProfileSkillsPersonaDraftRow(
-  overrides: Partial<ProfileSkillsPersonaDraftRow> = {}
+  overrides: Partial<ProfileSkillsPersonaDraftRow> = {},
 ): ProfileSkillsPersonaDraftRow {
   const category = overrides.category ?? "skills";
   const ref = overrides.ref ?? "";
@@ -233,7 +247,13 @@ export function createDefaultProfileSkillsPersonaDraftRow(
     ref,
     originalRef: overrides.originalRef ?? null,
     displayLabel:
-      overrides.displayLabel ?? (ref ? safeAssetLabel(category, ref) : CATEGORY_LABELS[category]),
+      overrides.displayLabel ??
+      (ref
+        ? safeAssetLabel(category, ref, { allowAbsolute: true })
+        : CATEGORY_LABELS[category]),
+    ...(overrides.trustedSource
+      ? { trustedSource: overrides.trustedSource }
+      : {}),
   };
 }
 
@@ -253,7 +273,10 @@ export function validateProfileSkillsPersonaForm(input: {
 
   const value = createEmptyResolvedDraft();
   const seenRefs = new Map<ProfileSkillsPersonaCategory, Set<string>>(
-    PROFILE_SKILLS_PERSONA_CATEGORIES.map((category) => [category, new Set<string>()])
+    PROFILE_SKILLS_PERSONA_CATEGORIES.map((category) => [
+      category,
+      new Set<string>(),
+    ]),
   );
 
   input.draft.rows.forEach((row, index) => {
@@ -272,7 +295,8 @@ export function validateProfileSkillsPersonaForm(input: {
       issues.push({
         field: "ref",
         path: rowPath(row, index, "ref"),
-        message: "Choose an installed or catalog-backed persona asset before saving.",
+        message:
+          "Choose an installed or catalog-backed persona asset before saving.",
         severity: "error",
       });
       return;
@@ -289,11 +313,12 @@ export function validateProfileSkillsPersonaForm(input: {
       return;
     }
 
-    if (!canSummarizeDraftRef(row.category, ref)) {
+    if (!canSummarizeDraftRow(row, ref)) {
       issues.push({
         field: "ref",
         path: rowPath(row, index, "ref"),
-        message: "Use a persona asset reference that can be shown by a safe name.",
+        message:
+          "Use a persona asset reference that can be shown by a safe name.",
         severity: "error",
       });
       return;
@@ -305,7 +330,8 @@ export function validateProfileSkillsPersonaForm(input: {
       issues.push({
         field: "ref",
         path: rowPath(row, index, "ref"),
-        message: "Each Skills & Persona asset can only appear once per category.",
+        message:
+          "Each Skills & Persona asset can only appear once per category.",
         severity: "error",
       });
       return;
@@ -328,13 +354,19 @@ export function buildProfileSkillsPersonaPatch(input: {
       path: null,
       content: null,
       issues: [
-        { field: "target", path: "target", message: input.target.message, severity: "error" },
+        {
+          field: "target",
+          path: "target",
+          message: input.target.message,
+          severity: "error",
+        },
       ],
     };
   }
 
   const validation = validateProfileSkillsPersonaForm(input);
-  if (!validation.ok) return { ok: false, path: null, content: null, issues: validation.issues };
+  if (!validation.ok)
+    return { ok: false, path: null, content: null, issues: validation.issues };
 
   return {
     ok: true,
@@ -346,7 +378,7 @@ export function buildProfileSkillsPersonaPatch(input: {
 
 export function createSafeProfileSkillsPersonaPreviewSummary(
   before: ScopeDoc | null,
-  after: ScopeDoc | null
+  after: ScopeDoc | null,
 ): ProfileSkillsPersonaPreviewSummaryItem[] {
   if (!before || !after) return [];
 
@@ -371,31 +403,36 @@ export function createSafeProfileSkillsPersonaPreviewSummary(
 }
 
 export function countProfileSkillsPersonaCapabilities(
-  persona: ScopeDocPersona | null | undefined
+  persona: ScopeDocPersona | null | undefined,
 ): ProfileSkillsPersonaCapabilityCount[] {
   return PROFILE_SKILLS_PERSONA_CATEGORIES.map((category) => ({
     category,
-    count: persona?.[category]?.filter((ref) => ref.trim().length > 0).length ?? 0,
+    count:
+      persona?.[category]?.filter((ref) => ref.trim().length > 0).length ?? 0,
   }));
 }
 
 export function createSafeProfileSkillsPersonaMissingSourceSummary(
-  missingSources: readonly PersonaRenderMissingSource[]
+  missingSources: readonly PersonaRenderMissingSource[],
 ): ProfileSkillsPersonaMissingSourceSummaryItem[] {
   return missingSources.map((source) => ({
     category: source.category,
-    label: safeAssetLabel(source.category, source.sourcePath, { allowAbsolute: true }),
+    label: safeAssetLabel(source.category, source.sourcePath, {
+      allowAbsolute: true,
+    }),
     count: 1,
     detail: "Source could not be found.",
   }));
 }
 
 export function createSafeProfileSkillsPersonaCollisionSummary(
-  collisions: readonly PersonaRenderCollision[]
+  collisions: readonly PersonaRenderCollision[],
 ): ProfileSkillsPersonaCollisionSummaryItem[] {
   return collisions.map((collision) => ({
     category: collision.category,
-    label: safeAssetLabel(collision.category, collision.basename, { allowAbsolute: true }),
+    label: safeAssetLabel(collision.category, collision.basename, {
+      allowAbsolute: true,
+    }),
     count: collision.overriddenSources.length,
     detail:
       collision.overriddenSources.length === 1
@@ -411,16 +448,31 @@ export function shouldGuardProfileSkillsPersonaClose(input: {
   return input.isDirty && !input.isSaving;
 }
 
-export function formatProfileSkillsPersonaBridgeError(error: unknown, fallback: string): string {
+export function formatProfileSkillsPersonaBridgeError(
+  error: unknown,
+  fallback: string,
+): string {
   const message = getErrorMessage(error);
   if (containsUnsafeDiagnosticText(message)) return fallback;
-  if (/persona|skill|agent|command|memory|preview|render|collision|source/i.test(message)) {
+  if (
+    /persona|skill|agent|command|memory|preview|render|collision|source/i.test(
+      message,
+    )
+  ) {
     return "Skills & Persona could not be checked. Review the selected assets and try again.";
   }
   return fallback;
 }
 
-function patchScopeDoc(current: ScopeDoc, persona: ProfileSkillsPersonaResolvedDraft): ScopeDoc {
+export function isProfileSkillsPersonaOpaqueSkillRef(ref: string): boolean {
+  const trimmed = ref.trim();
+  return ABSOLUTE_PATH_RE.test(trimmed) && !TOKEN_LIKE_RE.test(trimmed);
+}
+
+function patchScopeDoc(
+  current: ScopeDoc,
+  persona: ProfileSkillsPersonaResolvedDraft,
+): ScopeDoc {
   return {
     version: 1,
     mcpServers: cloneServerRecord(current.mcpServers),
@@ -435,7 +487,7 @@ function patchScopeDoc(current: ScopeDoc, persona: ProfileSkillsPersonaResolvedD
 }
 
 function cloneServerRecord(
-  servers: Record<string, ScopeDocServerEntry | null>
+  servers: Record<string, ScopeDocServerEntry | null>,
 ): Record<string, ScopeDocServerEntry | null> {
   return Object.fromEntries(
     Object.entries(servers).map(([name, server]) => [
@@ -448,12 +500,12 @@ function cloneServerRecord(
             ...(server.headers ? { headers: { ...server.headers } } : {}),
           }
         : null,
-    ])
+    ]),
   );
 }
 
 function cloneResolvedPersona(
-  persona: ProfileSkillsPersonaResolvedDraft
+  persona: ProfileSkillsPersonaResolvedDraft,
 ): ProfileSkillsPersonaResolvedDraft {
   return {
     claudeMd: [...persona.claudeMd],
@@ -472,7 +524,7 @@ function summarizeChangedRefs(
   category: ProfileSkillsPersonaCategory,
   beforeRefs: readonly string[],
   afterRefs: readonly string[],
-  change: ProfileSkillsPersonaPreviewSummaryItem["change"]
+  change: ProfileSkillsPersonaPreviewSummaryItem["change"],
 ): string {
   const beforeKeys = new Set(beforeRefs.map(normalizeRefKey));
   const afterKeys = new Set(afterRefs.map(normalizeRefKey));
@@ -481,7 +533,8 @@ function summarizeChangedRefs(
       ? beforeRefs.filter((ref) => !afterKeys.has(normalizeRefKey(ref)))
       : afterRefs.filter((ref) => !beforeKeys.has(normalizeRefKey(ref)));
   const [candidate] = candidates;
-  if (candidate) return safeAssetLabel(category, candidate);
+  if (candidate)
+    return safeAssetLabel(category, candidate, { allowAbsolute: true });
   const count = change === "removed" ? beforeRefs.length : afterRefs.length;
   return `${count} ${CATEGORY_LABELS[category]}${count === 1 ? "" : "s"}`;
 }
@@ -489,44 +542,77 @@ function summarizeChangedRefs(
 function safeAssetLabel(
   category: PersonaRenderMissingSource["category"],
   value: string,
-  options: { allowAbsolute?: boolean } = {}
+  options: { allowAbsolute?: boolean } = {},
 ): string {
   const label = extractSafeAssetLabel(category, value, options);
   if (label) return label;
   return category === "claudeMd" ? "Claude memory" : CATEGORY_LABELS[category];
 }
 
-function canSummarizeDraftRef(category: ProfileSkillsPersonaCategory, ref: string): boolean {
-  return extractSafeAssetLabel(category, ref, { allowAbsolute: false }) !== null;
+function canSummarizeDraftRow(
+  row: ProfileSkillsPersonaDraftRow,
+  ref: string,
+): boolean {
+  return (
+    extractSafeAssetLabel(row.category, ref, {
+      allowAbsolute: shouldAllowAbsoluteDraftRef(row, ref),
+    }) !== null
+  );
+}
+
+function shouldAllowAbsoluteDraftRef(
+  row: ProfileSkillsPersonaDraftRow,
+  ref: string,
+): boolean {
+  if (row.category !== "skills" || !isProfileSkillsPersonaOpaqueSkillRef(ref))
+    return false;
+  if (
+    row.trustedSource === "installed-skill" ||
+    row.trustedSource === "catalog-install"
+  ) {
+    return true;
+  }
+  return row.originalRef?.trim() === ref.trim();
 }
 
 function extractSafeAssetLabel(
   category: PersonaRenderMissingSource["category"],
   value: string,
-  options: { allowAbsolute?: boolean }
+  options: { allowAbsolute?: boolean },
 ): string | null {
   const trimmed = value.trim();
-  if (!trimmed || TOKEN_LIKE_RE.test(trimmed) || URI_SCHEME_RE.test(trimmed)) return null;
+  if (!trimmed || TOKEN_LIKE_RE.test(trimmed) || URI_SCHEME_RE.test(trimmed))
+    return null;
   if (!options.allowAbsolute && ABSOLUTE_PATH_RE.test(trimmed)) return null;
 
   const normalized = trimmed.replace(/\\/g, "/");
   const segments = normalized.split("/").filter(Boolean);
-  if (segments.length === 0 || segments.some((segment) => segment === "." || segment === "..")) {
+  if (
+    segments.length === 0 ||
+    segments.some((segment) => segment === "." || segment === "..")
+  ) {
     return null;
   }
 
   const last = segments.at(-1);
   if (!last) return null;
   const parent = segments.length > 1 ? segments.at(-2) : undefined;
-  const candidate = category === "skills" && /^skill\.md$/i.test(last) ? (parent ?? last) : last;
+  const candidate =
+    category === "skills" && /^skill\.md$/i.test(last)
+      ? (parent ?? last)
+      : last;
   return sanitizeSummarySegment(candidate);
 }
 
 function sanitizeSummarySegment(value: string): string | null {
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) return null;
-  if (TOKEN_LIKE_RE.test(normalized) || UNSAFE_DIAGNOSTIC_RE.test(normalized)) return null;
-  if (/[/\\]|\0|\$\{|\bsecret\b|\btoken\b|authorization|oauth/i.test(normalized)) return null;
+  if (TOKEN_LIKE_RE.test(normalized) || UNSAFE_DIAGNOSTIC_RE.test(normalized))
+    return null;
+  if (
+    /[/\\]|\0|\$\{|\bsecret\b|\btoken\b|authorization|oauth/i.test(normalized)
+  )
+    return null;
   return normalized.slice(0, 80);
 }
 
@@ -542,7 +628,11 @@ function normalizeRefKey(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+/g, "/").toLowerCase();
 }
 
-function rowPath(row: ProfileSkillsPersonaDraftRow, index: number, field: string): string {
+function rowPath(
+  row: ProfileSkillsPersonaDraftRow,
+  index: number,
+  field: string,
+): string {
   const category = isSupportedCategory(row.category) ? row.category : "row";
   const id = sanitizeSummarySegment(row.id) ?? String(index + 1);
   return `persona.${category}.${id}.${field}`;
@@ -550,7 +640,7 @@ function rowPath(row: ProfileSkillsPersonaDraftRow, index: number, field: string
 
 function unavailableTarget(
   role: string | null,
-  message: string
+  message: string,
 ): ProfileSkillsPersonaUnavailableTarget {
   return { status: "unavailable", role, message };
 }
@@ -559,8 +649,11 @@ function normalizeRoleKey(role: string): string {
   return role.trim().replace(/\s+/g, "-");
 }
 
-function isSupportedCategory(category: unknown): category is ProfileSkillsPersonaCategory {
+function isSupportedCategory(
+  category: unknown,
+): category is ProfileSkillsPersonaCategory {
   return (
-    typeof category === "string" && PROFILE_SKILLS_PERSONA_CATEGORIES.includes(category as never)
+    typeof category === "string" &&
+    PROFILE_SKILLS_PERSONA_CATEGORIES.includes(category as never)
   );
 }

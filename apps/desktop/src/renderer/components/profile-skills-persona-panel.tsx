@@ -25,6 +25,17 @@ import { profileSkillsPersonaNavigationGuardAtom } from "../lib/atoms.js";
 import { stableStringify } from "../lib/clone.js";
 import { normalizeValidationIssues } from "../lib/normalize.js";
 import {
+  createCatalogInstallAttachment,
+  createInstalledSkillAttachment,
+  isDuplicateSkillAttachment,
+  normalizeAgentProfileSkillItems,
+  safeSkillDescription,
+  safeSkillName,
+  safeVisibleSegment,
+  sanitizeSkillBridgeError,
+  type SafeProfileSkillAttachment,
+} from "../lib/skills-catalog.js";
+import {
   PROFILE_SKILLS_PERSONA_CATEGORIES,
   type ProfileSkillsPersonaCategory,
   type ProfileSkillsPersonaDraft,
@@ -37,6 +48,7 @@ import {
   createProfileSkillsPersonaDraft,
   createSafeProfileSkillsPersonaPreviewSummary,
   formatProfileSkillsPersonaBridgeError,
+  isProfileSkillsPersonaOpaqueSkillRef,
   resolveProfileSkillsPersonaTarget,
   resolveProfileSkillsPersonaTargetFromList,
   shouldGuardProfileSkillsPersonaClose,
@@ -57,7 +69,11 @@ interface ProfileSkillsPersonaPanelProps {
   onOpenAdvanced: () => void;
   onOpenChange: (open: boolean) => void;
   onPreviewStateChange: (state: PreviewState) => void;
-  onSaved: (selection: { role: string; authProfileId: string; cwd: string }) => Promise<void>;
+  onSaved: (selection: {
+    role: string;
+    authProfileId: string;
+    cwd: string;
+  }) => Promise<void>;
   onValidationStateChange: (state: ValidationState) => void;
   open: boolean;
   profile: AgentProfileViewModel;
@@ -66,7 +82,12 @@ interface ProfileSkillsPersonaPanelProps {
   selectedRole: string;
 }
 
-type SkillsPersonaAsyncStatus = "idle" | "pending" | "loading" | "ready" | "error";
+type SkillsPersonaAsyncStatus =
+  | "idle"
+  | "pending"
+  | "loading"
+  | "ready"
+  | "error";
 type SkillsPersonaSaveResult = { ok: true } | { ok: false; message: string };
 type ProfileBridge = NonNullable<typeof window.myclaude>["profile"];
 
@@ -137,7 +158,8 @@ const CATEGORY_CONFIG: Record<
 > = {
   claudeMd: {
     addLabel: "Add instructions",
-    description: "Attach Claude instruction fragments that shape the profile voice.",
+    description:
+      "Attach Claude instruction fragments that shape the profile voice.",
     empty: "No Claude instructions attached yet.",
     icon: FileText,
     label: "Claude instructions",
@@ -155,7 +177,8 @@ const CATEGORY_CONFIG: Record<
   },
   skills: {
     addLabel: "Add skill",
-    description: "Attach installed or catalog-backed skills without exposing raw Layers.",
+    description:
+      "Attach installed or catalog-backed skills without exposing raw Layers.",
     empty: "No skills attached yet.",
     icon: Sparkles,
     label: "Skills",
@@ -183,7 +206,7 @@ const CATEGORY_CONFIG: Record<
 };
 
 const UNSAFE_VISIBLE_TEXT_RE =
-  /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+|oauth|authorization|\/Users\/|\b[A-Za-z]:\\/i;
+  /\.myclaude|project-role|global-role|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+|oauth|authorization|\/Users\/|\/tmp\/|\b[A-Za-z]:\\|\bnpx\b/i;
 
 export function ProfileSkillsPersonaPanel({
   cwd,
@@ -199,37 +222,54 @@ export function ProfileSkillsPersonaPanel({
   selectedRole,
 }: ProfileSkillsPersonaPanelProps): React.ReactElement | null {
   const announce = useAnnounce();
-  const setSkillsPersonaNavigationGuard = useSetAtom(profileSkillsPersonaNavigationGuardAtom);
+  const setSkillsPersonaNavigationGuard = useSetAtom(
+    profileSkillsPersonaNavigationGuardAtom,
+  );
   const initialFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const pendingLeaveContinuationRef = React.useRef<(() => void) | null>(null);
   const target = React.useMemo(
     () => resolveProfileSkillsPersonaTarget({ scopeEntries, selectedRole }),
-    [scopeEntries, selectedRole]
+    [scopeEntries, selectedRole],
   );
   const [draft, setDraft] = React.useState<ProfileSkillsPersonaDraft>(() =>
-    createProfileSkillsPersonaDraft(target)
+    createProfileSkillsPersonaDraft(target),
   );
-  const [baselineSerialized, setBaselineSerialized] = React.useState(() => serializeDraft(draft));
+  const [baselineSerialized, setBaselineSerialized] = React.useState(() =>
+    serializeDraft(draft),
+  );
   const [bridgeIssues, setBridgeIssues] = React.useState<ValidationIssue[]>([]);
-  const [previewStatus, setPreviewStatus] = React.useState<SkillsPersonaAsyncStatus>("idle");
+  const [previewStatus, setPreviewStatus] =
+    React.useState<SkillsPersonaAsyncStatus>("idle");
   const [previewError, setPreviewError] = React.useState<string | null>(null);
-  const [previewItems, setPreviewItems] = React.useState<ProfileSkillsPersonaPreviewSummaryItem[]>(
-    []
-  );
-  const [personaPreview, setPersonaPreview] = React.useState<PersonaPreviewPayload | null>(null);
-  const [previewedSerialized, setPreviewedSerialized] = React.useState<string | null>(null);
+  const [previewItems, setPreviewItems] = React.useState<
+    ProfileSkillsPersonaPreviewSummaryItem[]
+  >([]);
+  const [personaPreview, setPersonaPreview] =
+    React.useState<PersonaPreviewPayload | null>(null);
+  const [previewedSerialized, setPreviewedSerialized] = React.useState<
+    string | null
+  >(null);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [dirtyPromptOpen, setDirtyPromptOpen] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [installedSkills, setInstalledSkills] = React.useState<SkillCatalogItem[]>([]);
-  const [installedStatus, setInstalledStatus] = React.useState<SkillsPersonaAsyncStatus>("idle");
+  const [installedSkills, setInstalledSkills] = React.useState<
+    SkillCatalogItem[]
+  >([]);
+  const [installedStatus, setInstalledStatus] =
+    React.useState<SkillsPersonaAsyncStatus>("idle");
   const [skillQuery, setSkillQuery] = React.useState("");
-  const [skillResults, setSkillResults] = React.useState<SkillCatalogItem[]>([]);
+  const [skillResults, setSkillResults] = React.useState<SkillCatalogItem[]>(
+    [],
+  );
   const [skillSearchStatus, setSkillSearchStatus] =
     React.useState<SkillsPersonaAsyncStatus>("idle");
-  const [skillCatalogError, setSkillCatalogError] = React.useState<string | null>(null);
-  const [installingSkillId, setInstallingSkillId] = React.useState<string | null>(null);
+  const [skillCatalogError, setSkillCatalogError] = React.useState<
+    string | null
+  >(null);
+  const [installingSkillId, setInstallingSkillId] = React.useState<
+    string | null
+  >(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -252,24 +292,33 @@ export function ProfileSkillsPersonaPanel({
     setSkillCatalogError(null);
     setInstallingSkillId(null);
     announce("Guided Skills & Persona opened");
-    const frameId = window.requestAnimationFrame(() => initialFocusRef.current?.focus());
+    const frameId = window.requestAnimationFrame(() =>
+      initialFocusRef.current?.focus(),
+    );
     return () => window.cancelAnimationFrame(frameId);
   }, [announce, open, target]);
 
   const formValidation = React.useMemo(
     () => validateProfileSkillsPersonaForm({ target, draft }),
-    [draft, target]
+    [draft, target],
   );
   const issues = React.useMemo(
-    () => [...formValidation.issues, ...bridgeIssues.map(toProfileSkillsPersonaIssue)],
-    [bridgeIssues, formValidation.issues]
+    () => [
+      ...formValidation.issues,
+      ...bridgeIssues.map(toProfileSkillsPersonaIssue),
+    ],
+    [bridgeIssues, formValidation.issues],
   );
   const issuesByField = React.useMemo(() => mapIssuesByField(issues), [issues]);
   const currentSerialized = serializeDraft(draft);
   const isDirty = open && currentSerialized !== baselineSerialized;
-  const hasSelection = Boolean(selectedRole.trim() && selectedAuthId.trim() && cwd.trim());
-  const hasCurrentPreview = previewStatus === "ready" && previewedSerialized === currentSerialized;
-  const hasBlockingIssues = issues.length > 0 || previewStatus === "error" || !hasSelection;
+  const hasSelection = Boolean(
+    selectedRole.trim() && selectedAuthId.trim() && cwd.trim(),
+  );
+  const hasCurrentPreview =
+    previewStatus === "ready" && previewedSerialized === currentSerialized;
+  const hasBlockingIssues =
+    issues.length > 0 || previewStatus === "error" || !hasSelection;
   const saveDisabledReason = getSaveDisabledReason({
     hasBlockingIssues,
     hasCurrentPreview,
@@ -290,9 +339,20 @@ export function ProfileSkillsPersonaPanel({
       errorMessage: null,
     });
     if (!formValidation.ok || target.status !== "writable") {
-      onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
+      onPreviewStateChange({
+        status: "idle",
+        effective: null,
+        diff: [],
+        errorMessage: null,
+      });
     }
-  }, [formValidation, onPreviewStateChange, onValidationStateChange, open, target.status]);
+  }, [
+    formValidation,
+    onPreviewStateChange,
+    onValidationStateChange,
+    open,
+    target.status,
+  ]);
 
   const resetPanelState = React.useCallback(() => {
     pendingLeaveContinuationRef.current = null;
@@ -307,7 +367,12 @@ export function ProfileSkillsPersonaPanel({
     setSkillCatalogError(null);
     setInstallingSkillId(null);
     onValidationStateChange({ status: "idle", issues: [], errorMessage: null });
-    onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
+    onPreviewStateChange({
+      status: "idle",
+      effective: null,
+      diff: [],
+      errorMessage: null,
+    });
   }, [onPreviewStateChange, onValidationStateChange]);
 
   const completeClose = React.useCallback(
@@ -316,7 +381,7 @@ export function ProfileSkillsPersonaPanel({
       onOpenChange(false);
       if (announceClosed) announce("Guided Skills & Persona closed");
     },
-    [announce, onOpenChange, resetPanelState]
+    [announce, onOpenChange, resetPanelState],
   );
 
   const completeCloseAndContinue = React.useCallback(
@@ -324,7 +389,7 @@ export function ProfileSkillsPersonaPanel({
       completeClose(announceClosed);
       window.setTimeout(() => continuation?.(), 0);
     },
-    [completeClose]
+    [completeClose],
   );
 
   const requestLeave = React.useCallback(
@@ -337,11 +402,15 @@ export function ProfileSkillsPersonaPanel({
       }
       completeCloseAndContinue(continuation);
     },
-    [announce, completeCloseAndContinue, isDirty, isSaving]
+    [announce, completeCloseAndContinue, isDirty, isSaving],
   );
 
   const updateDraft = React.useCallback(
-    (updater: (current: ProfileSkillsPersonaDraft) => ProfileSkillsPersonaDraft) => {
+    (
+      updater: (
+        current: ProfileSkillsPersonaDraft,
+      ) => ProfileSkillsPersonaDraft,
+    ) => {
       setSaveError(null);
       setBridgeIssues([]);
       setPreviewedSerialized(null);
@@ -351,48 +420,88 @@ export function ProfileSkillsPersonaPanel({
       setPersonaPreview(null);
       setDraft(updater);
     },
-    []
+    [],
   );
 
   const addRow = React.useCallback(
     (category: ProfileSkillsPersonaCategory, ref = "") => {
       updateDraft((current) => ({
-        rows: [...current.rows, createDefaultProfileSkillsPersonaDraftRow({ category, ref })],
+        rows: [
+          ...current.rows,
+          createDefaultProfileSkillsPersonaDraftRow({ category, ref }),
+        ],
       }));
     },
-    [updateDraft]
+    [updateDraft],
   );
 
   const updateRow = React.useCallback(
-    (rowId: string, patch: Partial<Pick<ProfileSkillsPersonaDraftRow, "category" | "ref">>) => {
+    (
+      rowId: string,
+      patch: Partial<Pick<ProfileSkillsPersonaDraftRow, "category" | "ref">>,
+    ) => {
       updateDraft((current) => ({
-        rows: current.rows.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+        rows: current.rows.map((row) =>
+          row.id === rowId ? { ...row, ...patch } : row,
+        ),
       }));
     },
-    [updateDraft]
+    [updateDraft],
   );
 
   const removeRow = React.useCallback(
     (rowId: string) => {
-      updateDraft((current) => ({ rows: current.rows.filter((row) => row.id !== rowId) }));
+      updateDraft((current) => ({
+        rows: current.rows.filter((row) => row.id !== rowId),
+      }));
     },
-    [updateDraft]
+    [updateDraft],
   );
 
-  const attachSkillRef = React.useCallback(
-    (skill: SkillCatalogItem) => {
-      const ref = safeSkillRefFromCatalogItem(skill);
-      if (!ref) {
-        const message = "That skill cannot be attached safely from the guided panel.";
+  const attachSkill = React.useCallback(
+    (
+      attachment: SafeProfileSkillAttachment,
+      trustedSource: "installed-skill" | "catalog-install",
+    ) => {
+      const existingSkillRefs = draft.rows
+        .filter((row) => row.category === "skills")
+        .map((row) => row.ref);
+      if (isDuplicateSkillAttachment(existingSkillRefs, attachment.ref)) {
+        const message = "That skill is already attached to this profile.";
         setSkillCatalogError(message);
         announce(message);
         return;
       }
-      addRow("skills", ref);
+      updateDraft((current) => ({
+        rows: [
+          ...current.rows,
+          createDefaultProfileSkillsPersonaDraftRow({
+            category: "skills",
+            ref: attachment.ref,
+            displayLabel: attachment.label,
+            trustedSource,
+          }),
+        ],
+      }));
       setSkillCatalogError(null);
-      announce(`Attached skill ${safeSkillName(skill)}`);
+      announce(`Attached skill ${attachment.label}`);
     },
-    [addRow, announce]
+    [announce, draft.rows, updateDraft],
+  );
+
+  const attachInstalledSkill = React.useCallback(
+    (skill: SkillCatalogItem) => {
+      const attachment = createInstalledSkillAttachment(skill);
+      if (!attachment) {
+        const message =
+          "That installed skill cannot be attached safely from the guided panel.";
+        setSkillCatalogError(message);
+        announce(message);
+        return;
+      }
+      attachSkill(attachment, "installed-skill");
+    },
+    [announce, attachSkill],
   );
 
   const loadInstalledSkills = React.useCallback(async () => {
@@ -406,14 +515,21 @@ export function ProfileSkillsPersonaPanel({
     setInstalledStatus("loading");
     setSkillCatalogError(null);
     try {
-      const result = await api.listInstalled({ scope: "global", agent: "claude-code" });
-      setInstalledSkills(result.skills.filter(hasSafeSkillName).slice(0, 30));
+      const result = await api.listInstalled({
+        scope: "global",
+        agent: "claude-code",
+      });
+      setInstalledSkills(
+        normalizeAgentProfileSkillItems(result.skills)
+          .filter((skill) => createInstalledSkillAttachment(skill) !== null)
+          .slice(0, 100),
+      );
       setInstalledStatus("ready");
       announce("Installed skills loaded");
     } catch (error) {
-      const message = formatSkillBridgeError(
+      const message = sanitizeSkillBridgeError(
         error,
-        "Installed skills could not be loaded. Try again later."
+        "Installed skills could not be loaded. Try again later.",
       );
       setInstalledStatus("error");
       setSkillCatalogError(message);
@@ -438,13 +554,21 @@ export function ProfileSkillsPersonaPanel({
     setSkillCatalogError(null);
     try {
       const result = await api.search({ query, limit: 10 });
-      setSkillResults(result.skills.filter(hasSafeSkillName).slice(0, 10));
+      const safeResults = normalizeAgentProfileSkillItems(result.skills).slice(
+        0,
+        10,
+      );
+      setSkillResults(safeResults);
       setSkillSearchStatus("ready");
-      announce("Skill search finished");
+      announce(
+        safeResults.length > 0
+          ? "Skill search finished"
+          : "Skill search found no matches",
+      );
     } catch (error) {
-      const message = formatSkillBridgeError(
+      const message = sanitizeSkillBridgeError(
         error,
-        "Skill search failed. Try a different query later."
+        "Skill search failed. Try a different query later.",
       );
       setSkillSearchStatus("error");
       setSkillCatalogError(message);
@@ -470,17 +594,28 @@ export function ProfileSkillsPersonaPanel({
           source: skill.source,
           ...(skill.installUrl ? { installUrl: skill.installUrl } : {}),
         });
-        attachSkillRef({ ...skill, name: result.name || skill.name });
-        announce(`Installed and attached skill ${safeSkillName(skill)}`);
+        const attachment = createCatalogInstallAttachment(skill, result);
+        if (!attachment) {
+          const message =
+            "Installed skill response could not be attached safely.";
+          setSkillCatalogError(message);
+          announce(message);
+          return;
+        }
+        attachSkill(attachment, "catalog-install");
+        announce(`Installed and attached skill ${attachment.label}`);
       } catch (error) {
-        const message = formatSkillBridgeError(error, "Skill install failed. Try again later.");
+        const message = sanitizeSkillBridgeError(
+          error,
+          "Skill install failed. Try again later.",
+        );
         setSkillCatalogError(message);
         announce(message);
       } finally {
         setInstallingSkillId(null);
       }
     },
-    [announce, attachSkillRef]
+    [announce, attachSkill],
   );
 
   const handlePreview = React.useCallback(async () => {
@@ -492,32 +627,58 @@ export function ProfileSkillsPersonaPanel({
       setPreviewError(null);
       setPreviewItems([]);
       setPersonaPreview(null);
-      onValidationStateChange({ status: "ready", issues: safeIssues, errorMessage: null });
-      onPreviewStateChange({ status: "idle", effective: null, diff: [], errorMessage: null });
+      onValidationStateChange({
+        status: "ready",
+        issues: safeIssues,
+        errorMessage: null,
+      });
+      onPreviewStateChange({
+        status: "idle",
+        effective: null,
+        diff: [],
+        errorMessage: null,
+      });
       announce("Skills & Persona needs field fixes before preview");
       return;
     }
     if (!hasSelection) {
-      const message = "Choose a valid Agent Profile before previewing Skills & Persona.";
+      const message =
+        "Choose a valid Agent Profile before previewing Skills & Persona.";
       setPreviewStatus("error");
       setPreviewError(message);
       setPreviewItems([]);
       setPersonaPreview(null);
-      onPreviewStateChange({ status: "error", effective: null, diff: [], errorMessage: message });
+      onPreviewStateChange({
+        status: "error",
+        effective: null,
+        diff: [],
+        errorMessage: message,
+      });
       announce(message);
       return;
     }
 
-    const baselineContent = target.status === "writable" ? target.content : null;
+    const baselineContent =
+      target.status === "writable" ? target.content : null;
     const profileApi = window.myclaude?.profile;
     const personaApi = window.myclaude?.persona;
     if (!profileApi?.validate || !personaApi?.preview) {
       const message = "Skills & Persona preview is unavailable right now.";
       setPreviewStatus("error");
       setPreviewError(message);
-      setPreviewItems(createSafeProfileSkillsPersonaPreviewSummary(baselineContent, patch.content));
+      setPreviewItems(
+        createSafeProfileSkillsPersonaPreviewSummary(
+          baselineContent,
+          patch.content,
+        ),
+      );
       setPersonaPreview(null);
-      onPreviewStateChange({ status: "error", effective: null, diff: [], errorMessage: message });
+      onPreviewStateChange({
+        status: "error",
+        effective: null,
+        diff: [],
+        errorMessage: message,
+      });
       announce("Skills & Persona preview failed");
       return;
     }
@@ -526,7 +687,12 @@ export function ProfileSkillsPersonaPanel({
     setPreviewStatus("loading");
     setPreviewError(null);
     setSaveError(null);
-    onPreviewStateChange({ status: "loading", effective: null, diff: [], errorMessage: null });
+    onPreviewStateChange({
+      status: "loading",
+      effective: null,
+      diff: [],
+      errorMessage: null,
+    });
     try {
       const [validationResult, personaPreviewResult] = await Promise.all([
         profileApi.validate({ content: patch.content }),
@@ -538,21 +704,39 @@ export function ProfileSkillsPersonaPanel({
         }),
       ]);
       const validationIssues = sanitizeValidationIssues(
-        normalizeValidationIssues(validationResult)
+        normalizeValidationIssues(validationResult),
       );
-      const personaResult = normalizePersonaPreviewResponse(personaPreviewResult);
-      const mergedIssues = mergeValidationIssues(validationIssues, personaResult.issues);
-      const summary = createSafeProfileSkillsPersonaPreviewSummary(baselineContent, patch.content);
+      const personaResult =
+        normalizePersonaPreviewResponse(personaPreviewResult);
+      const mergedIssues = mergeValidationIssues(
+        validationIssues,
+        personaResult.issues,
+      );
+      const summary = createSafeProfileSkillsPersonaPreviewSummary(
+        baselineContent,
+        patch.content,
+      );
       setBridgeIssues(mergedIssues);
       setPreviewItems(summary);
       setPersonaPreview(personaResult.preview);
-      onValidationStateChange({ status: "ready", issues: mergedIssues, errorMessage: null });
+      onValidationStateChange({
+        status: "ready",
+        issues: mergedIssues,
+        errorMessage: null,
+      });
 
       if (personaResult.status === "error" || mergedIssues.length > 0) {
-        const message = personaResult.errorMessage ?? "Skills & Persona preview needs attention.";
+        const message =
+          personaResult.errorMessage ??
+          "Skills & Persona preview needs attention.";
         setPreviewStatus("error");
         setPreviewError(message);
-        onPreviewStateChange({ status: "error", effective: null, diff: [], errorMessage: message });
+        onPreviewStateChange({
+          status: "error",
+          effective: null,
+          diff: [],
+          errorMessage: message,
+        });
         announce("Skills & Persona preview needs attention");
         return;
       }
@@ -569,20 +753,29 @@ export function ProfileSkillsPersonaPanel({
       announce(
         summary.length > 0
           ? "Skills & Persona preview ready"
-          : "Skills & Persona preview has no changes"
+          : "Skills & Persona preview has no changes",
       );
     } catch (error) {
       const message = formatProfileSkillsPersonaBridgeError(
         error,
-        "Skills & Persona preview could not be prepared. Review the selected assets and try again."
+        "Skills & Persona preview could not be prepared. Review the selected assets and try again.",
       );
       setBridgeIssues([]);
       setPreviewStatus("error");
       setPreviewError(message);
       setPreviewItems([]);
       setPersonaPreview(null);
-      onValidationStateChange({ status: "error", issues: [], errorMessage: message });
-      onPreviewStateChange({ status: "error", effective: null, diff: [], errorMessage: message });
+      onValidationStateChange({
+        status: "error",
+        issues: [],
+        errorMessage: message,
+      });
+      onPreviewStateChange({
+        status: "error",
+        effective: null,
+        diff: [],
+        errorMessage: message,
+      });
       announce("Skills & Persona preview failed");
     }
   }, [
@@ -601,116 +794,137 @@ export function ProfileSkillsPersonaPanel({
   const preparePatchForCurrentDraft = React.useCallback(
     async (profileApi: ProfileBridge) => {
       const listed = await profileApi.list({ cwd, roleFilter: selectedRole });
-      const latestTarget = resolveProfileSkillsPersonaTargetFromList({ listed, selectedRole });
-      const validation = validateProfileSkillsPersonaForm({ target: latestTarget, draft });
+      const latestTarget = resolveProfileSkillsPersonaTargetFromList({
+        listed,
+        selectedRole,
+      });
+      const validation = validateProfileSkillsPersonaForm({
+        target: latestTarget,
+        draft,
+      });
       if (!validation.ok || latestTarget.status !== "writable") {
         return {
           ok: false as const,
           message: issueMessage(
             validation.issues,
-            "Skills & Persona needs a writable profile target."
+            "Skills & Persona needs a writable profile target.",
           ),
           issues: validation.issues,
         };
       }
-      const patch = buildProfileSkillsPersonaPatch({ target: latestTarget, draft });
+      const patch = buildProfileSkillsPersonaPatch({
+        target: latestTarget,
+        draft,
+      });
       if (!patch.ok) {
         return {
           ok: false as const,
           message: issueMessage(
             patch.issues,
-            "Fix the highlighted Skills & Persona fields before saving."
+            "Fix the highlighted Skills & Persona fields before saving.",
           ),
           issues: patch.issues,
         };
       }
       return { ok: true as const, patch };
     },
-    [cwd, draft, selectedRole]
+    [cwd, draft, selectedRole],
   );
 
-  const saveSkillsPersonaDraft = React.useCallback(async (): Promise<SkillsPersonaSaveResult> => {
-    if (target.status !== "writable") {
-      const message = target.message;
-      setSaveError(message);
-      announce(message);
-      return { ok: false, message };
-    }
-    if (!hasSelection) {
-      const message = "Choose a valid Agent Profile before saving Skills & Persona.";
-      setSaveError(message);
-      announce(message);
-      return { ok: false, message };
-    }
-    if (!formValidation.ok || issues.length > 0) {
-      const message = "Fix the highlighted Skills & Persona fields before saving.";
-      setSaveError(message);
-      announce(message);
-      return { ok: false, message };
-    }
-    if (!hasCurrentPreview) {
-      const message = "Preview the current Skills & Persona draft before saving.";
-      setSaveError(message);
-      announce(message);
-      return { ok: false, message };
-    }
-
-    const profileApi = window.myclaude?.profile;
-    if (!profileApi?.save || !profileApi.list) {
-      const message = "Skills & Persona save is unavailable right now.";
-      setSaveError(message);
-      announce(message);
-      return { ok: false, message };
-    }
-
-    setIsSaving(true);
-    setSaveError(null);
-    try {
-      const prepared = await preparePatchForCurrentDraft(profileApi);
-      if (!prepared.ok) {
-        setBridgeIssues(prepared.issues.map(toValidationIssue));
-        setSaveError(prepared.message);
-        announce(prepared.message);
-        return { ok: false, message: prepared.message };
+  const saveSkillsPersonaDraft =
+    React.useCallback(async (): Promise<SkillsPersonaSaveResult> => {
+      if (target.status !== "writable") {
+        const message = target.message;
+        setSaveError(message);
+        announce(message);
+        return { ok: false, message };
+      }
+      if (!hasSelection) {
+        const message =
+          "Choose a valid Agent Profile before saving Skills & Persona.";
+        setSaveError(message);
+        announce(message);
+        return { ok: false, message };
+      }
+      if (!formValidation.ok || issues.length > 0) {
+        const message =
+          "Fix the highlighted Skills & Persona fields before saving.";
+        setSaveError(message);
+        announce(message);
+        return { ok: false, message };
+      }
+      if (!hasCurrentPreview) {
+        const message =
+          "Preview the current Skills & Persona draft before saving.";
+        setSaveError(message);
+        announce(message);
+        return { ok: false, message };
       }
 
-      await profileApi.save({ path: prepared.patch.path, content: prepared.patch.content });
-      await onSaved({ role: selectedRole, authProfileId: selectedAuthId, cwd });
-      setBaselineSerialized(currentSerialized);
-      setPreviewedSerialized(null);
-      announce("Guided Skills & Persona saved");
-      return { ok: true };
-    } catch (error) {
-      const message = formatProfileSkillsPersonaBridgeError(
-        error,
-        "Skills & Persona could not be saved. Review the selected assets and try again."
-      );
-      setSaveError(message);
-      announce(`Skills & Persona save failed: ${message}`);
-      return { ok: false, message };
-    } finally {
-      setIsSaving(false);
-    }
-  }, [
-    announce,
-    currentSerialized,
-    cwd,
-    formValidation.ok,
-    hasCurrentPreview,
-    hasSelection,
-    issues.length,
-    onSaved,
-    preparePatchForCurrentDraft,
-    selectedAuthId,
-    selectedRole,
-    target,
-  ]);
+      const profileApi = window.myclaude?.profile;
+      if (!profileApi?.save || !profileApi.list) {
+        const message = "Skills & Persona save is unavailable right now.";
+        setSaveError(message);
+        announce(message);
+        return { ok: false, message };
+      }
 
-  const saveSkillsPersonaAndClose = React.useCallback(async (): Promise<void> => {
-    const result = await saveSkillsPersonaDraft();
-    if (!result.ok) throw new Error(result.message);
-    completeClose(false);
-  }, [completeClose, saveSkillsPersonaDraft]);
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        const prepared = await preparePatchForCurrentDraft(profileApi);
+        if (!prepared.ok) {
+          setBridgeIssues(prepared.issues.map(toValidationIssue));
+          setSaveError(prepared.message);
+          announce(prepared.message);
+          return { ok: false, message: prepared.message };
+        }
+
+        await profileApi.save({
+          path: prepared.patch.path,
+          content: prepared.patch.content,
+        });
+        await onSaved({
+          role: selectedRole,
+          authProfileId: selectedAuthId,
+          cwd,
+        });
+        setBaselineSerialized(currentSerialized);
+        setPreviewedSerialized(null);
+        announce("Guided Skills & Persona saved");
+        return { ok: true };
+      } catch (error) {
+        const message = formatProfileSkillsPersonaBridgeError(
+          error,
+          "Skills & Persona could not be saved. Review the selected assets and try again.",
+        );
+        setSaveError(message);
+        announce(`Skills & Persona save failed: ${message}`);
+        return { ok: false, message };
+      } finally {
+        setIsSaving(false);
+      }
+    }, [
+      announce,
+      currentSerialized,
+      cwd,
+      formValidation.ok,
+      hasCurrentPreview,
+      hasSelection,
+      issues.length,
+      onSaved,
+      preparePatchForCurrentDraft,
+      selectedAuthId,
+      selectedRole,
+      target,
+    ]);
+
+  const saveSkillsPersonaAndClose =
+    React.useCallback(async (): Promise<void> => {
+      const result = await saveSkillsPersonaDraft();
+      if (!result.ok) throw new Error(result.message);
+      completeClose(false);
+    }, [completeClose, saveSkillsPersonaDraft]);
 
   const handleSave = React.useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -718,7 +932,7 @@ export function ProfileSkillsPersonaPanel({
       const result = await saveSkillsPersonaDraft();
       if (result.ok) completeClose(false);
     },
-    [completeClose, saveSkillsPersonaDraft]
+    [completeClose, saveSkillsPersonaDraft],
   );
 
   const discardSkillsPersonaAndClose = React.useCallback(() => {
@@ -753,7 +967,7 @@ export function ProfileSkillsPersonaPanel({
     () => () => {
       setSkillsPersonaNavigationGuard(null);
     },
-    [setSkillsPersonaNavigationGuard]
+    [setSkillsPersonaNavigationGuard],
   );
 
   const cancelDirtyPrompt = React.useCallback(() => {
@@ -791,7 +1005,11 @@ export function ProfileSkillsPersonaPanel({
   }, [cancelDirtyPrompt, dirtyPromptOpen, open, requestLeave]);
 
   const targetTone =
-    target.status === "writable" ? "success" : target.status === "invalid" ? "danger" : "warning";
+    target.status === "writable"
+      ? "success"
+      : target.status === "invalid"
+        ? "danger"
+        : "warning";
   const previewTone =
     previewStatus === "ready"
       ? previewItems.length > 0
@@ -811,7 +1029,10 @@ export function ProfileSkillsPersonaPanel({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm" aria-hidden="true" />
+      <div
+        className="fixed inset-0 z-50 bg-overlay backdrop-blur-sm"
+        aria-hidden="true"
+      />
       <dialog
         aria-labelledby="profile-skills-persona-title"
         aria-modal="true"
@@ -823,7 +1044,10 @@ export function ProfileSkillsPersonaPanel({
         }}
         open
       >
-        <form className="flex max-h-[92vh] min-h-0 flex-col" onSubmit={handleSave}>
+        <form
+          className="flex max-h-[92vh] min-h-0 flex-col"
+          onSubmit={handleSave}
+        >
           <header className="border-b border-subtle bg-surface/95 px-6 py-5">
             <div className="flex min-w-0 items-start justify-between gap-4">
               <div className="flex min-w-0 gap-3">
@@ -839,8 +1063,8 @@ export function ProfileSkillsPersonaPanel({
                     Customize skills & persona for {profile.name}
                   </h2>
                   <p className="mt-1 text-sm leading-6 text-secondary">
-                    Attach profile-owned skills, instructions, agents, commands, and memory with
-                    safe previews before saving.
+                    Attach profile-owned skills, instructions, agents, commands,
+                    and memory with safe previews before saving.
                   </p>
                 </div>
               </div>
@@ -864,11 +1088,17 @@ export function ProfileSkillsPersonaPanel({
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-primary">Target status</h3>
-                    <p className="mt-1 text-sm leading-6 text-secondary">{targetMessage}</p>
+                    <h3 className="text-sm font-semibold text-primary">
+                      Target status
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-secondary">
+                      {targetMessage}
+                    </p>
                   </div>
                   <StatusChip tone={targetTone}>
-                    {target.status === "writable" ? "Ready to edit" : "Needs advanced edit"}
+                    {target.status === "writable"
+                      ? "Ready to edit"
+                      : "Needs advanced edit"}
                   </StatusChip>
                 </div>
                 {target.status !== "writable" ? (
@@ -892,15 +1122,27 @@ export function ProfileSkillsPersonaPanel({
                   issuesByField={issuesByField}
                   key={category}
                   onAdd={() => addRow(category)}
-                  onLoadInstalled={category === "skills" ? loadInstalledSkills : undefined}
-                  onSearchSkills={category === "skills" ? searchSkills : undefined}
-                  onSkillQueryChange={category === "skills" ? setSkillQuery : undefined}
-                  onInstallSkill={category === "skills" ? installSkill : undefined}
-                  onAttachSkill={category === "skills" ? attachSkillRef : undefined}
+                  onLoadInstalled={
+                    category === "skills" ? loadInstalledSkills : undefined
+                  }
+                  onSearchSkills={
+                    category === "skills" ? searchSkills : undefined
+                  }
+                  onSkillQueryChange={
+                    category === "skills" ? setSkillQuery : undefined
+                  }
+                  onInstallSkill={
+                    category === "skills" ? installSkill : undefined
+                  }
+                  onAttachSkill={
+                    category === "skills" ? attachInstalledSkill : undefined
+                  }
                   onRemove={removeRow}
                   onUpdate={updateRow}
                   rows={draft.rows.filter((row) => row.category === category)}
-                  initialFocusRef={category === "skills" ? initialFocusRef : undefined}
+                  initialFocusRef={
+                    category === "skills" ? initialFocusRef : undefined
+                  }
                   installedSkills={installedSkills}
                   installedStatus={installedStatus}
                   installingSkillId={installingSkillId}
@@ -966,11 +1208,15 @@ export function ProfileSkillsPersonaPanel({
                     </ul>
                   ) : null}
 
-                  {personaPreview ? <PersonaPreviewDetails preview={personaPreview} /> : null}
+                  {personaPreview ? (
+                    <PersonaPreviewDetails preview={personaPreview} />
+                  ) : null}
                 </div>
 
                 <div className="rounded-xl border border-default bg-surface p-4">
-                  <h3 className="text-sm font-semibold text-primary">Save readiness</h3>
+                  <h3 className="text-sm font-semibold text-primary">
+                    Save readiness
+                  </h3>
                   <ul className="mt-3 grid gap-2 text-sm text-secondary">
                     <ReadinessLine ok={target.status === "writable"}>
                       Writable profile target
@@ -978,22 +1224,36 @@ export function ProfileSkillsPersonaPanel({
                     <ReadinessLine ok={hasSelection}>
                       Selected profile still available
                     </ReadinessLine>
-                    <ReadinessLine ok={formValidation.ok}>Valid persona rows</ReadinessLine>
-                    <ReadinessLine ok={hasCurrentPreview}>Current draft previewed</ReadinessLine>
+                    <ReadinessLine ok={formValidation.ok}>
+                      Valid persona rows
+                    </ReadinessLine>
+                    <ReadinessLine ok={hasCurrentPreview}>
+                      Current draft previewed
+                    </ReadinessLine>
                   </ul>
                 </div>
 
-                {issues.length > 0 || saveError || !hasSelection || target.status !== "writable" ? (
+                {issues.length > 0 ||
+                saveError ||
+                !hasSelection ||
+                target.status !== "writable" ? (
                   <div
                     className="rounded-xl border border-status-danger bg-status-danger-soft p-4 text-sm text-status-danger"
                     data-testid="profile-skills-persona-error"
                     role="alert"
                   >
-                    <p className="font-semibold">Skills & Persona needs attention</p>
+                    <p className="font-semibold">
+                      Skills & Persona needs attention
+                    </p>
                     <ul className="mt-2 grid gap-1">
-                      {target.status !== "writable" ? <li>{target.message}</li> : null}
+                      {target.status !== "writable" ? (
+                        <li>{target.message}</li>
+                      ) : null}
                       {!hasSelection ? (
-                        <li>Choose a valid Agent Profile before saving Skills & Persona.</li>
+                        <li>
+                          Choose a valid Agent Profile before saving Skills &
+                          Persona.
+                        </li>
                       ) : null}
                       {issues.slice(0, 5).map((issue, index) => (
                         <li key={`${issue.path}:${index}`}>{issue.message}</li>
@@ -1047,7 +1307,10 @@ export function ProfileSkillsPersonaPanel({
 
       {dirtyPromptOpen ? (
         <>
-          <div className="fixed inset-0 z-[60] bg-overlay/80 backdrop-blur-sm" aria-hidden="true" />
+          <div
+            className="fixed inset-0 z-[60] bg-overlay/80 backdrop-blur-sm"
+            aria-hidden="true"
+          />
           <dialog
             aria-labelledby="profile-skills-persona-dirty-title"
             aria-modal="true"
@@ -1063,8 +1326,8 @@ export function ProfileSkillsPersonaPanel({
                 Save Skills & Persona changes?
               </h2>
               <p className="text-sm text-muted-foreground">
-                You have unsaved guided Skills & Persona edits. Save before leaving, discard the
-                draft, or stay here to keep editing.
+                You have unsaved guided Skills & Persona edits. Save before
+                leaving, discard the draft, or stay here to keep editing.
               </p>
             </header>
             {saveDisabledReason ? (
@@ -1143,18 +1406,20 @@ function CategorySection({
   installedSkills: readonly SkillCatalogItem[];
   installedStatus: SkillsPersonaAsyncStatus;
   installingSkillId: string | null;
-  issuesByField: Partial<Record<ProfileSkillsPersonaValidationIssue["field"], string>>;
-  initialFocusRef?: React.Ref<HTMLButtonElement>;
+  issuesByField: Partial<
+    Record<ProfileSkillsPersonaValidationIssue["field"], string>
+  >;
+  initialFocusRef?: React.Ref<HTMLButtonElement> | undefined;
   onAdd: () => void;
-  onAttachSkill?: (skill: SkillCatalogItem) => void;
-  onInstallSkill?: (skill: SkillCatalogItem) => void;
-  onLoadInstalled?: () => void;
+  onAttachSkill?: ((skill: SkillCatalogItem) => void) | undefined;
+  onInstallSkill?: ((skill: SkillCatalogItem) => void) | undefined;
+  onLoadInstalled?: (() => void) | undefined;
   onRemove: (rowId: string) => void;
-  onSearchSkills?: () => void;
-  onSkillQueryChange?: (query: string) => void;
+  onSearchSkills?: (() => void) | undefined;
+  onSkillQueryChange?: ((query: string) => void) | undefined;
   onUpdate: (
     rowId: string,
-    patch: Partial<Pick<ProfileSkillsPersonaDraftRow, "category" | "ref">>
+    patch: Partial<Pick<ProfileSkillsPersonaDraftRow, "category" | "ref">>,
   ) => void;
   rows: readonly ProfileSkillsPersonaDraftRow[];
   skillCatalogError: string | null;
@@ -1175,7 +1440,9 @@ function CategorySection({
             <Icon className="h-4 w-4 text-secondary" aria-hidden="true" />
             {config.label}
           </h3>
-          <p className="mt-1 text-sm leading-6 text-secondary">{config.description}</p>
+          <p className="mt-1 text-sm leading-6 text-secondary">
+            {config.description}
+          </p>
         </div>
         <Button
           data-testid={`profile-skills-persona-add-${category}`}
@@ -1198,71 +1465,96 @@ function CategorySection({
 
       {rows.length > 0 ? (
         <div className="mt-4 grid gap-3">
-          {rows.map((row, index) => (
-            <div
-              className="rounded-lg border border-subtle bg-canvas/60 p-3"
-              data-testid="profile-skills-persona-row"
-              key={row.id}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">
-                    {config.noun} {index + 1}
-                  </p>
-                  <p className="mt-1 truncate text-sm font-medium text-primary">
-                    {safeRowLabel(row, category)}
-                  </p>
-                </div>
-                <Button
-                  aria-label={`Remove ${config.noun} ${index + 1}`}
-                  className="min-h-10"
-                  disabled={disabled}
-                  onClick={() => onRemove(row.id)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  Remove
-                </Button>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)]">
-                <Field label="Category">
-                  <select
-                    aria-label={`${config.noun} ${index + 1} category`}
-                    className="min-h-10 rounded-md border border-default bg-canvas px-3 text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+          {rows.map((row, index) => {
+            const isOpaqueSkillRow =
+              row.category === "skills" &&
+              isProfileSkillsPersonaOpaqueSkillRef(row.ref);
+            return (
+              <div
+                className="rounded-lg border border-subtle bg-canvas/60 p-3"
+                data-testid="profile-skills-persona-row"
+                key={row.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+                      {config.noun} {index + 1}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-medium text-primary">
+                      {safeRowLabel(row, category)}
+                    </p>
+                  </div>
+                  <Button
+                    aria-label={`Remove ${config.noun} ${index + 1}`}
+                    className="min-h-10"
                     disabled={disabled}
-                    onChange={(event) =>
-                      onUpdate(row.id, {
-                        category: event.currentTarget.value as ProfileSkillsPersonaCategory,
-                      })
-                    }
-                    value={row.category}
+                    onClick={() => onRemove(row.id)}
+                    type="button"
+                    variant="ghost"
                   >
-                    {PROFILE_SKILLS_PERSONA_CATEGORIES.map((option) => (
-                      <option key={option} value={option}>
-                        {CATEGORY_CONFIG[option].label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field
-                  description="Use a safe asset reference. Credentials and raw local paths are blocked."
-                  label="Asset reference"
-                  {...fieldErrorProps(issuesByField.ref)}
-                >
-                  <Input
-                    aria-invalid={issuesByField.ref ? true : undefined}
-                    className="font-mono text-xs"
-                    data-testid="profile-skills-persona-ref-input"
-                    disabled={disabled}
-                    onChange={(event) => onUpdate(row.id, { ref: event.currentTarget.value })}
-                    placeholder={CATEGORY_CONFIG[row.category]?.placeholder ?? config.placeholder}
-                    value={row.ref}
-                  />
-                </Field>
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Remove
+                  </Button>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)]">
+                  <Field label="Category">
+                    <select
+                      aria-label={`${config.noun} ${index + 1} category`}
+                      className="min-h-10 rounded-md border border-default bg-canvas px-3 text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={disabled || isOpaqueSkillRow}
+                      onChange={(event) =>
+                        onUpdate(row.id, {
+                          category: event.currentTarget
+                            .value as ProfileSkillsPersonaCategory,
+                        })
+                      }
+                      value={row.category}
+                    >
+                      {PROFILE_SKILLS_PERSONA_CATEGORIES.map((option) => (
+                        <option key={option} value={option}>
+                          {CATEGORY_CONFIG[option].label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {isOpaqueSkillRow ? (
+                    <Field
+                      description="Installed skill references are managed safely by the skills bridge. Remove this row to replace it."
+                      label="Attached skill"
+                    >
+                      <div
+                        className="min-h-10 rounded-md border border-subtle bg-canvas px-3 py-2 text-sm font-medium text-primary"
+                        data-testid="profile-skills-persona-safe-skill-ref"
+                      >
+                        {safeRowLabel(row, category)}
+                      </div>
+                    </Field>
+                  ) : (
+                    <Field
+                      description="Use a safe asset reference. Credentials and raw local paths are blocked."
+                      label="Asset reference"
+                      {...fieldErrorProps(issuesByField.ref)}
+                    >
+                      <Input
+                        aria-invalid={issuesByField.ref ? true : undefined}
+                        className="font-mono text-xs"
+                        data-testid="profile-skills-persona-ref-input"
+                        disabled={disabled}
+                        onChange={(event) =>
+                          onUpdate(row.id, { ref: event.currentTarget.value })
+                        }
+                        placeholder={
+                          CATEGORY_CONFIG[row.category]?.placeholder ??
+                          config.placeholder
+                        }
+                        value={row.ref}
+                      />
+                    </Field>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p
@@ -1313,11 +1605,11 @@ function SkillCatalogPanel({
   installedSkills: readonly SkillCatalogItem[];
   installedStatus: SkillsPersonaAsyncStatus;
   installingSkillId: string | null;
-  onAttachSkill?: (skill: SkillCatalogItem) => void;
-  onInstallSkill?: (skill: SkillCatalogItem) => void;
-  onLoadInstalled?: () => void;
-  onSearchSkills?: () => void;
-  onSkillQueryChange?: (query: string) => void;
+  onAttachSkill?: ((skill: SkillCatalogItem) => void) | undefined;
+  onInstallSkill?: ((skill: SkillCatalogItem) => void) | undefined;
+  onLoadInstalled?: (() => void) | undefined;
+  onSearchSkills?: (() => void) | undefined;
+  onSkillQueryChange?: ((query: string) => void) | undefined;
   skillCatalogError: string | null;
   skillQuery: string;
   skillResults: readonly SkillCatalogItem[];
@@ -1334,10 +1626,12 @@ function SkillCatalogPanel({
             Installed and catalog skills
           </h4>
           <p className="mt-1 text-sm text-secondary">
-            Load installed skills or search the catalog, then attach by safe skill name.
+            Load installed skills or search the catalog, then attach by safe
+            skill name.
           </p>
         </div>
         <Button
+          data-testid="profile-skills-persona-load-installed"
           disabled={disabled || installedStatus === "loading"}
           onClick={onLoadInstalled}
           type="button"
@@ -1392,30 +1686,26 @@ function SkillCatalogPanel({
       {skillSearchStatus === "ready" ? (
         <div className="mt-3 grid gap-2">
           {skillResults.length > 0 ? (
-            skillResults.map((skill) => (
-              <div
-                className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-subtle bg-surface px-3 py-2 text-sm"
-                key={skill.id}
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-primary">{safeSkillName(skill)}</p>
-                  {skill.description ? (
-                    <p className="mt-1 line-clamp-2 text-secondary">
-                      {safeSkillDescription(skill.description)}
+            skillResults.map((skill) => {
+              const description = safeSkillDescription(skill.description);
+              return (
+                <div
+                  className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-subtle bg-surface px-3 py-2 text-sm"
+                  data-testid="profile-skills-persona-catalog-skill"
+                  key={skill.id}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-primary">
+                      {safeSkillName(skill)}
                     </p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
+                    {description ? (
+                      <p className="mt-1 line-clamp-2 text-secondary">
+                        {description}
+                      </p>
+                    ) : null}
+                  </div>
                   <Button
-                    disabled={disabled}
-                    onClick={() => onAttachSkill?.(skill)}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Attach
-                  </Button>
-                  <Button
+                    data-testid="profile-skills-persona-install-skill"
                     disabled={disabled || installingSkillId === skill.id}
                     onClick={() => onInstallSkill?.(skill)}
                     size="sm"
@@ -1426,8 +1716,8 @@ function SkillCatalogPanel({
                     {installingSkillId === skill.id ? "Installing…" : "Install"}
                   </Button>
                 </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <p className="rounded-md border border-dashed border-subtle bg-canvas/60 px-3 py-4 text-sm text-secondary">
               No catalog skills matched that search.
@@ -1448,7 +1738,7 @@ function SkillList({
   disabled: boolean;
   empty: string;
   items: readonly SkillCatalogItem[];
-  onAttach?: (skill: SkillCatalogItem) => void;
+  onAttach?: ((skill: SkillCatalogItem) => void) | undefined;
 }): React.ReactElement {
   if (items.length === 0) {
     return (
@@ -1462,10 +1752,14 @@ function SkillList({
       {items.map((skill) => (
         <li
           className="flex items-center justify-between gap-3 rounded-md border border-subtle bg-surface px-3 py-2 text-sm"
+          data-testid="profile-skills-persona-installed-skill"
           key={skill.id}
         >
-          <span className="min-w-0 truncate font-medium text-primary">{safeSkillName(skill)}</span>
+          <span className="min-w-0 truncate font-medium text-primary">
+            {safeSkillName(skill)}
+          </span>
           <Button
+            data-testid="profile-skills-persona-attach-installed-skill"
             disabled={disabled}
             onClick={() => onAttach?.(skill)}
             size="sm"
@@ -1482,7 +1776,9 @@ function SkillList({
 
 function PersonaPreviewDetails({
   preview,
-}: { preview: PersonaPreviewPayload }): React.ReactElement {
+}: {
+  preview: PersonaPreviewPayload;
+}): React.ReactElement {
   const warnings = [...preview.missingSources, ...preview.collisions];
   return (
     <div className="mt-4 grid gap-3">
@@ -1520,15 +1816,17 @@ function PersonaPreviewDetails({
       ) : null}
       {warnings.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">Warnings</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+            Warnings
+          </p>
           <ul className="mt-2 grid gap-2">
             {preview.missingSources.map((item, index) => (
               <li
                 className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning"
                 key={`missing:${item.category}:${item.basename}:${index}`}
               >
-                {CATEGORY_CONFIG[item.category].label} · {item.basename} · Source could not be
-                found.
+                {CATEGORY_CONFIG[item.category].label} · {item.basename} ·
+                Source could not be found.
               </li>
             ))}
             {preview.collisions.map((item, index) => (
@@ -1536,8 +1834,9 @@ function PersonaPreviewDetails({
                 className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning"
                 key={`collision:${item.category}:${item.basename}:${index}`}
               >
-                {CATEGORY_CONFIG[item.category].label} · {item.basename} · {item.hiddenCount} hidden
-                source{item.hiddenCount === 1 ? "" : "s"}.
+                {CATEGORY_CONFIG[item.category].label} · {item.basename} ·{" "}
+                {item.hiddenCount} hidden source
+                {item.hiddenCount === 1 ? "" : "s"}.
               </li>
             ))}
           </ul>
@@ -1546,7 +1845,8 @@ function PersonaPreviewDetails({
       {preview.metrics.truncatedItemCount > 0 ? (
         <p className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning">
           {preview.metrics.truncatedItemCount} additional preview item
-          {preview.metrics.truncatedItemCount === 1 ? "" : "s"} hidden to keep this panel calm.
+          {preview.metrics.truncatedItemCount === 1 ? "" : "s"} hidden to keep
+          this panel calm.
         </p>
       ) : null}
     </div>
@@ -1556,15 +1856,26 @@ function PersonaPreviewDetails({
 function ReadinessLine({
   children,
   ok,
-}: { children: React.ReactNode; ok: boolean }): React.ReactElement {
+}: {
+  children: React.ReactNode;
+  ok: boolean;
+}): React.ReactElement {
   return (
     <li className="flex items-center gap-2">
       {ok ? (
-        <CheckCircle2 className="h-4 w-4 text-status-success" aria-hidden="true" />
+        <CheckCircle2
+          className="h-4 w-4 text-status-success"
+          aria-hidden="true"
+        />
       ) : (
-        <AlertTriangle className="h-4 w-4 text-status-warning" aria-hidden="true" />
+        <AlertTriangle
+          className="h-4 w-4 text-status-warning"
+          aria-hidden="true"
+        />
       )}
-      <span className={ok ? "text-secondary" : "text-status-warning"}>{children}</span>
+      <span className={ok ? "text-secondary" : "text-status-warning"}>
+        {children}
+      </span>
     </li>
   );
 }
@@ -1576,14 +1887,21 @@ function serializeDraft(draft: ProfileSkillsPersonaDraft): string {
 }
 
 function mapIssuesByField(
-  issues: readonly { field: ProfileSkillsPersonaValidationIssue["field"]; message: string }[]
+  issues: readonly {
+    field: ProfileSkillsPersonaValidationIssue["field"];
+    message: string;
+  }[],
 ): Partial<Record<ProfileSkillsPersonaValidationIssue["field"], string>> {
-  const byField: Partial<Record<ProfileSkillsPersonaValidationIssue["field"], string>> = {};
+  const byField: Partial<
+    Record<ProfileSkillsPersonaValidationIssue["field"], string>
+  > = {};
   for (const issue of issues) byField[issue.field] ??= issue.message;
   return byField;
 }
 
-function toProfileSkillsPersonaIssue(issue: ValidationIssue): ProfileSkillsPersonaValidationIssue {
+function toProfileSkillsPersonaIssue(
+  issue: ValidationIssue,
+): ProfileSkillsPersonaValidationIssue {
   return {
     field: "target",
     path: safeIssuePath(issue.path),
@@ -1592,11 +1910,19 @@ function toProfileSkillsPersonaIssue(issue: ValidationIssue): ProfileSkillsPerso
   };
 }
 
-function toValidationIssue(issue: ProfileSkillsPersonaValidationIssue): ValidationIssue {
-  return { path: safeIssuePath(issue.path), message: issue.message, severity: issue.severity };
+function toValidationIssue(
+  issue: ProfileSkillsPersonaValidationIssue,
+): ValidationIssue {
+  return {
+    path: safeIssuePath(issue.path),
+    message: issue.message,
+    severity: issue.severity,
+  };
 }
 
-function sanitizeValidationIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
+function sanitizeValidationIssues(
+  issues: readonly ValidationIssue[],
+): ValidationIssue[] {
   return issues.map((issue, index) => ({
     path: safeIssuePath(issue.path || `profile-skills-persona.${index + 1}`),
     severity: issue.severity || "error",
@@ -1610,16 +1936,25 @@ function safeIssuePath(path: string): string {
 }
 
 function safeValidationMessage(issue: ValidationIssue): string {
-  if (UNSAFE_VISIBLE_TEXT_RE.test(issue.message) || UNSAFE_VISIBLE_TEXT_RE.test(issue.path)) {
+  if (
+    UNSAFE_VISIBLE_TEXT_RE.test(issue.message) ||
+    UNSAFE_VISIBLE_TEXT_RE.test(issue.path)
+  ) {
     return "Skills & Persona needs a safe asset reference before saving.";
   }
-  if (/persona|skill|agent|command|memory|preview|render|source|collision/i.test(issue.message)) {
+  if (
+    /persona|skill|agent|command|memory|preview|render|source|collision/i.test(
+      issue.message,
+    )
+  ) {
     return issue.message;
   }
   return "Skills & Persona needs a safe value before saving.";
 }
 
-function normalizePersonaPreviewResponse(input: unknown): PersonaPreviewAdapterResult {
+function normalizePersonaPreviewResponse(
+  input: unknown,
+): PersonaPreviewAdapterResult {
   if (!isRecord(input)) {
     return {
       status: "error",
@@ -1628,7 +1963,9 @@ function normalizePersonaPreviewResponse(input: unknown): PersonaPreviewAdapterR
       errorMessage: "Skills & Persona preview returned an invalid response.",
     };
   }
-  const issues = sanitizeValidationIssues(normalizeValidationIssues(input.issues ?? []));
+  const issues = sanitizeValidationIssues(
+    normalizeValidationIssues(input.issues ?? []),
+  );
   const preview = normalizePersonaPreviewPayload(input.preview);
   const failure = normalizePersonaPreviewFailure(input.failure);
   if (failure) {
@@ -1645,21 +1982,41 @@ function normalizePersonaPreviewResponse(input: unknown): PersonaPreviewAdapterR
   return { status: "ready", issues, preview, errorMessage: null };
 }
 
-function normalizePersonaPreviewPayload(input: unknown): PersonaPreviewPayload | null {
+function normalizePersonaPreviewPayload(
+  input: unknown,
+): PersonaPreviewPayload | null {
   if (!isRecord(input)) return null;
   const metricsInput = isRecord(input.metrics) ? input.metrics : {};
   return {
-    categoryCounts: readArray(input.categoryCounts).map(normalizeCategoryCount).filter(isNonNull),
-    basenames: readArray(input.basenames).map(normalizeBasename).filter(isNonNull),
-    missingSources: readArray(input.missingSources).map(normalizeMissingSource).filter(isNonNull),
-    collisions: readArray(input.collisions).map(normalizeCollision).filter(isNonNull),
+    categoryCounts: readArray(input.categoryCounts)
+      .map(normalizeCategoryCount)
+      .filter(isNonNull),
+    basenames: readArray(input.basenames)
+      .map(normalizeBasename)
+      .filter(isNonNull),
+    missingSources: readArray(input.missingSources)
+      .map(normalizeMissingSource)
+      .filter(isNonNull),
+    collisions: readArray(input.collisions)
+      .map(normalizeCollision)
+      .filter(isNonNull),
     metrics: {
-      claudeMdSectionCount: readNonNegativeNumber(metricsInput.claudeMdSectionCount),
-      claudeMdCharacterCount: readNonNegativeNumber(metricsInput.claudeMdCharacterCount),
+      claudeMdSectionCount: readNonNegativeNumber(
+        metricsInput.claudeMdSectionCount,
+      ),
+      claudeMdCharacterCount: readNonNegativeNumber(
+        metricsInput.claudeMdCharacterCount,
+      ),
       fileCount: readNonNegativeNumber(metricsInput.fileCount),
-      fileCharacterCount: readNonNegativeNumber(metricsInput.fileCharacterCount),
-      totalCharacterCount: readNonNegativeNumber(metricsInput.totalCharacterCount),
-      truncatedItemCount: readNonNegativeNumber(metricsInput.truncatedItemCount),
+      fileCharacterCount: readNonNegativeNumber(
+        metricsInput.fileCharacterCount,
+      ),
+      totalCharacterCount: readNonNegativeNumber(
+        metricsInput.totalCharacterCount,
+      ),
+      truncatedItemCount: readNonNegativeNumber(
+        metricsInput.truncatedItemCount,
+      ),
     },
   };
 }
@@ -1673,9 +2030,14 @@ function normalizePersonaPreviewFailure(input: unknown): string | null {
   return message;
 }
 
-function normalizeCategoryCount(input: unknown): PersonaPreviewCategoryCount | null {
+function normalizeCategoryCount(
+  input: unknown,
+): PersonaPreviewCategoryCount | null {
   if (!isRecord(input) || !isCategory(input.category)) return null;
-  return { category: input.category, count: readNonNegativeNumber(input.count) };
+  return {
+    category: input.category,
+    count: readNonNegativeNumber(input.count),
+  };
 }
 
 function normalizeBasename(input: unknown): PersonaPreviewBasename | null {
@@ -1684,15 +2046,23 @@ function normalizeBasename(input: unknown): PersonaPreviewBasename | null {
   return basename ? { category: input.category, basename } : null;
 }
 
-function normalizeMissingSource(input: unknown): PersonaPreviewMissingSourceWarning | null {
+function normalizeMissingSource(
+  input: unknown,
+): PersonaPreviewMissingSourceWarning | null {
   if (!isRecord(input) || !isCategory(input.category)) return null;
   const basename = safeVisibleSegment(input.basename);
   return basename
-    ? { category: input.category, basename, count: Math.max(1, readNonNegativeNumber(input.count)) }
+    ? {
+        category: input.category,
+        basename,
+        count: Math.max(1, readNonNegativeNumber(input.count)),
+      }
     : null;
 }
 
-function normalizeCollision(input: unknown): PersonaPreviewCollisionWarning | null {
+function normalizeCollision(
+  input: unknown,
+): PersonaPreviewCollisionWarning | null {
   if (!isRecord(input) || !isFileCategory(input.category)) return null;
   const basename = safeVisibleSegment(input.basename);
   return basename
@@ -1705,7 +2075,7 @@ function normalizeCollision(input: unknown): PersonaPreviewCollisionWarning | nu
 }
 
 function createPersonaDiffSummary(
-  items: readonly ProfileSkillsPersonaPreviewSummaryItem[]
+  items: readonly ProfileSkillsPersonaPreviewSummaryItem[],
 ): DiffItem[] {
   return items.map((item) => ({
     section: "persona",
@@ -1739,28 +2109,34 @@ function getSaveDisabledReason(input: {
   isSaving: boolean;
   previewStatus: SkillsPersonaAsyncStatus;
 }): string | null {
-  if (input.targetStatus !== "writable") return "Skills & Persona needs a writable profile target.";
-  if (!input.hasSelection) return "Choose a valid Agent Profile before saving Skills & Persona.";
+  if (input.targetStatus !== "writable")
+    return "Skills & Persona needs a writable profile target.";
+  if (!input.hasSelection)
+    return "Choose a valid Agent Profile before saving Skills & Persona.";
   if (!input.isDirty) return "No Skills & Persona changes to save.";
-  if (input.hasBlockingIssues) return "Fix the highlighted Skills & Persona fields before saving.";
+  if (input.hasBlockingIssues)
+    return "Fix the highlighted Skills & Persona fields before saving.";
   if (input.previewStatus === "loading" || input.previewStatus === "pending")
     return "Wait for Skills & Persona preview to finish checking.";
-  if (!input.hasCurrentPreview) return "Preview the current Skills & Persona draft before saving.";
+  if (!input.hasCurrentPreview)
+    return "Preview the current Skills & Persona draft before saving.";
   if (input.isSaving) return "Skills & Persona is saving.";
   return null;
 }
 
 function issueMessage(
   issues: readonly ProfileSkillsPersonaValidationIssue[],
-  fallback: string
+  fallback: string,
 ): string {
   return (
-    issues.find((issue) => issue.field === "target")?.message ?? issues[0]?.message ?? fallback
+    issues.find((issue) => issue.field === "target")?.message ??
+    issues[0]?.message ??
+    fallback
   );
 }
 
 function fieldErrorProps(
-  error: string | null | undefined
+  error: string | null | undefined,
 ): { error: string } | Record<string, never> {
   return error ? { error } : {};
 }
@@ -1773,7 +2149,9 @@ function formatPreviewStatus(status: SkillsPersonaAsyncStatus): string {
   return "Waiting";
 }
 
-function formatPreviewChange(change: ProfileSkillsPersonaPreviewSummaryItem["change"]): string {
+function formatPreviewChange(
+  change: ProfileSkillsPersonaPreviewSummaryItem["change"],
+): string {
   if (change === "added") return "Adds";
   if (change === "removed") return "Removes";
   return "Changes";
@@ -1781,55 +2159,14 @@ function formatPreviewChange(change: ProfileSkillsPersonaPreviewSummaryItem["cha
 
 function safeRowLabel(
   row: ProfileSkillsPersonaDraftRow,
-  category: ProfileSkillsPersonaCategory
+  category: ProfileSkillsPersonaCategory,
 ): string {
   return (
     safeVisibleSegment(row.displayLabel) ??
+    safeVisibleSegment(row.ref.split(/[\\/]/).filter(Boolean).at(-2)) ??
     safeVisibleSegment(row.ref.split(/[\\/]/).pop()) ??
     CATEGORY_CONFIG[category].noun
   );
-}
-
-function safeSkillName(skill: SkillCatalogItem): string {
-  return safeVisibleSegment(skill.name) ?? safeVisibleSegment(skill.slug) ?? "Skill";
-}
-
-function safeSkillDescription(value: string): string {
-  return safeVisibleSegment(value) ?? "Skill details available after install.";
-}
-
-function hasSafeSkillName(skill: SkillCatalogItem): boolean {
-  return Boolean(safeVisibleSegment(skill.name) ?? safeVisibleSegment(skill.slug));
-}
-
-function safeSkillRefFromCatalogItem(skill: SkillCatalogItem): string | null {
-  const slug = safeSkillSlug(skill.slug) ?? safeSkillSlug(skill.name);
-  return slug ? `skills/${slug}/SKILL.md` : null;
-}
-
-function safeSkillSlug(value: string): string | null {
-  const lastSegment = value.trim().replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? "";
-  const slug = lastSegment
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!slug || UNSAFE_VISIBLE_TEXT_RE.test(slug)) return null;
-  return slug.slice(0, 80);
-}
-
-function formatSkillBridgeError(error: unknown, fallback: string): string {
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  if (!message || UNSAFE_VISIBLE_TEXT_RE.test(message)) return fallback;
-  if (/skill|catalog|install|search|network|request|timeout/i.test(message)) return message;
-  return fallback;
-}
-
-function safeVisibleSegment(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (!normalized || UNSAFE_VISIBLE_TEXT_RE.test(normalized)) return null;
-  if (/\0|\$\{|\bsecret\b|\btoken\b|authorization|oauth/i.test(normalized)) return null;
-  return normalized.slice(0, 80);
 }
 
 function readArray(value: unknown): unknown[] {
@@ -1837,20 +2174,29 @@ function readArray(value: unknown): unknown[] {
 }
 
 function readNonNegativeNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
 }
 
 function isCategory(value: unknown): value is ProfileSkillsPersonaCategory {
   return (
     typeof value === "string" &&
-    PROFILE_SKILLS_PERSONA_CATEGORIES.includes(value as ProfileSkillsPersonaCategory)
+    PROFILE_SKILLS_PERSONA_CATEGORIES.includes(
+      value as ProfileSkillsPersonaCategory,
+    )
   );
 }
 
 function isFileCategory(
-  value: unknown
+  value: unknown,
 ): value is Exclude<ProfileSkillsPersonaCategory, "claudeMd"> {
-  return value === "agents" || value === "skills" || value === "slashCmds" || value === "memory";
+  return (
+    value === "agents" ||
+    value === "skills" ||
+    value === "slashCmds" ||
+    value === "memory"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

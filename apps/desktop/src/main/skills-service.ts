@@ -15,25 +15,40 @@ export interface CommandResult {
   stderr: string;
 }
 
-export type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>;
+export type CommandRunner = (
+  command: string,
+  args: string[],
+) => Promise<CommandResult>;
 
-const SKILLS_API_BASE = "https://skills.sh";
+const SKILLS_API_BASE =
+  process.env.MYCLAUDE_SKILLS_API_BASE ?? "https://skills.sh";
 const DEFAULT_SEARCH_LIMIT = 20;
 
-export async function skillsSearch(input: SkillSearchInput): Promise<SkillsSearchResult> {
+export async function skillsSearch(
+  input: SkillSearchInput,
+): Promise<SkillsSearchResult> {
   const url = new URL("/api/v1/skills/search", SKILLS_API_BASE);
   url.searchParams.set("q", input.query.trim());
   url.searchParams.set("limit", String(input.limit ?? DEFAULT_SEARCH_LIMIT));
   const json = await fetchJson(url);
-  return { skills: normalizeSkillsPayload(json).slice(0, input.limit ?? DEFAULT_SEARCH_LIMIT) };
+  return {
+    skills: normalizeSkillsPayload(json).slice(
+      0,
+      input.limit ?? DEFAULT_SEARCH_LIMIT,
+    ),
+  };
 }
 
 export async function skillsDetail(id: string): Promise<unknown> {
-  return fetchJson(new URL(`/api/v1/skills/${encodeURIComponent(id)}`, SKILLS_API_BASE));
+  return fetchJson(
+    new URL(`/api/v1/skills/${encodeURIComponent(id)}`, SKILLS_API_BASE),
+  );
 }
 
 export async function skillsAudit(id: string): Promise<unknown> {
-  return fetchJson(new URL(`/api/v1/skills/audit/${encodeURIComponent(id)}`, SKILLS_API_BASE));
+  return fetchJson(
+    new URL(`/api/v1/skills/audit/${encodeURIComponent(id)}`, SKILLS_API_BASE),
+  );
 }
 
 export async function skillsListInstalled(args?: {
@@ -52,7 +67,7 @@ export async function skillsListInstalled(args?: {
 
 export async function skillsInstall(
   input: SkillsInstallInput,
-  runner: CommandRunner = runCommand
+  runner: CommandRunner = runCommand,
 ): Promise<SkillsInstallResult> {
   const packageRef = input.installUrl?.trim() || input.source.trim();
   const slug = input.slug.trim();
@@ -78,11 +93,18 @@ export async function skillsInstall(
     "-y",
   ];
   const installOutput = await runner("npx", addArgs);
-  const listOutput = await runSkillsList({ agent: "claude-code", global: true, runner });
-  const installed = findInstalledSkill(normalizeInstalledSkills(listOutput.stdout), {
-    id: input.id,
-    slug,
+  const listOutput = await runSkillsList({
+    agent: "claude-code",
+    global: true,
+    runner,
   });
+  const installed = findInstalledSkill(
+    normalizeInstalledSkills(listOutput.stdout),
+    {
+      id: input.id,
+      slug,
+    },
+  );
   if (!installed?.source) {
     const fallbackPath = resolveInstalledSkillFallback(slug);
     if (!fallbackPath) {
@@ -92,14 +114,18 @@ export async function skillsInstall(
       installed: true,
       name: slug,
       path: fallbackPath,
-      output: [installOutput.stdout, installOutput.stderr].filter(Boolean).join("\n"),
+      output: [installOutput.stdout, installOutput.stderr]
+        .filter(Boolean)
+        .join("\n"),
     };
   }
   return {
     installed: true,
     name: installed.slug,
     path: installed.source,
-    output: [installOutput.stdout, installOutput.stderr].filter(Boolean).join("\n"),
+    output: [installOutput.stdout, installOutput.stderr]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
@@ -145,19 +171,24 @@ export function normalizeInstalledSkills(stdout: string): SkillCatalogItem[] {
 
 export function findInstalledSkill(
   installed: SkillCatalogItem[],
-  input: Pick<SkillsInstallInput, "id" | "slug">
+  input: Pick<SkillsInstallInput, "id" | "slug">,
 ): SkillCatalogItem | null {
   const slug = input.slug.toLowerCase();
   const id = input.id.toLowerCase();
   return (
     installed.find((skill) => skill.slug.toLowerCase() === slug) ??
     installed.find((skill) => skill.id.toLowerCase() === id) ??
-    installed.find((skill) => skill.source.toLowerCase().endsWith(`/${slug}`)) ??
+    installed.find((skill) =>
+      skill.source.toLowerCase().endsWith(`/${slug}`),
+    ) ??
     null
   );
 }
 
-export async function runCommand(command: string, args: string[]): Promise<CommandResult> {
+export async function runCommand(
+  command: string,
+  args: string[],
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       shell: false,
@@ -183,7 +214,13 @@ export async function runCommand(command: string, args: string[]): Promise<Comma
       const stdout = chunks.join("");
       const stderr = errChunks.join("");
       if (code !== 0) {
-        reject(new Error(stderr || stdout || `${command} exited with code ${code ?? "unknown"}.`));
+        reject(
+          new Error(
+            stderr ||
+              stdout ||
+              `${command} exited with code ${code ?? "unknown"}.`,
+          ),
+        );
         return;
       }
       resolve({ stdout, stderr });
@@ -201,7 +238,8 @@ async function fetchJson(url: URL): Promise<unknown> {
 
 function normalizeSkillItem(item: unknown): SkillCatalogItem | null {
   if (!isRecord(item)) return null;
-  const id = stringValue(item.id) ?? stringValue(item.slug) ?? stringValue(item.name);
+  const id =
+    stringValue(item.id) ?? stringValue(item.slug) ?? stringValue(item.name);
   const slug = stringValue(item.slug) ?? id;
   const name = stringValue(item.name) ?? slug;
   const source =
@@ -218,11 +256,15 @@ function normalizeSkillItem(item: unknown): SkillCatalogItem | null {
     name,
     source,
   };
-  const description = stringValue(item.description) ?? stringValue(item.summary);
-  const installUrl = stringValue(item.installUrl) ?? stringValue(item.install_url);
+  const description =
+    stringValue(item.description) ?? stringValue(item.summary);
+  const installUrl =
+    stringValue(item.installUrl) ?? stringValue(item.install_url);
   const url = stringValue(item.url) ?? stringValue(item.html_url);
-  const installs = numberValue(item.installs) ?? numberValue(item.install_count);
-  const duplicate = booleanValue(item.duplicate) ?? booleanValue(item.is_duplicate);
+  const installs =
+    numberValue(item.installs) ?? numberValue(item.install_count);
+  const duplicate =
+    booleanValue(item.duplicate) ?? booleanValue(item.is_duplicate);
   const auditStatus =
     stringValue(item.auditStatus) ??
     stringValue(item.audit_status) ??
@@ -238,7 +280,8 @@ function normalizeSkillItem(item: unknown): SkillCatalogItem | null {
 
 function normalizeInstalledSkillItem(item: unknown): SkillCatalogItem | null {
   if (!isRecord(item)) return null;
-  const id = stringValue(item.id) ?? stringValue(item.slug) ?? stringValue(item.name);
+  const id =
+    stringValue(item.id) ?? stringValue(item.slug) ?? stringValue(item.name);
   const slug = stringValue(item.slug) ?? stringValue(item.name) ?? id;
   const source = stringValue(item.path) ?? stringValue(item.source) ?? "";
   if (!id || !slug || !source) return null;
@@ -255,8 +298,14 @@ function normalizeInstalledSkillItem(item: unknown): SkillCatalogItem | null {
 
 function resolveInstalledSkillFallback(slug: string): string | null {
   const home = homedir();
-  const candidates = [join(home, ".claude", "skills", slug), join(home, ".agents", "skills", slug)];
-  return candidates.find((candidate) => existsSync(join(candidate, "SKILL.md"))) ?? null;
+  const candidates = [
+    join(home, ".claude", "skills", slug),
+    join(home, ".agents", "skills", slug),
+  ];
+  return (
+    candidates.find((candidate) => existsSync(join(candidate, "SKILL.md"))) ??
+    null
+  );
 }
 
 function getArray(record: unknown, key: string): unknown[] | null {
@@ -274,7 +323,9 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function booleanValue(value: unknown): boolean | undefined {

@@ -16,23 +16,33 @@ export interface DesktopFixture {
   cleanup: () => Promise<void>;
 }
 
-export async function createDesktopFixture(prefix = "agent-profile-e2e-"): Promise<DesktopFixture> {
+export async function createDesktopFixture(
+  prefix = "agent-profile-e2e-",
+): Promise<DesktopFixture> {
   const root = await mkdtemp(join(tmpdir(), prefix));
   const myClaudeHome = join(root, "home", ".myclaude");
   const projectDir = join(root, "project");
   const appDir = join(root, "app");
   const socketPath = join(root, "myclaude.sock");
 
-  await mkdir(join(myClaudeHome, "config", "global", "roles"), { recursive: true });
+  await mkdir(join(myClaudeHome, "config", "global", "roles"), {
+    recursive: true,
+  });
   await mkdir(join(projectDir, ".myclaude", "roles"), { recursive: true });
   expect(
     existsSync(electronExecutablePath),
-    `missing Electron executable at ${electronExecutablePath}`
+    `missing Electron executable at ${electronExecutablePath}`,
   ).toBe(true);
-  await cp(join(process.cwd(), ".vite"), join(appDir, ".vite"), { recursive: true });
+  await cp(join(process.cwd(), ".vite"), join(appDir, ".vite"), {
+    recursive: true,
+  });
   await writeFile(
     join(appDir, "package.json"),
-    JSON.stringify({ name: "agent-profile-e2e", version: "0.0.1", main: ".vite/build/main.cjs" })
+    JSON.stringify({
+      name: "agent-profile-e2e",
+      version: "0.0.1",
+      main: ".vite/build/main.cjs",
+    }),
   );
 
   return {
@@ -48,7 +58,12 @@ export async function createDesktopFixture(prefix = "agent-profile-e2e-"): Promi
 export async function seedProfileFixture(fixture: DesktopFixture): Promise<{
   globalSharedPath: string;
 }> {
-  const globalSharedPath = join(fixture.myClaudeHome, "config", "global", "shared.yml");
+  const globalSharedPath = join(
+    fixture.myClaudeHome,
+    "config",
+    "global",
+    "shared.yml",
+  );
   await writeFile(
     join(fixture.myClaudeHome, "config", "authProfiles.yml"),
     `
@@ -60,7 +75,7 @@ authProfiles:
       mode: apiKey
       secretRef: keyring://anthropic/work
     mcpSecretRefs: {}
-`.trimStart()
+`.trimStart(),
   );
   await writeFile(
     globalSharedPath,
@@ -76,17 +91,22 @@ mcpServers:
     command: node
     args:
       - server.js
-`.trimStart()
+`.trimStart(),
   );
   await writeFile(
     join(fixture.myClaudeHome, "config", "global", "roles", "backend.yml"),
-    "version: 1\n"
+    "version: 1\n",
   );
-  await writeFile(join(fixture.projectDir, ".myclaude", "roles", "backend.yml"), "version: 1\n");
+  await writeFile(
+    join(fixture.projectDir, ".myclaude", "roles", "backend.yml"),
+    "version: 1\n",
+  );
   return { globalSharedPath };
 }
 
-export async function seedProfileCapabilityFixture(fixture: DesktopFixture): Promise<void> {
+export async function seedProfileCapabilityFixture(
+  fixture: DesktopFixture,
+): Promise<void> {
   await seedProfileFixture(fixture);
   await writeFile(
     join(fixture.myClaudeHome, "config", "authProfiles.yml"),
@@ -101,7 +121,7 @@ export async function seedProfileCapabilityFixture(fixture: DesktopFixture): Pro
       "    mcpSecretRefs:",
       "      github.pat: keyring://mcp/github",
       "",
-    ].join("\n")
+    ].join("\n"),
   );
   await writeFile(
     join(fixture.myClaudeHome, "config", "global", "shared.yml"),
@@ -124,12 +144,12 @@ export async function seedProfileCapabilityFixture(fixture: DesktopFixture): Pro
       "  agents:",
       "    - agents/reviewer.md",
       "",
-    ].join("\n")
+    ].join("\n"),
   );
 }
 
 export async function seedMissingToolSecretRepairFixture(
-  fixture: DesktopFixture
+  fixture: DesktopFixture,
 ): Promise<void> {
   await writeFile(
     join(fixture.myClaudeHome, "config", "authProfiles.yml"),
@@ -142,7 +162,7 @@ authProfiles:
       mode: apiKey
       secretRef: keyring://anthropic/work
     mcpSecretRefs: {}
-`.trimStart()
+`.trimStart(),
   );
   await writeFile(
     join(fixture.myClaudeHome, "config", "global", "shared.yml"),
@@ -154,24 +174,35 @@ mcpServers:
     url: https://github.example/mcp
     headers:
       Authorization: Bearer \${secret:github.pat}
-`.trimStart()
+`.trimStart(),
   );
   await writeFile(
     join(fixture.myClaudeHome, "config", "global", "roles", "backend.yml"),
-    "version: 1\n"
+    "version: 1\n",
   );
-  await writeFile(join(fixture.projectDir, ".myclaude", "roles", "backend.yml"), "version: 1\n");
+  await writeFile(
+    join(fixture.projectDir, ".myclaude", "roles", "backend.yml"),
+    "version: 1\n",
+  );
 }
 
-export async function launchDesktop(fixture: DesktopFixture): Promise<{
+export async function launchDesktop(
+  fixture: DesktopFixture,
+  options: { env?: Record<string, string> } = {},
+): Promise<{
   app: Awaited<ReturnType<typeof electron.launch>>;
-  page: Awaited<ReturnType<Awaited<ReturnType<typeof electron.launch>>["firstWindow"]>>;
+  page: Awaited<
+    ReturnType<Awaited<ReturnType<typeof electron.launch>>["firstWindow"]>
+  >;
 }> {
   const launchEnv = { ...process.env };
   launchEnv.ELECTRON_RUN_AS_NODE = undefined;
   const app = await electron.launch({
     executablePath: electronExecutablePath,
-    args: [fixture.appDir, `--user-data-dir=${join(fixture.root, "user-data")}`],
+    args: [
+      fixture.appDir,
+      `--user-data-dir=${join(fixture.root, "user-data")}`,
+    ],
     cwd: fixture.projectDir,
     env: {
       ...launchEnv,
@@ -180,6 +211,7 @@ export async function launchDesktop(fixture: DesktopFixture): Promise<{
       MYCLAUDE_HOME: fixture.myClaudeHome,
       MYCLAUDE_SOCKET: fixture.socketPath,
       PLAYWRIGHT_HEADLESS: process.env.PLAYWRIGHT_HEADLESS ?? "1",
+      ...options.env,
     },
   });
   return { app, page: await app.firstWindow() };
@@ -191,10 +223,14 @@ export async function readText(path: string): Promise<string> {
 
 export async function openAgentProfilesHome(page: Page): Promise<void> {
   await page.getByTestId("sidebar-home").click();
-  await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Agent Profiles" }),
+  ).toBeVisible();
 }
 
 export async function openProfileWorkspace(page: Page): Promise<void> {
   await page.getByTestId("sidebar-editor").click();
-  await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Profile Workspace" }),
+  ).toBeVisible();
 }

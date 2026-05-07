@@ -2,16 +2,26 @@ import { describe, expect, test } from "vitest";
 import {
   buildProfileSkillsPersonaPatch,
   countProfileSkillsPersonaCapabilities,
+  createDefaultProfileSkillsPersonaDraftRow,
   createProfileSkillsPersonaDraft,
   createSafeProfileSkillsPersonaCollisionSummary,
   createSafeProfileSkillsPersonaMissingSourceSummary,
   createSafeProfileSkillsPersonaPreviewSummary,
   formatProfileSkillsPersonaBridgeError,
+  isProfileSkillsPersonaOpaqueSkillRef,
   resolveProfileSkillsPersonaTarget,
   resolveProfileSkillsPersonaTargetFromList,
   shouldGuardProfileSkillsPersonaClose,
   validateProfileSkillsPersonaForm,
 } from "../src/renderer/lib/profile-skills-persona.js";
+import {
+  createCatalogInstallAttachment,
+  createInstalledSkillAttachment,
+  isDuplicateSkillAttachment,
+  normalizeAgentProfileSkillItems,
+  safeSkillName,
+  sanitizeSkillBridgeError,
+} from "../src/renderer/lib/skills-catalog.js";
 import type { ScopeDoc, ScopeListEntry } from "../src/renderer/lib/types.js";
 
 function scopeDoc(overrides: Partial<ScopeDoc> = {}): ScopeDoc {
@@ -61,13 +71,18 @@ describe("profile skills and persona draft contract", () => {
       selectedRole: "backend api review",
     });
     expect(target.status).toBe("writable");
-    if (target.status !== "writable") throw new Error("expected writable target");
+    if (target.status !== "writable")
+      throw new Error("expected writable target");
 
     const result = buildProfileSkillsPersonaPatch({
       target,
       draft: {
         rows: [
-          { id: "skill-row", category: "skills", ref: "skills/typescript/SKILL.md" },
+          {
+            id: "skill-row",
+            category: "skills",
+            ref: "skills/typescript/SKILL.md",
+          },
           { id: "agent-row", category: "agents", ref: "agents/reviewer.md" },
           { id: "claude-row", category: "claudeMd", ref: "CLAUDE.md" },
         ],
@@ -94,8 +109,13 @@ describe("profile skills and persona draft contract", () => {
       },
     });
 
-    const summary = createSafeProfileSkillsPersonaPreviewSummary(target.content, result.content);
-    expect(summary).toEqual([{ category: "skills", label: "typescript", change: "changed" }]);
+    const summary = createSafeProfileSkillsPersonaPreviewSummary(
+      target.content,
+      result.content,
+    );
+    expect(summary).toEqual([
+      { category: "skills", label: "typescript", change: "changed" },
+    ]);
     expect(JSON.stringify(summary)).not.toContain("skills/typescript/SKILL.md");
     expect(JSON.stringify(summary)).not.toContain(".myclaude");
     expect(JSON.stringify(summary)).not.toContain("${secret:");
@@ -119,10 +139,14 @@ describe("profile skills and persona draft contract", () => {
       selectedRole: "backend-api-review",
     });
     expect(target.status).toBe("writable");
-    if (target.status !== "writable") throw new Error("expected writable target");
+    if (target.status !== "writable")
+      throw new Error("expected writable target");
 
     let nextId = 0;
-    const draft = createProfileSkillsPersonaDraft(target, () => `row-${++nextId}`);
+    const draft = createProfileSkillsPersonaDraft(
+      target,
+      () => `row-${++nextId}`,
+    );
 
     expect(draft.rows).toEqual([
       {
@@ -161,44 +185,56 @@ describe("profile skills and persona draft contract", () => {
         displayLabel: "research-notes.md",
       },
     ]);
-    expect(countProfileSkillsPersonaCapabilities(target.content.persona)).toEqual([
+    expect(
+      countProfileSkillsPersonaCapabilities(target.content.persona),
+    ).toEqual([
       { category: "claudeMd", count: 2 },
       { category: "agents", count: 1 },
       { category: "skills", count: 1 },
       { category: "slashCmds", count: 1 },
       { category: "memory", count: 1 },
     ]);
-    expect(draft.rows.map((row) => row.displayLabel).join("|")).not.toContain("/");
+    expect(draft.rows.map((row) => row.displayLabel).join("|")).not.toContain(
+      "/",
+    );
   });
 
   test("rejects missing, malformed, global, shared, and stale non-profile targets", () => {
-    expect(resolveProfileSkillsPersonaTarget({ scopeEntries: [], selectedRole: "" })).toMatchObject(
-      {
-        status: "unavailable",
-        role: null,
-        message: "Choose an Agent Profile before editing skills and persona.",
-      }
-    );
+    expect(
+      resolveProfileSkillsPersonaTarget({ scopeEntries: [], selectedRole: "" }),
+    ).toMatchObject({
+      status: "unavailable",
+      role: null,
+      message: "Choose an Agent Profile before editing skills and persona.",
+    });
 
     const globalTarget = resolveProfileSkillsPersonaTarget({
       scopeEntries: [entry({ scope: "global-role", path: "/global/raw.yml" })],
       selectedRole: "backend api review",
     });
-    expect(globalTarget).toMatchObject({ status: "unavailable", role: "backend-api-review" });
+    expect(globalTarget).toMatchObject({
+      status: "unavailable",
+      role: "backend-api-review",
+    });
     expect(JSON.stringify(globalTarget)).not.toContain("/global/raw.yml");
 
     const sharedTarget = resolveProfileSkillsPersonaTarget({
-      scopeEntries: [entry({ scope: "project-shared", path: "/project/shared.yml" })],
+      scopeEntries: [
+        entry({ scope: "project-shared", path: "/project/shared.yml" }),
+      ],
       selectedRole: "backend api review",
     });
-    expect(sharedTarget).toMatchObject({ status: "unavailable", role: "backend-api-review" });
+    expect(sharedTarget).toMatchObject({
+      status: "unavailable",
+      role: "backend-api-review",
+    });
     expect(JSON.stringify(sharedTarget)).not.toContain("/project/shared.yml");
 
     expect(
       resolveProfileSkillsPersonaTargetFromList({
         listed: [entry({ content: null })],
         selectedRole: "backend api review",
-      })
+      }),
     ).toMatchObject({
       status: "invalid",
       role: "backend-api-review",
@@ -213,16 +249,29 @@ describe("profile skills and persona draft contract", () => {
       selectedRole: "backend-api-review",
     });
     expect(target.status).toBe("writable");
-    if (target.status !== "writable") throw new Error("expected writable target");
+    if (target.status !== "writable")
+      throw new Error("expected writable target");
 
     const validation = validateProfileSkillsPersonaForm({
       target,
       draft: {
         rows: [
           { id: "empty", category: "skills", ref: "   " },
-          { id: "skill-one", category: "skills", ref: "skills/typescript/SKILL.md" },
-          { id: "skill-two", category: "skills", ref: "skills/typescript/SKILL.md" },
-          { id: "unsupported", category: "assets" as never, ref: "skills/other/SKILL.md" },
+          {
+            id: "skill-one",
+            category: "skills",
+            ref: "skills/typescript/SKILL.md",
+          },
+          {
+            id: "skill-two",
+            category: "skills",
+            ref: "skills/typescript/SKILL.md",
+          },
+          {
+            id: "unsupported",
+            category: "assets" as never,
+            ref: "skills/other/SKILL.md",
+          },
           { id: "token", category: "memory", ref: "ghp_secretvalue" },
           { id: "secret-ref", category: "claudeMd", ref: "${secret:persona}" },
           { id: "keyring", category: "agents", ref: "keyring://persona/agent" },
@@ -281,11 +330,19 @@ describe("profile skills and persona draft contract", () => {
 
   test("redacts missing sources, collisions, bridge errors, and dirty-close state", () => {
     const missing = createSafeProfileSkillsPersonaMissingSourceSummary([
-      { category: "skills", sourcePath: "/Users/alice/project/.myclaude/skills/github/SKILL.md" },
+      {
+        category: "skills",
+        sourcePath: "/Users/alice/project/.myclaude/skills/github/SKILL.md",
+      },
       { category: "claudeMd", sourcePath: "keyring://persona/CLAUDE.md" },
     ]);
     expect(missing).toEqual([
-      { category: "skills", label: "github", count: 1, detail: "Source could not be found." },
+      {
+        category: "skills",
+        label: "github",
+        count: 1,
+        detail: "Source could not be found.",
+      },
       {
         category: "claudeMd",
         label: "Claude memory",
@@ -299,7 +356,10 @@ describe("profile skills and persona draft contract", () => {
         category: "agents",
         basename: "reviewer.md",
         winningSource: "/Users/alice/project/.myclaude/agents/reviewer.md",
-        overriddenSources: ["/repo/.myclaude/agents/reviewer.md", "global-role"],
+        overriddenSources: [
+          "/repo/.myclaude/agents/reviewer.md",
+          "global-role",
+        ],
       },
     ]);
     expect(collisions).toEqual([
@@ -311,26 +371,32 @@ describe("profile skills and persona draft contract", () => {
       },
     ]);
 
-    expect(shouldGuardProfileSkillsPersonaClose({ isDirty: true, isSaving: false })).toBe(true);
-    expect(shouldGuardProfileSkillsPersonaClose({ isDirty: false, isSaving: false })).toBe(false);
-    expect(shouldGuardProfileSkillsPersonaClose({ isDirty: true, isSaving: true })).toBe(false);
+    expect(
+      shouldGuardProfileSkillsPersonaClose({ isDirty: true, isSaving: false }),
+    ).toBe(true);
+    expect(
+      shouldGuardProfileSkillsPersonaClose({ isDirty: false, isSaving: false }),
+    ).toBe(false);
+    expect(
+      shouldGuardProfileSkillsPersonaClose({ isDirty: true, isSaving: true }),
+    ).toBe(false);
 
     const fallback =
       "Skills & Persona could not be saved. Review the selected assets and try again.";
     const unsafe = formatProfileSkillsPersonaBridgeError(
       new Error(
-        "preview failed for /Users/alice/project/.myclaude/roles/backend-api-review.yml project-role keyring://persona Bearer ghp_secretvalue"
+        "preview failed for /Users/alice/project/.myclaude/roles/backend-api-review.yml project-role keyring://persona Bearer ghp_secretvalue",
       ),
-      fallback
+      fallback,
     );
     const generic = formatProfileSkillsPersonaBridgeError(
       new Error("persona preview failed"),
-      fallback
+      fallback,
     );
 
     expect(unsafe).toBe(fallback);
     expect(generic).toBe(
-      "Skills & Persona could not be checked. Review the selected assets and try again."
+      "Skills & Persona could not be checked. Review the selected assets and try again.",
     );
     const serialized = JSON.stringify({ missing, collisions, unsafe, generic });
     expect(serialized).not.toContain("/Users/alice");
@@ -339,5 +405,147 @@ describe("profile skills and persona draft contract", () => {
     expect(serialized).not.toContain("global-role");
     expect(serialized).not.toContain("keyring://");
     expect(serialized).not.toContain("ghp_secretvalue");
+  });
+
+  test("attaches trusted installed and catalog-backed skills without displaying raw refs", () => {
+    const installed = createInstalledSkillAttachment({
+      id: "graphify",
+      slug: "graphify",
+      name: "Graphify",
+      source: "/tmp/agent-profile/.claude/skills/graphify",
+      description: "Graph workflows",
+    });
+    expect(installed).toEqual({
+      ref: "/tmp/agent-profile/.claude/skills/graphify",
+      label: "Graphify",
+      sourceLabel: "Installed skill",
+    });
+    expect(
+      JSON.stringify({
+        label: installed?.label,
+        sourceLabel: installed?.sourceLabel,
+      }),
+    ).not.toMatch(/\/tmp|\.claude/i);
+
+    const catalog = createCatalogInstallAttachment(
+      {
+        id: "postgres",
+        slug: "postgres",
+        name: "Postgres",
+        source: "org/repo",
+      },
+      {
+        installed: true,
+        name: "Postgres",
+        path: "/tmp/agent-profile/.claude/skills/postgres",
+      },
+    );
+    expect(catalog?.ref).toBe("/tmp/agent-profile/.claude/skills/postgres");
+    expect(catalog?.label).toBe("Postgres");
+
+    const target = resolveProfileSkillsPersonaTarget({
+      scopeEntries: [
+        entry({
+          content: scopeDoc({
+            persona: {
+              claudeMd: [],
+              agents: [],
+              skills: [],
+              slashCmds: [],
+              memory: [],
+            },
+          }),
+        }),
+      ],
+      selectedRole: "backend-api-review",
+    });
+    expect(target.status).toBe("writable");
+    if (target.status !== "writable" || !installed)
+      throw new Error("expected writable target");
+
+    const trustedRow = createDefaultProfileSkillsPersonaDraftRow({
+      category: "skills",
+      ref: installed.ref,
+      displayLabel: installed.label,
+      trustedSource: "installed-skill",
+    });
+    const validation = validateProfileSkillsPersonaForm({
+      target,
+      draft: { rows: [trustedRow] },
+    });
+    expect(validation.ok).toBe(true);
+    expect(isProfileSkillsPersonaOpaqueSkillRef(installed.ref)).toBe(true);
+
+    const patch = buildProfileSkillsPersonaPatch({
+      target,
+      draft: { rows: [trustedRow] },
+    });
+    expect(patch.ok).toBe(true);
+    if (!patch.ok) throw new Error("expected patch");
+    expect(patch.content.persona?.skills).toEqual([installed.ref]);
+    expect(
+      createSafeProfileSkillsPersonaPreviewSummary(
+        target.content,
+        patch.content,
+      ),
+    ).toEqual([{ category: "skills", label: "graphify", change: "added" }]);
+
+    const reloaded = createProfileSkillsPersonaDraft(
+      { ...target, content: patch.content },
+      () => "reloaded-row",
+    );
+    expect(reloaded.rows[0]).toMatchObject({
+      ref: installed.ref,
+      originalRef: installed.ref,
+      displayLabel: "graphify",
+    });
+    expect(
+      validateProfileSkillsPersonaForm({ target, draft: reloaded }).ok,
+    ).toBe(true);
+  });
+
+  test("rejects malformed skills, duplicates, and unsafe skill errors", () => {
+    const safeItems = normalizeAgentProfileSkillItems([
+      {
+        id: "safe",
+        slug: "safe",
+        name: "Safe Skill",
+        source: "/tmp/skills/safe",
+      },
+      {
+        id: "bad",
+        slug: "Bearer ghp_secretvalue",
+        name: "Bearer ghp_secretvalue",
+        source: "/tmp/skills/bad",
+      },
+    ]);
+    expect(safeItems.map((skill) => safeSkillName(skill))).toEqual([
+      "Safe Skill",
+    ]);
+    expect(
+      createInstalledSkillAttachment({
+        id: "missing",
+        slug: "missing",
+        name: "Missing",
+        source: "",
+      }),
+    ).toBeNull();
+    expect(
+      isDuplicateSkillAttachment(["/tmp/skills/safe"], "/tmp/skills/safe/"),
+    ).toBe(true);
+    expect(
+      sanitizeSkillBridgeError(
+        new Error(
+          "npx failed at /tmp/private/install with token ghp_secretvalue\n    at file:///tmp/stack.js:1:1",
+        ),
+        "Skill install failed. Try again later.",
+      ),
+    ).toBe("Skill install failed. Try again later.");
+    expect(
+      sanitizeSkillBridgeError(
+        new Error("skills catalog request timed out"),
+        "fallback",
+      ),
+    ).toBe("Skill operation timed out. Try again later.");
   });
 });

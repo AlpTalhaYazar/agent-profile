@@ -22,7 +22,7 @@ describe("skills-service", () => {
             audit: { status: "passed" },
           },
         ],
-      })
+      }),
     ).toEqual([
       {
         id: "postgres",
@@ -47,7 +47,7 @@ describe("skills-service", () => {
             agent: "Claude Code",
           },
         ],
-      })
+      }),
     );
 
     expect(installed).toEqual([
@@ -58,9 +58,10 @@ describe("skills-service", () => {
         source: "/Users/dev/.claude/skills/graphify",
       },
     ]);
-    expect(findInstalledSkill(installed, { id: "graphify", slug: "graphify" })?.source).toBe(
-      "/Users/dev/.claude/skills/graphify"
-    );
+    expect(
+      findInstalledSkill(installed, { id: "graphify", slug: "graphify" })
+        ?.source,
+    ).toBe("/Users/dev/.claude/skills/graphify");
   });
 
   it("installs with argument arrays and resolves the installed path from skills list", async () => {
@@ -69,7 +70,9 @@ describe("skills-service", () => {
       .mockResolvedValueOnce({ stdout: "installed", stderr: "" })
       .mockResolvedValueOnce({
         stdout: JSON.stringify({
-          skills: [{ name: "postgres", path: "/Users/dev/.claude/skills/postgres" }],
+          skills: [
+            { name: "postgres", path: "/Users/dev/.claude/skills/postgres" },
+          ],
         }),
         stderr: "",
       });
@@ -82,8 +85,8 @@ describe("skills-service", () => {
           source: "org/repo",
           installUrl: "https://github.com/org/repo",
         },
-        runner
-      )
+        runner,
+      ),
     ).resolves.toEqual({
       installed: true,
       name: "postgres",
@@ -124,8 +127,8 @@ describe("skills-service", () => {
           slug: "postgres",
           source: "-g",
         },
-        runner
-      )
+        runner,
+      ),
     ).rejects.toThrow(/must not start with "-"/);
 
     await expect(
@@ -135,8 +138,8 @@ describe("skills-service", () => {
           slug: "--skill",
           source: "org/repo",
         },
-        runner
-      )
+        runner,
+      ),
     ).rejects.toThrow(/must not start with "-"/);
 
     await expect(
@@ -146,10 +149,51 @@ describe("skills-service", () => {
           slug: "postgres\n--skill",
           source: "org/repo",
         },
-        runner
-      )
+        runner,
+      ),
     ).rejects.toThrow(/must not contain control characters/);
 
     expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("filters malformed installed skills and propagates install failures without running renderer code", async () => {
+    expect(
+      normalizeInstalledSkills(
+        JSON.stringify({
+          skills: [
+            { name: "valid", path: "/Users/dev/.claude/skills/valid" },
+            { name: "missing-path" },
+            { path: "/Users/dev/.claude/skills/missing-name" },
+          ],
+        }),
+      ),
+    ).toEqual([
+      {
+        id: "valid",
+        slug: "valid",
+        name: "valid",
+        source: "/Users/dev/.claude/skills/valid",
+      },
+    ]);
+
+    const runner = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          "npx failed for /Users/dev/.claude/skills/private with ghp_secretvalue",
+        ),
+      );
+
+    await expect(
+      skillsInstall(
+        {
+          id: "postgres",
+          slug: "postgres",
+          source: "org/repo",
+        },
+        runner,
+      ),
+    ).rejects.toThrow(/npx failed/);
+    expect(runner).toHaveBeenCalledTimes(1);
   });
 });

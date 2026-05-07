@@ -82,7 +82,7 @@ persona:
 
   const app = await electron.launch({
     executablePath: electronExecutablePath,
-    args: [appDir],
+    args: [appDir, `--user-data-dir=${join(root, "user-data")}`],
     cwd: projectDir,
     env: {
       ...launchEnv,
