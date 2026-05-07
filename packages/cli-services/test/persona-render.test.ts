@@ -11,7 +11,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { personaPreviewService, personaRenderService } from "../src/persona/index.js";
+import {
+  personaPreviewService,
+  personaRenderService,
+} from "../src/persona/index.js";
 
 let scratchRoot: string;
 
@@ -86,7 +89,9 @@ persona:
     expect(result.claudeMd).not.toBeNull();
     expect(result.claudeMd?.sections).toHaveLength(1);
     expect(result.claudeMd?.sections[0]?.originScope).toBe("global-role");
-    expect(result.claudeMd?.combinedContent).toContain("<!-- source: global-role -->");
+    expect(result.claudeMd?.combinedContent).toContain(
+      "<!-- source: global-role -->",
+    );
 
     expect(result.files).toHaveLength(1);
     expect(result.files[0]?.category).toBe("agents");
@@ -133,14 +138,29 @@ describe("personaRenderService — multi-scope cascade with provenance map label
 
     // Persona files (fragments) in distinct locations to keep provenance crisp.
     const globalClaudeMd = join(home, "persona", "global-CLAUDE.md");
-    const projectSharedClaudeMd = join(projectDir, "persona", "shared-CLAUDE.md");
+    const projectSharedClaudeMd = join(
+      projectDir,
+      "persona",
+      "shared-CLAUDE.md",
+    );
     const projectRoleClaudeMd = join(projectDir, "persona", "role-CLAUDE.md");
     const globalAgent = join(home, "persona", "agents", "global-agent.md");
-    const projectRoleAgent = join(projectDir, "persona", "agents", "project-agent.md");
+    const projectRoleAgent = join(
+      projectDir,
+      "persona",
+      "agents",
+      "project-agent.md",
+    );
 
     writeContent({ path: globalClaudeMd, content: "# Global CLAUDE.md\n" });
-    writeContent({ path: projectSharedClaudeMd, content: "# Project shared CLAUDE.md\n" });
-    writeContent({ path: projectRoleClaudeMd, content: "# Project role CLAUDE.md\n" });
+    writeContent({
+      path: projectSharedClaudeMd,
+      content: "# Project shared CLAUDE.md\n",
+    });
+    writeContent({
+      path: projectRoleClaudeMd,
+      content: "# Project role CLAUDE.md\n",
+    });
     writeContent({ path: globalAgent, content: "# Global agent\n" });
     writeContent({ path: projectRoleAgent, content: "# Project role agent\n" });
 
@@ -190,8 +210,12 @@ persona:
     expect(result.claudeMd).not.toBeNull();
     expect(result.claudeMd?.sections).toHaveLength(3);
     expect(result.claudeMd?.sections[0]?.originScope).toBe("global-role");
-    expect(result.claudeMd?.sections[1]?.originScope.startsWith("project-shared")).toBe(true);
-    expect(result.claudeMd?.sections[2]?.originScope.startsWith("project-role")).toBe(true);
+    expect(
+      result.claudeMd?.sections[1]?.originScope.startsWith("project-shared"),
+    ).toBe(true);
+    expect(
+      result.claudeMd?.sections[2]?.originScope.startsWith("project-role"),
+    ).toBe(true);
 
     // Combined content has each marker (prefix match — full label includes path).
     const combined = result.claudeMd?.combinedContent ?? "";
@@ -203,7 +227,11 @@ persona:
     expect(result.files).toHaveLength(2);
     const agentByName = new Map(result.files.map((f) => [f.basename, f]));
     expect(agentByName.get("global-agent.md")?.originScope).toBe("global-role");
-    expect(agentByName.get("project-agent.md")?.originScope.startsWith("project-role")).toBe(true);
+    expect(
+      agentByName
+        .get("project-agent.md")
+        ?.originScope.startsWith("project-role"),
+    ).toBe(true);
 
     expect(result.collisions).toHaveLength(0);
     expect(result.missingSources).toHaveLength(0);
@@ -264,6 +292,51 @@ persona:
 });
 
 describe("personaRenderService — missing-source policy default", () => {
+  it("resolves relative persona refs against the selected cwd", async () => {
+    const { home } = setupHome();
+    const projectDir = join(scratchRoot, "project");
+    mkdirSync(join(projectDir, ".myclaude", "roles"), { recursive: true });
+
+    const relativeAgent = "persona/agents/reviewer.md";
+    const relativeSkill = "persona/skills/review/SKILL.md";
+    writeContent({
+      path: join(projectDir, relativeAgent),
+      content: "# Relative reviewer\n",
+    });
+    writeContent({
+      path: join(projectDir, relativeSkill),
+      content: "# Relative skill\n",
+    });
+    writeYaml({
+      scopeDir: join(projectDir, ".myclaude", "roles"),
+      scopeFilename: "backend.yml",
+      yaml: `version: 1
+persona:
+  agents:
+    - ${relativeAgent}
+  skills:
+    - ${relativeSkill}
+`,
+    });
+
+    const result = await personaRenderService({
+      role: "backend",
+      home,
+      cwd: projectDir,
+    });
+
+    expect(result.missingSources).toHaveLength(0);
+    expect(result.files).toHaveLength(2);
+    const agent = result.files.find((file) => file.category === "agents");
+    const skill = result.files.find((file) => file.category === "skills");
+    expect(agent?.sourcePath).toBe(join(projectDir, relativeAgent));
+    expect(agent?.originScope.startsWith("project-role")).toBe(true);
+    expect(agent?.content).toContain("# Relative reviewer");
+    expect(skill?.sourcePath).toBe(join(projectDir, relativeSkill));
+    expect(skill?.originScope.startsWith("project-role")).toBe(true);
+    expect(skill?.content).toContain("# Relative skill");
+  });
+
   it("missing persona files are tolerated under the implicit 'skip' policy", async () => {
     const { home } = setupHome();
 
@@ -308,7 +381,12 @@ describe("personaPreviewService — draft-aware safe projection", () => {
     const claudeMd = join(projectDir, "persona", "CLAUDE.md");
     const lowerAgent = join(home, "persona", "global", "reviewer.md");
     const draftAgent = join(projectDir, "persona", "project", "reviewer.md");
-    const missingSkill = join(projectDir, "persona", "skills", "ghost-skill.md");
+    const missingSkill = join(
+      projectDir,
+      "persona",
+      "skills",
+      "ghost-skill.md",
+    );
 
     writeContent({ path: claudeMd, content: "# Draft persona\n" });
     writeContent({ path: lowerAgent, content: "# Lower reviewer\n" });
@@ -345,8 +423,12 @@ describe("personaPreviewService — draft-aware safe projection", () => {
         { category: "claudeMd", basename: "CLAUDE.md" },
         { category: "agents", basename: "reviewer.md" },
       ],
-      missingSources: [{ category: "skills", basename: "ghost-skill.md", count: 1 }],
-      collisions: [{ category: "agents", basename: "reviewer.md", hiddenCount: 1 }],
+      missingSources: [
+        { category: "skills", basename: "ghost-skill.md", count: 1 },
+      ],
+      collisions: [
+        { category: "agents", basename: "reviewer.md", hiddenCount: 1 },
+      ],
     });
     expect(result.preview?.metrics).toMatchObject({
       claudeMdSectionCount: 1,
@@ -367,8 +449,18 @@ describe("personaPreviewService — draft-aware safe projection", () => {
     const projectDir = join(scratchRoot, "project");
     mkdirSync(join(projectDir, ".myclaude", "roles"), { recursive: true });
 
-    const savedAgent = join(projectDir, "persona", "agents", "saved-reviewer.md");
-    const draftAgent = join(projectDir, "persona", "agents", "draft-reviewer.md");
+    const savedAgent = join(
+      projectDir,
+      "persona",
+      "agents",
+      "saved-reviewer.md",
+    );
+    const draftAgent = join(
+      projectDir,
+      "persona",
+      "agents",
+      "draft-reviewer.md",
+    );
     writeContent({ path: savedAgent, content: "# Saved reviewer\n" });
     writeContent({ path: draftAgent, content: "# Draft reviewer\n" });
     writeYaml({

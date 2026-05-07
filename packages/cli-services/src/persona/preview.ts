@@ -3,17 +3,36 @@ import {
   findProjectChain,
   resolve as coreResolve,
 } from "@agent-profile/core";
-import { type PersonaRenderResult, renderPersonaInMemory } from "@agent-profile/persona-deployer";
+import {
+  type PersonaRenderResult,
+  renderPersonaInMemory,
+} from "@agent-profile/persona-deployer";
 import { join, resolve } from "node:path";
 import { globalConfigDirFor, globalFragmentsDirFor } from "../paths.js";
+import {
+  resolvePersonaProvenanceMapForRender,
+  resolvePersonaRefSetForRender,
+  resolvePersonaRefsForRender,
+} from "./path-resolution.js";
 import {
   type ProfileIssue,
   resolveCurrentProfile,
   validateScopeContent,
 } from "../profile/shared.js";
 
-const PERSONA_PREVIEW_CATEGORIES = ["claudeMd", "agents", "skills", "slashCmds", "memory"] as const;
-const PERSONA_PREVIEW_FILE_CATEGORIES = ["agents", "skills", "slashCmds", "memory"] as const;
+const PERSONA_PREVIEW_CATEGORIES = [
+  "claudeMd",
+  "agents",
+  "skills",
+  "slashCmds",
+  "memory",
+] as const;
+const PERSONA_PREVIEW_FILE_CATEGORIES = [
+  "agents",
+  "skills",
+  "slashCmds",
+  "memory",
+] as const;
 const MAX_SAFE_PREVIEW_ITEMS = 50;
 const PREVIEW_FAILURE_MESSAGE =
   "Skills & Persona preview could not be prepared. Review the selected assets and try again.";
@@ -24,8 +43,10 @@ const TOKEN_LIKE_RE =
 const UNSAFE_SUMMARY_RE =
   /\.myclaude|project-role|global-role|launch-overrides|keyring:\/\/|\$\{secret:|\$\{env:|secretRef|bearer\s+\S+|sk-ant-[A-Za-z0-9_-]+|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+|oauth|authorization|\/Users\/|\b[A-Za-z]:\\/i;
 
-export type PersonaPreviewCategory = (typeof PERSONA_PREVIEW_CATEGORIES)[number];
-export type PersonaPreviewFileCategory = (typeof PERSONA_PREVIEW_FILE_CATEGORIES)[number];
+export type PersonaPreviewCategory =
+  (typeof PERSONA_PREVIEW_CATEGORIES)[number];
+export type PersonaPreviewFileCategory =
+  (typeof PERSONA_PREVIEW_FILE_CATEGORIES)[number];
 
 export interface PersonaPreviewInput {
   home: string;
@@ -90,7 +111,7 @@ export interface PersonaPreviewResult {
 }
 
 export async function personaPreviewService(
-  input: PersonaPreviewInput
+  input: PersonaPreviewInput,
 ): Promise<PersonaPreviewResult> {
   const { home, role, authProfileId, cwd, draft } = input;
 
@@ -133,12 +154,28 @@ export async function personaPreviewService(
     if (authProfileId !== undefined) resolveInput.authProfileId = authProfileId;
 
     const previewResolved = coreResolve(resolveInput);
-    const draftScopeName = scopeNameForDraftPath({ home, role, cwd, draftPath: draft.path });
+    const draftScopeName = scopeNameForDraftPath({
+      home,
+      role,
+      cwd,
+      draftPath: draft.path,
+    });
     const renderInput = draftScopeName
-      ? buildDraftReplacementRenderInput(currentResolved, previewResolved, draftScopeName)
+      ? buildDraftReplacementRenderInput(
+          currentResolved,
+          previewResolved,
+          draftScopeName,
+          cwd,
+        )
       : {
-          effective: previewResolved.effective.persona,
-          provenanceMap: buildPersonaProvenanceMap(previewResolved),
+          effective: resolvePersonaRefsForRender(
+            previewResolved.effective.persona,
+            cwd,
+          ),
+          provenanceMap: resolvePersonaProvenanceMapForRender(
+            buildPersonaProvenanceMap(previewResolved),
+            cwd,
+          ),
         };
     const renderResult = await renderPersonaInMemory({
       ...renderInput,
@@ -157,7 +194,7 @@ export async function personaPreviewService(
 
 function previewFailure(
   code: PersonaPreviewFailure["code"],
-  message: string
+  message: string,
 ): PersonaPreviewResult {
   return {
     issues: [],
@@ -170,7 +207,9 @@ function previewFailure(
   };
 }
 
-function buildPersonaProvenanceMap(resolved: EffectiveSessionConfig): Record<string, string> {
+function buildPersonaProvenanceMap(
+  resolved: EffectiveSessionConfig,
+): Record<string, string> {
   const provenanceMap: Record<string, string> = {};
   for (const entry of resolved.provenance.persona) {
     for (const filePath of entry.files) {
@@ -183,14 +222,32 @@ function buildPersonaProvenanceMap(resolved: EffectiveSessionConfig): Record<str
 function buildDraftReplacementRenderInput(
   currentResolved: EffectiveSessionConfig,
   previewResolved: EffectiveSessionConfig,
-  draftScopeName: string
+  draftScopeName: string,
+  cwd: string,
 ): {
   effective: EffectiveSessionConfig["effective"]["persona"];
   provenanceMap: Record<string, string>;
 } {
-  const replacedFiles = filesForProvenanceSource(currentResolved, draftScopeName);
-  const draftFiles = filesForProvenanceSource(previewResolved, "launch-overrides");
-  const provenanceMap = buildPersonaProvenanceMap(currentResolved);
+  const replacedFiles = resolvePersonaRefSetForRender(
+    filesForProvenanceSource(currentResolved, draftScopeName),
+    cwd,
+  );
+  const draftFiles = resolvePersonaRefSetForRender(
+    filesForProvenanceSource(previewResolved, "launch-overrides"),
+    cwd,
+  );
+  const provenanceMap = resolvePersonaProvenanceMapForRender(
+    buildPersonaProvenanceMap(currentResolved),
+    cwd,
+  );
+  const currentPersona = resolvePersonaRefsForRender(
+    currentResolved.effective.persona,
+    cwd,
+  );
+  const previewPersona = resolvePersonaRefsForRender(
+    previewResolved.effective.persona,
+    cwd,
+  );
 
   for (const filePath of replacedFiles) {
     delete provenanceMap[filePath];
@@ -202,34 +259,34 @@ function buildDraftReplacementRenderInput(
   return {
     effective: {
       claudeMd: replaceCategoryRefs(
-        currentResolved.effective.persona.claudeMd,
-        previewResolved.effective.persona.claudeMd,
+        currentPersona.claudeMd,
+        previewPersona.claudeMd,
         replacedFiles,
-        draftFiles
+        draftFiles,
       ),
       agents: replaceCategoryRefs(
-        currentResolved.effective.persona.agents,
-        previewResolved.effective.persona.agents,
+        currentPersona.agents,
+        previewPersona.agents,
         replacedFiles,
-        draftFiles
+        draftFiles,
       ),
       skills: replaceCategoryRefs(
-        currentResolved.effective.persona.skills,
-        previewResolved.effective.persona.skills,
+        currentPersona.skills,
+        previewPersona.skills,
         replacedFiles,
-        draftFiles
+        draftFiles,
       ),
       slashCmds: replaceCategoryRefs(
-        currentResolved.effective.persona.slashCmds,
-        previewResolved.effective.persona.slashCmds,
+        currentPersona.slashCmds,
+        previewPersona.slashCmds,
         replacedFiles,
-        draftFiles
+        draftFiles,
       ),
       memory: replaceCategoryRefs(
-        currentResolved.effective.persona.memory,
-        previewResolved.effective.persona.memory,
+        currentPersona.memory,
+        previewPersona.memory,
         replacedFiles,
-        draftFiles
+        draftFiles,
       ),
     },
     provenanceMap,
@@ -238,7 +295,7 @@ function buildDraftReplacementRenderInput(
 
 function filesForProvenanceSource(
   resolved: EffectiveSessionConfig,
-  sourceName: string
+  sourceName: string,
 ): Set<string> {
   const files = new Set<string>();
   for (const entry of resolved.provenance.persona) {
@@ -252,7 +309,7 @@ function replaceCategoryRefs(
   currentRefs: readonly string[],
   previewRefs: readonly string[],
   replacedFiles: ReadonlySet<string>,
-  draftFiles: ReadonlySet<string>
+  draftFiles: ReadonlySet<string>,
 ): string[] {
   const output: string[] = [];
   const seen = new Set<string>();
@@ -282,7 +339,11 @@ function scopeNameForDraftPath(input: {
   if (targetPath === resolve(join(globalConfigDir, "global", "shared.yml"))) {
     return "global-shared";
   }
-  if (role && targetPath === resolve(join(globalConfigDir, "global", "roles", `${role}.yml`))) {
+  if (
+    role &&
+    targetPath ===
+      resolve(join(globalConfigDir, "global", "roles", `${role}.yml`))
+  ) {
     return "global-role";
   }
 
@@ -295,7 +356,10 @@ function scopeNameForDraftPath(input: {
     if (targetPath === resolve(join(myClaudeDir, "local.yml"))) {
       return `project-shared-local:${resolvedProjectDir}`;
     }
-    if (role && targetPath === resolve(join(myClaudeDir, "roles", `${role}.yml`))) {
+    if (
+      role &&
+      targetPath === resolve(join(myClaudeDir, "roles", `${role}.yml`))
+    ) {
       return `project-role:${resolvedProjectDir}`;
     }
   }
@@ -303,7 +367,9 @@ function scopeNameForDraftPath(input: {
   return null;
 }
 
-function projectSafePersonaPreview(result: PersonaRenderResult): PersonaPreviewProjection {
+function projectSafePersonaPreview(
+  result: PersonaRenderResult,
+): PersonaPreviewProjection {
   const basenames: PersonaPreviewBasename[] = [];
   const claudeMdSections = result.claudeMd?.sections ?? [];
 
@@ -325,7 +391,10 @@ function projectSafePersonaPreview(result: PersonaRenderResult): PersonaPreviewP
   const collisions = groupCollisions(result);
   const truncatedItemCount = Math.max(
     0,
-    basenames.length + missingSources.length + collisions.length - MAX_SAFE_PREVIEW_ITEMS
+    basenames.length +
+      missingSources.length +
+      collisions.length -
+      MAX_SAFE_PREVIEW_ITEMS,
   );
 
   return {
@@ -340,7 +409,10 @@ function projectSafePersonaPreview(result: PersonaRenderResult): PersonaPreviewP
       claudeMdSectionCount: claudeMdSections.length,
       claudeMdCharacterCount: result.claudeMd?.combinedContent.length ?? 0,
       fileCount: result.files.length,
-      fileCharacterCount: result.files.reduce((sum, file) => sum + file.content.length, 0),
+      fileCharacterCount: result.files.reduce(
+        (sum, file) => sum + file.content.length,
+        0,
+      ),
       totalCharacterCount:
         (result.claudeMd?.combinedContent.length ?? 0) +
         result.files.reduce((sum, file) => sum + file.content.length, 0),
@@ -351,13 +423,15 @@ function projectSafePersonaPreview(result: PersonaRenderResult): PersonaPreviewP
 
 function countRenderedCategory(
   result: PersonaRenderResult,
-  category: PersonaPreviewCategory
+  category: PersonaPreviewCategory,
 ): number {
   if (category === "claudeMd") return result.claudeMd?.sections.length ?? 0;
   return result.files.filter((file) => file.category === category).length;
 }
 
-function groupMissingSources(result: PersonaRenderResult): PersonaPreviewMissingSourceWarning[] {
+function groupMissingSources(
+  result: PersonaRenderResult,
+): PersonaPreviewMissingSourceWarning[] {
   const grouped = new Map<string, PersonaPreviewMissingSourceWarning>();
 
   for (const source of result.missingSources) {
@@ -375,7 +449,9 @@ function groupMissingSources(result: PersonaRenderResult): PersonaPreviewMissing
   return Array.from(grouped.values());
 }
 
-function groupCollisions(result: PersonaRenderResult): PersonaPreviewCollisionWarning[] {
+function groupCollisions(
+  result: PersonaRenderResult,
+): PersonaPreviewCollisionWarning[] {
   const grouped = new Map<string, PersonaPreviewCollisionWarning>();
 
   for (const collision of result.collisions) {
@@ -400,17 +476,27 @@ function normalizePreviewCategory(category: string): PersonaPreviewCategory {
   return "memory";
 }
 
-function normalizeFilePreviewCategory(category: string): PersonaPreviewFileCategory | null {
+function normalizeFilePreviewCategory(
+  category: string,
+): PersonaPreviewFileCategory | null {
   const normalized = category === "commands" ? "slashCmds" : category;
   return isPreviewFileCategory(normalized) ? normalized : null;
 }
 
-function isPreviewCategory(category: string): category is PersonaPreviewCategory {
-  return PERSONA_PREVIEW_CATEGORIES.includes(category as PersonaPreviewCategory);
+function isPreviewCategory(
+  category: string,
+): category is PersonaPreviewCategory {
+  return PERSONA_PREVIEW_CATEGORIES.includes(
+    category as PersonaPreviewCategory,
+  );
 }
 
-function isPreviewFileCategory(category: string): category is PersonaPreviewFileCategory {
-  return PERSONA_PREVIEW_FILE_CATEGORIES.includes(category as PersonaPreviewFileCategory);
+function isPreviewFileCategory(
+  category: string,
+): category is PersonaPreviewFileCategory {
+  return PERSONA_PREVIEW_FILE_CATEGORIES.includes(
+    category as PersonaPreviewFileCategory,
+  );
 }
 
 function safeBasename(category: PersonaPreviewCategory, value: string): string {
@@ -427,8 +513,12 @@ function safeBasename(category: PersonaPreviewCategory, value: string): string {
 function sanitizeSummarySegment(value: string): string | null {
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) return null;
-  if (TOKEN_LIKE_RE.test(normalized) || UNSAFE_SUMMARY_RE.test(normalized)) return null;
-  if (/[/\\]|\0|\$\{|\bsecret\b|\btoken\b|authorization|oauth/i.test(normalized)) return null;
+  if (TOKEN_LIKE_RE.test(normalized) || UNSAFE_SUMMARY_RE.test(normalized))
+    return null;
+  if (
+    /[/\\]|\0|\$\{|\bsecret\b|\btoken\b|authorization|oauth/i.test(normalized)
+  )
+    return null;
   return normalized.slice(0, 80);
 }
 

@@ -227,6 +227,7 @@ export function ProfileSkillsPersonaPanel({
   );
   const initialFocusRef = React.useRef<HTMLButtonElement | null>(null);
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const dirtyCancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const pendingLeaveContinuationRef = React.useRef<(() => void) | null>(null);
   const target = React.useMemo(
     () => resolveProfileSkillsPersonaTarget({ scopeEntries, selectedRole }),
@@ -976,10 +977,18 @@ export function ProfileSkillsPersonaPanel({
     window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
   }, [announce]);
 
+  React.useEffect(() => {
+    if (!dirtyPromptOpen) return;
+    const frameId = window.requestAnimationFrame(() => {
+      dirtyCancelButtonRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [dirtyPromptOpen]);
+
   const discardDirtyPromptAndContinue = React.useCallback(() => {
     const continuation = pendingLeaveContinuationRef.current;
     announce("Discarded Skills & Persona changes.");
-    completeCloseAndContinue(continuation);
+    completeCloseAndContinue(continuation, false);
   }, [announce, completeCloseAndContinue]);
 
   const saveDirtyPromptAndContinue = React.useCallback(async () => {
@@ -1034,6 +1043,7 @@ export function ProfileSkillsPersonaPanel({
         aria-hidden="true"
       />
       <dialog
+        aria-describedby="profile-skills-persona-description"
         aria-labelledby="profile-skills-persona-title"
         aria-modal="true"
         className="fixed left-1/2 top-1/2 z-50 grid max-h-[92vh] w-full max-w-6xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-lg focus-visible:outline-none"
@@ -1062,7 +1072,10 @@ export function ProfileSkillsPersonaPanel({
                   >
                     Customize skills & persona for {profile.name}
                   </h2>
-                  <p className="mt-1 text-sm leading-6 text-secondary">
+                  <p
+                    className="mt-1 text-sm leading-6 text-secondary"
+                    id="profile-skills-persona-description"
+                  >
                     Attach profile-owned skills, instructions, agents, commands,
                     and memory with safe previews before saving.
                   </p>
@@ -1158,6 +1171,7 @@ export function ProfileSkillsPersonaPanel({
               <section
                 aria-live="polite"
                 className="sticky top-0 grid gap-4"
+                data-preview-status={previewStatus}
                 data-testid="profile-skills-persona-preview"
               >
                 <div className="rounded-xl border border-default bg-surface p-4 shadow-xs">
@@ -1172,9 +1186,11 @@ export function ProfileSkillsPersonaPanel({
                         <h3 className="text-sm font-semibold text-primary">
                           Preview composed persona
                         </h3>
-                        <StatusChip tone={previewTone}>
-                          {formatPreviewStatus(previewStatus)}
-                        </StatusChip>
+                        <span data-testid="profile-skills-persona-preview-status">
+                          <StatusChip tone={previewTone}>
+                            {formatPreviewStatus(previewStatus)}
+                          </StatusChip>
+                        </span>
                       </div>
                       <p className="mt-2 text-sm leading-6 text-secondary">
                         {previewStatus === "loading"
@@ -1258,7 +1274,11 @@ export function ProfileSkillsPersonaPanel({
                       {issues.slice(0, 5).map((issue, index) => (
                         <li key={`${issue.path}:${index}`}>{issue.message}</li>
                       ))}
-                      {saveError ? <li>{saveError}</li> : null}
+                      {saveError ? (
+                        <li data-testid="profile-skills-persona-save-error">
+                          {saveError}
+                        </li>
+                      ) : null}
                     </ul>
                   </div>
                 ) : null}
@@ -1312,6 +1332,7 @@ export function ProfileSkillsPersonaPanel({
             aria-hidden="true"
           />
           <dialog
+            aria-describedby="profile-skills-persona-dirty-description"
             aria-labelledby="profile-skills-persona-dirty-title"
             aria-modal="true"
             className="fixed left-1/2 top-1/2 z-[61] grid w-full max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-md border border-border bg-popover p-6 text-popover-foreground shadow-lg"
@@ -1325,7 +1346,10 @@ export function ProfileSkillsPersonaPanel({
               >
                 Save Skills & Persona changes?
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p
+                className="text-sm text-muted-foreground"
+                id="profile-skills-persona-dirty-description"
+              >
                 You have unsaved guided Skills & Persona edits. Save before
                 leaving, discard the draft, or stay here to keep editing.
               </p>
@@ -1348,6 +1372,7 @@ export function ProfileSkillsPersonaPanel({
                 data-testid="profile-skills-persona-dirty-cancel"
                 disabled={isSaving}
                 onClick={cancelDirtyPrompt}
+                ref={dirtyCancelButtonRef}
                 type="button"
                 variant="ghost"
               >
@@ -1469,6 +1494,8 @@ function CategorySection({
             const isOpaqueSkillRow =
               row.category === "skills" &&
               isProfileSkillsPersonaOpaqueSkillRef(row.ref);
+            const categoryControlId = `profile-skills-persona-category-${row.id}`;
+            const refControlId = `profile-skills-persona-ref-${row.id}`;
             return (
               <div
                 className="rounded-lg border border-subtle bg-canvas/60 p-3"
@@ -1497,11 +1524,12 @@ function CategorySection({
                   </Button>
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)]">
-                  <Field label="Category">
+                  <Field label="Category" htmlFor={categoryControlId}>
                     <select
                       aria-label={`${config.noun} ${index + 1} category`}
                       className="min-h-10 rounded-md border border-default bg-canvas px-3 text-sm text-primary shadow-xs focus:outline-none focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={disabled || isOpaqueSkillRow}
+                      id={categoryControlId}
                       onChange={(event) =>
                         onUpdate(row.id, {
                           category: event.currentTarget
@@ -1532,6 +1560,7 @@ function CategorySection({
                   ) : (
                     <Field
                       description="Use a safe asset reference. Credentials and raw local paths are blocked."
+                      htmlFor={refControlId}
                       label="Asset reference"
                       {...fieldErrorProps(issuesByField.ref)}
                     >
@@ -1540,6 +1569,7 @@ function CategorySection({
                         className="font-mono text-xs"
                         data-testid="profile-skills-persona-ref-input"
                         disabled={disabled}
+                        id={refControlId}
                         onChange={(event) =>
                           onUpdate(row.id, { ref: event.currentTarget.value })
                         }
@@ -1823,6 +1853,7 @@ function PersonaPreviewDetails({
             {preview.missingSources.map((item, index) => (
               <li
                 className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning"
+                data-testid="profile-skills-persona-missing-source-warning"
                 key={`missing:${item.category}:${item.basename}:${index}`}
               >
                 {CATEGORY_CONFIG[item.category].label} · {item.basename} ·
@@ -1832,6 +1863,7 @@ function PersonaPreviewDetails({
             {preview.collisions.map((item, index) => (
               <li
                 className="rounded-md border border-status-warning bg-status-warning-soft px-3 py-2 text-sm text-status-warning"
+                data-testid="profile-skills-persona-collision-warning"
                 key={`collision:${item.category}:${item.basename}:${index}`}
               >
                 {CATEGORY_CONFIG[item.category].label} · {item.basename} ·{" "}

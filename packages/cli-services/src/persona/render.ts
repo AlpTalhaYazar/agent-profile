@@ -11,8 +11,15 @@
  * created and no `CLAUDE.md` is written; the render output is intended for
  * preview surfaces (Persona Composer GUI, `myclaude render persona` CLI).
  */
-import { type PersonaRenderResult, renderPersonaInMemory } from "@agent-profile/persona-deployer";
+import {
+  type PersonaRenderResult,
+  renderPersonaInMemory,
+} from "@agent-profile/persona-deployer";
 import { resolveCurrentProfile } from "../profile/shared.js";
+import {
+  resolvePersonaProvenanceMapForRender,
+  resolvePersonaRefsForRender,
+} from "./path-resolution.js";
 
 /**
  * Input options for `personaRenderService`.
@@ -57,7 +64,7 @@ export interface PersonaRenderInput {
  *   suppressed by the `"skip"` policy.
  */
 export async function personaRenderService(
-  input: PersonaRenderInput
+  input: PersonaRenderInput,
 ): Promise<PersonaRenderResult> {
   const { role, authProfileId, cwd, home } = input;
   const resolved = resolveCurrentProfile({
@@ -79,8 +86,8 @@ export async function personaRenderService(
   }
 
   return renderPersonaInMemory({
-    effective: resolved.effective.persona,
-    provenanceMap,
+    effective: resolvePersonaRefsForRender(resolved.effective.persona, cwd),
+    provenanceMap: resolvePersonaProvenanceMapForRender(provenanceMap, cwd),
     onMissingSource: "skip",
   });
 }

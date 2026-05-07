@@ -5,7 +5,10 @@ import {
   type AgentProfileViewModelInput,
 } from "../src/renderer/lib/agent-profile-view-model.js";
 import { normalizeAuthProfiles } from "../src/renderer/lib/normalize.js";
-import type { AuthProfileOption, EffectiveConfig } from "../src/renderer/lib/types.js";
+import type {
+  AuthProfileOption,
+  EffectiveConfig,
+} from "../src/renderer/lib/types.js";
 
 const workAuth: AuthProfileOption = {
   id: "work-oauth",
@@ -40,7 +43,7 @@ function effective(overrides: Partial<EffectiveConfig> = {}): EffectiveConfig {
 }
 
 function baseInput(
-  overrides: Partial<AgentProfileViewModelInput> = {}
+  overrides: Partial<AgentProfileViewModelInput> = {},
 ): AgentProfileViewModelInput {
   return {
     selectedRole: "frontend-ui",
@@ -74,7 +77,12 @@ function baseInput(
       }),
       provenance: null,
     },
-    previewState: { status: "idle", effective: null, diff: [], errorMessage: null },
+    previewState: {
+      status: "idle",
+      effective: null,
+      diff: [],
+      errorMessage: null,
+    },
     validationState: { status: "ready", issues: [], errorMessage: null },
     isBootstrapping: false,
     isRefreshing: false,
@@ -99,7 +107,7 @@ describe("deriveAgentProfileViewModel", () => {
             "refresh_token",
           ],
         },
-      ])
+      ]),
     ).toEqual([
       {
         id: "work-oauth",
@@ -120,7 +128,7 @@ describe("deriveAgentProfileViewModel", () => {
           mode: "oauth",
           secrets: [],
         },
-      ])
+      ]),
     ).toEqual([
       {
         id: "keyring://anthropic/work",
@@ -157,13 +165,21 @@ describe("deriveAgentProfileViewModel", () => {
       personaAssets: 6,
       validationIssues: 0,
     });
-    expect(vm.readiness).toMatchObject({ status: "ready", canLaunch: true, label: "Ready" });
+    expect(vm.readiness).toMatchObject({
+      status: "ready",
+      canLaunch: true,
+      label: "Ready",
+    });
     expect(vm.launch.payload).toEqual({
       role: "frontend-ui",
       authProfileId: "work-oauth",
       cwd: "/Users/alptalhayazarwork/personal/agent-profile",
     });
-    expect(vm.card.metadata).toEqual(["Work Claude", "agent-profile", "2 tools · 2 skills"]);
+    expect(vm.card.metadata).toEqual([
+      "Work Claude",
+      "agent-profile",
+      "2 tools · 2 skills",
+    ]);
   });
 
   test.each([
@@ -180,7 +196,9 @@ describe("deriveAgentProfileViewModel", () => {
   });
 
   test("blocks launch when the selected auth id is not in the known auth profiles", () => {
-    const vm = deriveAgentProfileViewModel(baseInput({ selectedAuthId: "missing-auth" }));
+    const vm = deriveAgentProfileViewModel(
+      baseInput({ selectedAuthId: "missing-auth" }),
+    );
 
     expect(vm.auth).toMatchObject({
       profileId: "missing-auth",
@@ -194,7 +212,11 @@ describe("deriveAgentProfileViewModel", () => {
   test("keeps loading profiles non-launchable", () => {
     const vm = deriveAgentProfileViewModel(baseInput({ isRefreshing: true }));
 
-    expect(vm.readiness).toMatchObject({ status: "loading", canLaunch: false, label: "Loading" });
+    expect(vm.readiness).toMatchObject({
+      status: "loading",
+      canLaunch: false,
+      label: "Loading",
+    });
     expect(vm.launch.disabledReason).toBe("Profile is still loading");
   });
 
@@ -203,10 +225,16 @@ describe("deriveAgentProfileViewModel", () => {
       baseInput({
         validationState: {
           status: "ready",
-          issues: [{ path: "settings.model", message: "Unsupported model", severity: "warning" }],
+          issues: [
+            {
+              path: "settings.model",
+              message: "Unsupported model",
+              severity: "warning",
+            },
+          ],
           errorMessage: null,
         },
-      })
+      }),
     );
 
     expect(vm.readiness).toMatchObject({
@@ -244,7 +272,7 @@ describe("deriveAgentProfileViewModel", () => {
           diff: [],
           errorMessage: null,
         },
-      })
+      }),
     );
 
     expect(vm.toolSkillCounts.tools).toBe(1);
@@ -256,7 +284,7 @@ describe("deriveAgentProfileViewModel", () => {
     const vm = deriveAgentProfileViewModel(
       baseInput({
         effectiveState: { effective: {} as EffectiveConfig, provenance: null },
-      })
+      }),
     );
 
     expect(vm.toolSkillCounts).toMatchObject({
@@ -271,6 +299,57 @@ describe("deriveAgentProfileViewModel", () => {
       personaAssets: 0,
     });
     expect(vm.card.metadata[2]).toBe("No tools or skills");
+  });
+
+  test("projects persona capability counts without leaking raw persona refs into home-facing summaries", () => {
+    const vm = deriveAgentProfileViewModel(
+      baseInput({
+        effectiveState: {
+          effective: effective({
+            persona: {
+              claudeMd: ["/tmp/private/.myclaude/CLAUDE.md"],
+              agents: ["/Users/alice/.myclaude/agents/reviewer.md"],
+              skills: ["/tmp/private/.myclaude/skills/secret-skill/SKILL.md"],
+              slashCmds: ["commands/${secret:raw-token}.md"],
+              memory: ["keyring://persona/memory"],
+            },
+          }),
+          provenance: null,
+        },
+      }),
+    );
+
+    expect(vm.toolSkillCounts).toMatchObject({
+      claudeMd: 1,
+      agents: 1,
+      skills: 1,
+      commands: 1,
+      memory: 1,
+      personaAssets: 5,
+    });
+    expect(vm.capabilities.skills).toEqual({
+      claudeMd: 1,
+      agents: 1,
+      skills: 1,
+      slashCommands: 1,
+      memory: 1,
+      personaAssets: 5,
+    });
+
+    const homeFacing = JSON.stringify({
+      counts: vm.toolSkillCounts,
+      skills: vm.capabilities.skills,
+      card: vm.card,
+    });
+    expect(homeFacing).toContain("1 skill");
+    expect(homeFacing).not.toContain("/tmp");
+    expect(homeFacing).not.toContain("/Users/");
+    expect(homeFacing).not.toContain(".myclaude");
+    expect(homeFacing).not.toContain("${secret:");
+    expect(homeFacing).not.toContain("keyring://");
+    expect(homeFacing).not.toContain("raw-token");
+    expect(homeFacing).not.toContain("sourcePath");
+    expect(homeFacing).not.toContain("originScope");
   });
 
   test("derives present and missing MCP secret status from safe logical names only", () => {
@@ -298,7 +377,7 @@ describe("deriveAgentProfileViewModel", () => {
           }),
           provenance: null,
         },
-      })
+      }),
     );
 
     expect(vm.capabilities.tools.serverNames).toEqual(["browser", "github"]);
@@ -307,7 +386,10 @@ describe("deriveAgentProfileViewModel", () => {
       "github.pat",
       "linear.token",
     ]);
-    expect(vm.capabilities.tools.presentSecretNames).toEqual(["browser.token", "github.pat"]);
+    expect(vm.capabilities.tools.presentSecretNames).toEqual([
+      "browser.token",
+      "github.pat",
+    ]);
     expect(vm.capabilities.tools.missingSecretNames).toEqual(["linear.token"]);
     expect(vm.capabilities.tools.secretStatuses).toEqual([
       { name: "browser.token", state: "present" },
@@ -339,16 +421,21 @@ describe("deriveAgentProfileViewModel", () => {
         effectiveState: {
           effective: effective({
             mcpServers: {
-              linear: { type: "http", headers: { Authorization: "Bearer ${secret:linear.token}" } },
+              linear: {
+                type: "http",
+                headers: { Authorization: "Bearer ${secret:linear.token}" },
+              },
             },
           }),
           provenance: null,
         },
-      })
+      }),
     );
 
     expect(vm.auth.state).toBe("missing");
-    expect(vm.capabilities.tools.referencedSecretNames).toEqual(["linear.token"]);
+    expect(vm.capabilities.tools.referencedSecretNames).toEqual([
+      "linear.token",
+    ]);
     expect(vm.capabilities.tools.presentSecretNames).toEqual([]);
     expect(vm.capabilities.tools.missingSecretNames).toEqual(["linear.token"]);
   });
@@ -359,12 +446,20 @@ describe("deriveAgentProfileViewModel", () => {
         validationState: {
           status: "ready",
           issues: [
-            { path: "mcpServers.github", message: "Missing command", severity: "error" },
-            { path: "settings.model", message: "Unsupported model", severity: "warning" },
+            {
+              path: "mcpServers.github",
+              message: "Missing command",
+              severity: "error",
+            },
+            {
+              path: "settings.model",
+              message: "Unsupported model",
+              severity: "warning",
+            },
           ],
           errorMessage: null,
         },
-      })
+      }),
     );
 
     expect(vm.toolSkillCounts.validationIssues).toBe(2);
@@ -376,12 +471,15 @@ describe("deriveAgentProfileViewModel", () => {
       baseInput({
         selectedAuthId: "keyring://anthropic/work",
         authProfiles: [secretLikeAuth],
-      })
+      }),
     );
 
     expect(vm.auth.label).toBe("Claude identity");
     expect(vm.card.metadata).toContain("Claude identity");
-    const homeFacing = JSON.stringify({ authLabel: vm.auth.label, card: vm.card });
+    const homeFacing = JSON.stringify({
+      authLabel: vm.auth.label,
+      card: vm.card,
+    });
     expect(homeFacing).not.toContain("keyring://");
     expect(homeFacing).not.toContain("${secret:");
     expect(homeFacing).not.toContain("Bearer");
@@ -411,7 +509,7 @@ describe("deriveAgentProfileViewModel", () => {
             },
           },
         ],
-      })
+      }),
     );
 
     expect(vm.name).toBe("Backend API Review");
@@ -440,7 +538,7 @@ describe("deriveAgentProfileViewModel", () => {
           }),
           provenance: null,
         },
-      })
+      }),
     );
 
     const homeFacing = JSON.stringify({
@@ -486,7 +584,9 @@ describe("deriveAgentProfileViewModel", () => {
                 purpose: "Review backend API changes before launch",
               },
               auth: { profileId: "work-oauth" },
-              mcpServers: { github: { type: "http", url: "https://github.example/mcp" } },
+              mcpServers: {
+                github: { type: "http", url: "https://github.example/mcp" },
+              },
               env: {},
               settings: {},
               persona: {
@@ -532,7 +632,7 @@ describe("deriveAgentProfileViewModel", () => {
             },
           },
         ],
-      })
+      }),
     );
 
     expect(library.items).toHaveLength(3);
@@ -568,7 +668,9 @@ describe("deriveAgentProfileViewModel", () => {
     });
 
     const displaySurface = JSON.stringify(
-      library.items.map(({ selection: _selection, ...displayFields }) => displayFields)
+      library.items.map(
+        ({ selection: _selection, ...displayFields }) => displayFields,
+      ),
     );
     expect(displaySurface).not.toContain("keyring://");
     expect(displaySurface).not.toContain("${secret:");
@@ -584,7 +686,10 @@ describe("deriveAgentProfileViewModel", () => {
       path: `/repo/.myclaude/roles/review-${index}.yml`,
       content: {
         version: 1 as const,
-        profile: { displayName: `Review ${index}`, purpose: `Review queue ${index}` },
+        profile: {
+          displayName: `Review ${index}`,
+          purpose: `Review queue ${index}`,
+        },
         auth: { profileId: "work-oauth" },
         mcpServers: {},
         env: {},
@@ -599,15 +704,17 @@ describe("deriveAgentProfileViewModel", () => {
         selectedRole: "review-0",
         selectedAuthId: "work-oauth",
         scopeEntries,
-      })
+      }),
     );
 
     expect(library.items).toHaveLength(20);
     expect(library.items.filter((item) => item.isSelected)).toHaveLength(1);
     expect(library.items.filter((item) => item.isSwitchable)).toHaveLength(19);
-    expect(library.items.every((item) => item.selection.authProfileId === "work-oauth")).toBe(
-      true
-    );
+    expect(
+      library.items.every(
+        (item) => item.selection.authProfileId === "work-oauth",
+      ),
+    ).toBe(true);
   });
 
   test("keeps the profile id opaque instead of embedding raw role, auth, or cwd", () => {

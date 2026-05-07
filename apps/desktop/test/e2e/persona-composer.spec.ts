@@ -33,11 +33,16 @@ test("persona composer renders the combined CLAUDE.md and per-category catalog",
   const agentDir = join(personaDir, "agents");
   const agentPath = join(agentDir, "api-designer.md");
 
-  await mkdir(join(myClaudeHome, "config", "global", "roles"), { recursive: true });
+  await mkdir(join(myClaudeHome, "config", "global", "roles"), {
+    recursive: true,
+  });
   await mkdir(join(projectDir, ".myclaude", "roles"), { recursive: true });
   await mkdir(agentDir, { recursive: true });
 
-  await writeFile(claudeMdPath, "# Backend persona\n\nYou are working on the Acme backend.\n");
+  await writeFile(
+    claudeMdPath,
+    "# Backend persona\n\nYou are working on the Acme backend.\n",
+  );
   await writeFile(agentPath, "# api-designer\n\nReview API contracts.\n");
 
   await writeFile(
@@ -51,11 +56,11 @@ authProfiles:
       mode: apiKey
       secretRef: keyring://anthropic/work
     mcpSecretRefs: {}
-`.trimStart()
+`.trimStart(),
   );
   await writeFile(
     join(myClaudeHome, "config", "global", "shared.yml"),
-    "version: 1\nenv:\n  EDITOR: nvim\n"
+    "version: 1\nenv:\n  EDITOR: nvim\n",
   );
   await writeFile(
     join(myClaudeHome, "config", "global", "roles", "backend.yml"),
@@ -66,18 +71,27 @@ persona:
     - ${claudeMdPath}
   agents:
     - ${agentPath}
-`.trimStart()
+`.trimStart(),
   );
-  await writeFile(join(projectDir, ".myclaude", "roles", "backend.yml"), "version: 1\n");
+  await writeFile(
+    join(projectDir, ".myclaude", "roles", "backend.yml"),
+    "version: 1\n",
+  );
 
   expect(
     existsSync(electronExecutablePath),
-    `missing Electron executable at ${electronExecutablePath}`
+    `missing Electron executable at ${electronExecutablePath}`,
   ).toBe(true);
-  await cp(join(process.cwd(), ".vite"), join(appDir, ".vite"), { recursive: true });
+  await cp(join(process.cwd(), ".vite"), join(appDir, ".vite"), {
+    recursive: true,
+  });
   await writeFile(
     join(appDir, "package.json"),
-    JSON.stringify({ name: "agent-profile-e2e", version: "0.0.1", main: ".vite/build/main.cjs" })
+    JSON.stringify({
+      name: "agent-profile-e2e",
+      version: "0.0.1",
+      main: ".vite/build/main.cjs",
+    }),
   );
 
   const app = await electron.launch({
@@ -97,7 +111,9 @@ persona:
   try {
     const page = await app.firstWindow();
     await page.getByTestId("sidebar-editor").click();
-    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Profile Workspace" }),
+    ).toBeVisible();
 
     // Persona now lives under Profile Workspace → Debug.
     await page.getByRole("button", { name: "Debug", exact: true }).click();
@@ -108,16 +124,36 @@ persona:
     // claudeMd block (driven by the seeded backend persona ref).
     const catalog = page.getByTestId("persona-catalog");
     await expect(catalog).toBeVisible();
+    await expect(catalog).not.toContainText("keyring://");
+    await expect(catalog).not.toContainText("${secret:");
+    await expect(catalog).toContainText("global-role");
     const combined = page.getByTestId("persona-claudemd-combined");
     await expect(combined).toBeVisible();
 
     // Agents section reflects the seeded api-designer.md.
-    await expect(page.getByTestId("persona-file-agents-api-designer.md")).toBeVisible();
+    await expect(
+      page.getByTestId("persona-file-agents-api-designer.md"),
+    ).toBeVisible();
 
     // Clicking the combined entry opens the preview pane.
     await combined.click();
     const preview = page.getByTestId("persona-preview");
-    await expect(preview.getByRole("heading", { name: "CLAUDE.md (combined)" })).toBeVisible();
+    await expect(
+      preview.getByRole("heading", { name: "CLAUDE.md (combined)" }),
+    ).toBeVisible();
+    await expect(preview).not.toContainText("keyring://");
+    await expect(preview).not.toContainText("${secret:");
+
+    // Persona Composer is an explicit Profile Workspace debug surface, so it
+    // may keep source details that default Agent Profile surfaces redact.
+    await page.getByTestId("persona-file-agents-api-designer.md").click();
+    await expect(
+      preview.getByRole("heading", { name: "api-designer.md" }),
+    ).toBeVisible();
+    await expect(preview).toContainText(agentPath);
+    await expect(preview).toContainText("origin global-role");
+    await expect(preview).not.toContainText("keyring://");
+    await expect(preview).not.toContainText("${secret:");
   } finally {
     await app.close();
     await rm(root, { recursive: true, force: true });

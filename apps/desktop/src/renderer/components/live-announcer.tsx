@@ -5,7 +5,12 @@ import { announceMessageAtom } from "../lib/atoms.js";
 export function LiveAnnouncer(): React.ReactElement {
   const message = useAtomValue(announceMessageAtom);
   return (
-    <output aria-atomic="true" aria-live="polite" className="sr-only">
+    <output
+      aria-atomic="true"
+      aria-live="polite"
+      className="sr-only"
+      data-testid="app-live-announcer"
+    >
       {message}
     </output>
   );
@@ -27,6 +32,6 @@ export function useAnnounce(): (message: string) => void {
       lastMessageRef.current = trimmed;
       setMessage(trimmed);
     },
-    [setMessage]
+    [setMessage],
   );
 }
