@@ -235,6 +235,77 @@ test("guided skills persona attaches installed and catalog skills safely, saves,
   }
 });
 
+test("guided skills persona saves to the selected nested project profile layer", async () => {
+  const fixture = await createDesktopFixture("guided-skills-persona-nested-target-");
+  await seedProfileFixture(fixture);
+
+  const parentProjectDir = fixture.projectDir;
+  const nestedProjectDir = join(parentProjectDir, "packages", "api");
+  await mkdir(join(nestedProjectDir, ".myclaude", "roles"), {
+    recursive: true,
+  });
+  const parentRolePath = join(
+    parentProjectDir,
+    ".myclaude",
+    "roles",
+    "backend.yml",
+  );
+  const nestedRolePath = join(
+    nestedProjectDir,
+    ".myclaude",
+    "roles",
+    "backend.yml",
+  );
+  await writeFile(
+    parentRolePath,
+    [
+      "version: 1",
+      "persona:",
+      "  skills:",
+      "    - skills/parent/SKILL.md",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(nestedRolePath, "version: 1\n");
+
+  const nestedFixture: DesktopFixture = {
+    ...fixture,
+    projectDir: nestedProjectDir,
+  };
+  const assets = await createInlinePersonaAssets(nestedFixture);
+  const { app, page } = await launchDesktop(nestedFixture);
+  const fixtureForbidden = forbiddenFixturePatterns(nestedFixture);
+
+  try {
+    await expect(
+      page.getByRole("heading", { name: "Agent Profiles" }),
+    ).toBeVisible();
+    await page.getByTestId("profile-skills-persona-open").click();
+    const panel = page.getByTestId("profile-skills-persona-panel");
+    await expect(panel).toBeVisible();
+    await addManualPersonaRow(page, panel, "skills", assets.skill);
+    await panel.getByTestId("profile-skills-persona-preview-action").click();
+    await expect(
+      panel.getByTestId("profile-skills-persona-preview"),
+    ).toHaveAttribute("data-preview-status", "ready", { timeout: 15_000 });
+    await panel.getByTestId("profile-skills-persona-save").click();
+    await expect(panel).toHaveCount(0, { timeout: 15_000 });
+
+    const parentProfile = await readText(parentRolePath);
+    const nestedProfile = await readText(nestedRolePath);
+    expect(parentProfile).toContain("skills/parent/SKILL.md");
+    expect(parentProfile).not.toContain(assets.skill);
+    expect(nestedProfile).toContain(assets.skill);
+    await expectSafeSurface(
+      page.getByTestId("agent-profile-card"),
+      fixtureForbidden,
+    );
+  } finally {
+    await app.close().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
 test("guided skills persona previews multi-category assets with missing and collision warnings, keyboard dirty guard, and live announcements", async () => {
   const fixture = await createDesktopFixture(
     "guided-skills-persona-categories-",

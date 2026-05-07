@@ -243,6 +243,106 @@ describe("profile skills and persona draft contract", () => {
     });
   });
 
+  test("prefers the explicit selected project-role target and blocks stale targets", () => {
+    const parent = entry({
+      path: "/repo/.myclaude/roles/backend-api-review.yml",
+      content: scopeDoc({
+        persona: {
+          claudeMd: [],
+          agents: [],
+          skills: ["skills/parent/SKILL.md"],
+          slashCmds: [],
+          memory: [],
+        },
+      }),
+    });
+    const child = entry({
+      path: "/repo/packages/api/.myclaude/roles/backend-api-review.yml",
+      content: scopeDoc({
+        persona: {
+          claudeMd: [],
+          agents: [],
+          skills: ["skills/child/SKILL.md"],
+          slashCmds: [],
+          memory: [],
+        },
+      }),
+    });
+
+    const target = resolveProfileSkillsPersonaTarget({
+      scopeEntries: [parent, child],
+      selectedRole: "backend api review",
+      selectedScopePath: child.path,
+    });
+    expect(target.status).toBe("writable");
+    if (target.status !== "writable")
+      throw new Error("expected writable target");
+    expect(target.path).toBe(child.path);
+    expect(target.content.persona?.skills).toEqual(["skills/child/SKILL.md"]);
+
+    const stale = resolveProfileSkillsPersonaTarget({
+      scopeEntries: [parent, child],
+      selectedRole: "backend api review",
+      selectedScopePath: "/repo/missing/.myclaude/roles/backend-api-review.yml",
+    });
+    expect(stale).toMatchObject({
+      status: "invalid",
+      role: "backend-api-review",
+    });
+    expect(JSON.stringify(stale)).not.toContain("/repo/missing");
+
+    const wrongLayer = resolveProfileSkillsPersonaTarget({
+      scopeEntries: [
+        parent,
+        entry({ scope: "global-role", path: "/global/backend.yml" }),
+      ],
+      selectedRole: "backend api review",
+      selectedScopePath: "/global/backend.yml",
+    });
+    expect(wrongLayer).toMatchObject({
+      status: "invalid",
+      role: "backend-api-review",
+    });
+    expect(JSON.stringify(wrongLayer)).not.toContain("/global/backend.yml");
+  });
+
+  test("falls back to the highest-precedence writable project-role when no selected path exists", () => {
+    const parent = entry({
+      path: "/repo/.myclaude/roles/backend-api-review.yml",
+      content: scopeDoc({
+        persona: {
+          claudeMd: [],
+          agents: [],
+          skills: ["skills/parent/SKILL.md"],
+          slashCmds: [],
+          memory: [],
+        },
+      }),
+    });
+    const child = entry({
+      path: "/repo/packages/api/.myclaude/roles/backend-api-review.yml",
+      content: scopeDoc({
+        persona: {
+          claudeMd: [],
+          agents: [],
+          skills: ["skills/child/SKILL.md"],
+          slashCmds: [],
+          memory: [],
+        },
+      }),
+    });
+
+    const target = resolveProfileSkillsPersonaTarget({
+      scopeEntries: [parent, child],
+      selectedRole: "backend api review",
+    });
+    expect(target.status).toBe("writable");
+    if (target.status !== "writable")
+      throw new Error("expected writable target");
+    expect(target.path).toBe(child.path);
+    expect(target.content.persona?.skills).toEqual(["skills/child/SKILL.md"]);
+  });
+
   test("blocks empty rows, unsupported categories, duplicates, credentials, and absolute paths", () => {
     const target = resolveProfileSkillsPersonaTarget({
       scopeEntries: [entry()],

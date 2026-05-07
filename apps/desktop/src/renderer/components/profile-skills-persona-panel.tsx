@@ -80,6 +80,7 @@ interface ProfileSkillsPersonaPanelProps {
   scopeEntries: readonly ScopeListEntry[];
   selectedAuthId: string;
   selectedRole: string;
+  selectedScopePath: string | null;
 }
 
 type SkillsPersonaAsyncStatus =
@@ -220,6 +221,7 @@ export function ProfileSkillsPersonaPanel({
   scopeEntries,
   selectedAuthId,
   selectedRole,
+  selectedScopePath,
 }: ProfileSkillsPersonaPanelProps): React.ReactElement | null {
   const announce = useAnnounce();
   const setSkillsPersonaNavigationGuard = useSetAtom(
@@ -230,8 +232,13 @@ export function ProfileSkillsPersonaPanel({
   const dirtyCancelButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const pendingLeaveContinuationRef = React.useRef<(() => void) | null>(null);
   const target = React.useMemo(
-    () => resolveProfileSkillsPersonaTarget({ scopeEntries, selectedRole }),
-    [scopeEntries, selectedRole],
+    () =>
+      resolveProfileSkillsPersonaTarget({
+        scopeEntries,
+        selectedRole,
+        selectedScopePath,
+      }),
+    [scopeEntries, selectedRole, selectedScopePath],
   );
   const [draft, setDraft] = React.useState<ProfileSkillsPersonaDraft>(() =>
     createProfileSkillsPersonaDraft(target),
@@ -798,6 +805,7 @@ export function ProfileSkillsPersonaPanel({
       const latestTarget = resolveProfileSkillsPersonaTargetFromList({
         listed,
         selectedRole,
+        selectedScopePath,
       });
       const validation = validateProfileSkillsPersonaForm({
         target: latestTarget,
@@ -829,7 +837,7 @@ export function ProfileSkillsPersonaPanel({
       }
       return { ok: true as const, patch };
     },
-    [cwd, draft, selectedRole],
+    [cwd, draft, selectedRole, selectedScopePath],
   );
 
   const saveSkillsPersonaDraft =

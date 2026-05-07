@@ -99,7 +99,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const setScopeEntries = useSetAtom(scopeEntriesAtom);
   const setSelectedRole = useSetAtom(selectedRoleAtom);
   const setSelectedAuthId = useSetAtom(selectedAuthIdAtom);
-  const setSelectedScopePath = useSetAtom(selectedScopePathAtom);
+  const [selectedScopePath, setSelectedScopePath] = useAtom(selectedScopePathAtom);
   const setEffectiveState = useSetAtom(effectiveStateAtom);
   const setValidationState = useSetAtom(validationStateAtom);
   const setPreviewState = useSetAtom(previewStateAtom);
@@ -123,6 +123,20 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const skillsPersonaButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
+  const selectedSkillsPersonaScopePath = React.useMemo(() => {
+    if (!selectedScopePath) return null;
+    const selectedRole = agentProfile.details.inspectTarget.role ?? "";
+    if (!selectedRole) return null;
+    const selectedEntry = scopeEntries.find((entry) => entry.path === selectedScopePath);
+    if (
+      !selectedEntry ||
+      selectedEntry.role !== selectedRole ||
+      selectedEntry.scope !== "project-role"
+    ) {
+      return null;
+    }
+    return selectedEntry.path;
+  }, [agentProfile.details.inspectTarget.role, scopeEntries, selectedScopePath]);
 
   const openProfileDetails = React.useCallback(() => {
     setLaunchError(null);
@@ -835,6 +849,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           scopeEntries={scopeEntries}
           selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
           selectedRole={agentProfile.details.inspectTarget.role ?? ""}
+          selectedScopePath={selectedSkillsPersonaScopePath}
         />
       </div>
       <CreateAgentProfileDialog
@@ -1296,15 +1311,31 @@ function findScopePathForRole(
 ): string | null {
   if (!role) return null;
   return (
-    entries.find((entry) => entry.role === role && entry.scope === "project-role" && entry.content)
-      ?.path ??
-    entries.find((entry) => entry.role === role && entry.scope === "project-role")?.path ??
-    entries.find((entry) => entry.role === role && entry.scope?.includes("role") && entry.content)
-      ?.path ??
-    entries.find((entry) => entry.role === role)?.path ??
-    entries[0]?.path ??
+    findLastEntryPath(
+      entries,
+      (entry) => entry.role === role && entry.scope === "project-role" && Boolean(entry.content)
+    ) ??
+    findLastEntryPath(entries, (entry) => entry.role === role && entry.scope === "project-role") ??
+    findLastEntryPath(
+      entries,
+      (entry) =>
+        entry.role === role && Boolean(entry.scope?.includes("role")) && Boolean(entry.content)
+    ) ??
+    findLastEntryPath(entries, (entry) => entry.role === role) ??
+    entries[entries.length - 1]?.path ??
     null
   );
+}
+
+function findLastEntryPath<T extends { path: string }>(
+  entries: ReadonlyArray<T>,
+  predicate: (entry: T) => boolean
+): string | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry && predicate(entry)) return entry.path;
+  }
+  return null;
 }
 
 function ProfileCreationFact({

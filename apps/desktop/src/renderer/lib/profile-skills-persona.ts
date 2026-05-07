@@ -28,11 +28,13 @@ export type ProfileSkillsPersonaTrustedSource =
 export interface ResolveProfileSkillsPersonaTargetInput {
   scopeEntries: readonly ScopeListEntry[];
   selectedRole: string;
+  selectedScopePath?: string | null;
 }
 
 export interface ResolveProfileSkillsPersonaListedTargetInput {
   listed: unknown;
   selectedRole: string;
+  selectedScopePath?: string | null;
 }
 
 export interface ProfileSkillsPersonaDraftRow {
@@ -152,6 +154,7 @@ const URI_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 export function resolveProfileSkillsPersonaTarget({
   scopeEntries,
   selectedRole,
+  selectedScopePath,
 }: ResolveProfileSkillsPersonaTargetInput): ProfileSkillsPersonaTarget {
   const role = normalizeRoleKey(selectedRole);
   if (!role) {
@@ -161,39 +164,71 @@ export function resolveProfileSkillsPersonaTarget({
     );
   }
 
-  let malformedProjectRole = false;
-  let sawRoleLayer = false;
-
-  for (const entry of scopeEntries) {
-    if (normalizeRoleKey(entry.role) !== role) continue;
-    if (!entry.scope.includes("role")) continue;
-    sawRoleLayer = true;
-
-    if (entry.scope !== "project-role") continue;
-    if (entry.content) {
-      return {
-        status: "writable",
+  const explicitPath = selectedScopePath?.trim() ?? "";
+  if (explicitPath) {
+    const explicitEntry = scopeEntries.find((entry) => entry.path === explicitPath);
+    if (!explicitEntry) {
+      return invalidTarget(
         role,
-        path: entry.path,
-        content: entry.content,
-        message: null,
-      };
+        "Selected Agent Profile skills and persona could not be prepared. Refresh the profile and try again.",
+      );
     }
-    malformedProjectRole = true;
+    if (
+      normalizeRoleKey(explicitEntry.role) !== role ||
+      explicitEntry.scope !== "project-role"
+    ) {
+      return invalidTarget(
+        role,
+        "Selected Agent Profile skills and persona target is no longer editable. Refresh the profile and try again.",
+      );
+    }
+    if (!explicitEntry.content) {
+      return invalidTarget(
+        role,
+        "Selected Agent Profile skills and persona could not be prepared. Refresh the profile and try again.",
+      );
+    }
+    return {
+      status: "writable",
+      role,
+      path: explicitEntry.path,
+      content: explicitEntry.content,
+      message: null,
+    };
   }
 
-  if (malformedProjectRole) {
+  const roleLayers = scopeEntries.filter((entry) => {
+    if (normalizeRoleKey(entry.role) !== role) return false;
+    return entry.scope.includes("role");
+  });
+  const projectRoleLayers = roleLayers.filter(
+    (entry) => entry.scope === "project-role",
+  );
+  const writableProjectRole = findLastScopeEntry(
+    projectRoleLayers,
+    (entry) => Boolean(entry.content),
+  );
+
+  if (writableProjectRole?.content) {
     return {
-      status: "invalid",
+      status: "writable",
       role,
-      message:
-        "Selected Agent Profile skills and persona could not be prepared. Refresh the profile and try again.",
+      path: writableProjectRole.path,
+      content: writableProjectRole.content,
+      message: null,
     };
+  }
+
+  if (projectRoleLayers.length > 0) {
+    return invalidTarget(
+      role,
+      "Selected Agent Profile skills and persona could not be prepared. Refresh the profile and try again.",
+    );
   }
 
   return unavailableTarget(
     role,
-    sawRoleLayer
+    roleLayers.length > 0
       ? "This Agent Profile needs a writable project layer before guided skills and persona can be saved."
       : "Selected Agent Profile skills and persona are unavailable. Choose another profile and try again.",
   );
@@ -202,10 +237,12 @@ export function resolveProfileSkillsPersonaTarget({
 export function resolveProfileSkillsPersonaTargetFromList({
   listed,
   selectedRole,
+  selectedScopePath,
 }: ResolveProfileSkillsPersonaListedTargetInput): ProfileSkillsPersonaTarget {
   return resolveProfileSkillsPersonaTarget({
     scopeEntries: normalizeScopeList(listed),
     selectedRole,
+    selectedScopePath: selectedScopePath ?? null,
   });
 }
 
@@ -643,6 +680,24 @@ function unavailableTarget(
   message: string,
 ): ProfileSkillsPersonaUnavailableTarget {
   return { status: "unavailable", role, message };
+}
+
+function invalidTarget(
+  role: string,
+  message: string,
+): ProfileSkillsPersonaInvalidTarget {
+  return { status: "invalid", role, message };
+}
+
+function findLastScopeEntry(
+  entries: readonly ScopeListEntry[],
+  predicate: (entry: ScopeListEntry) => boolean,
+): ScopeListEntry | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry && predicate(entry)) return entry;
+  }
+  return null;
 }
 
 function normalizeRoleKey(role: string): string {
