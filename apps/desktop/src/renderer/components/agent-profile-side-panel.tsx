@@ -27,6 +27,7 @@ interface AgentProfileSidePanelProps {
   activeSection: AgentProfilePanelSection;
   onClose: () => void;
   onOpenClaudeAuth: () => void;
+  onOpenProfileSkillsPersona: () => void;
   onOpenProfileTools: () => void;
   onOpenProfileWorkspace: (tab: ProfileWorkspaceTab) => void;
   onRepairToolSecret: (secretName: string) => void;
@@ -50,6 +51,7 @@ export function AgentProfileSidePanel({
   activeSection,
   onClose,
   onOpenClaudeAuth,
+  onOpenProfileSkillsPersona,
   onOpenProfileTools,
   onOpenProfileWorkspace,
   onRepairToolSecret,
@@ -228,7 +230,12 @@ export function AgentProfileSidePanel({
               profile={profile}
             />
           ) : null}
-          {activeSection === "skills" ? <SkillsSection profile={profile} /> : null}
+          {activeSection === "skills" ? (
+            <SkillsSection
+              onOpenProfileSkillsPersona={onOpenProfileSkillsPersona}
+              profile={profile}
+            />
+          ) : null}
           {activeSection === "inspect" ? <InspectSection profile={profile} /> : null}
         </div>
       </aside>
@@ -460,7 +467,13 @@ function ToolsSection({
   );
 }
 
-function SkillsSection({ profile }: { profile: AgentProfileViewModel }): React.ReactElement {
+function SkillsSection({
+  onOpenProfileSkillsPersona,
+  profile,
+}: {
+  onOpenProfileSkillsPersona: () => void;
+  profile: AgentProfileViewModel;
+}): React.ReactElement {
   const skills = profile.capabilities.skills;
 
   return (
@@ -484,6 +497,17 @@ function SkillsSection({ profile }: { profile: AgentProfileViewModel }): React.R
         <MetricCard icon={Settings2} label="Slash commands" value={skills.slashCommands} />
         <MetricCard icon={ListChecks} label="Memory" value={skills.memory} />
       </dl>
+
+      <Button
+        className="min-h-10 justify-start"
+        data-testid="agent-profile-panel-open-skills-persona"
+        onClick={onOpenProfileSkillsPersona}
+        type="button"
+        variant="primary"
+      >
+        <Sparkles className="h-4 w-4" aria-hidden="true" />
+        Customize skills & persona
+      </Button>
     </section>
   );
 }

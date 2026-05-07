@@ -8,6 +8,7 @@ import {
   originalDocAtom,
   previewStateAtom,
   profileBasicsNavigationGuardAtom,
+  profileSkillsPersonaNavigationGuardAtom,
   scopeEntriesAtom,
   selectedScopeAtom,
   settingsParseErrorAtom,
@@ -17,8 +18,9 @@ import {
 import { cloneDoc, stringifyDoc, stringifyValue } from "./clone.js";
 import { getErrorMessage } from "./normalize.js";
 import { formatProfileBasicsBridgeError } from "./profile-basics.js";
+import { formatProfileSkillsPersonaBridgeError } from "./profile-skills-persona.js";
 
-export type ProfileDraftGuardSource = "layers" | "basics";
+export type ProfileDraftGuardSource = "layers" | "basics" | "skills-persona";
 
 export interface ProfileDraftNavigationGuard {
   open: boolean;
@@ -44,11 +46,18 @@ export interface ProfileDraftGuardBasicsState {
   saveDisabledReason: string | null;
 }
 
+export interface ProfileDraftGuardSkillsPersonaState {
+  isDirty: boolean;
+  canSave: boolean;
+  saveDisabledReason: string | null;
+}
+
 export interface ProfileDraftGuardSnapshotInput {
   hasLayerChanges: boolean;
   layerCanSave: boolean;
   layerSaveDisabledReason: string | null;
   basics: ProfileDraftGuardBasicsState | null | undefined;
+  skillsPersona?: ProfileDraftGuardSkillsPersonaState | null | undefined;
   preferredSource?: ProfileDraftGuardSource | null;
 }
 
@@ -88,6 +97,18 @@ const BASICS_DIALOG_COPY = {
   saveFailureFallback: "Profile Basics could not be saved. Review the fields and try again.",
 };
 
+const SKILLS_PERSONA_DIALOG_COPY = {
+  title: "Save Skills & Persona changes?",
+  description:
+    "Guided Skills & Persona has unsaved edits. Save before leaving, discard the draft, or stay here to keep editing.",
+  cancelAnnouncement: "Stayed in guided Skills & Persona.",
+  discardAnnouncement: "Discarded Skills & Persona changes.",
+  saveAnnouncement: "Saved Skills & Persona changes.",
+  saveFailurePrefix: "Skills & Persona save failed",
+  saveFailureFallback:
+    "Skills & Persona could not be saved. Review the selected assets and try again.",
+};
+
 const DEFAULT_DIALOG_COPY = LAYER_DIALOG_COPY;
 
 export function resolveProfileDraftGuardSnapshot({
@@ -96,9 +117,17 @@ export function resolveProfileDraftGuardSnapshot({
   layerCanSave,
   layerSaveDisabledReason,
   preferredSource,
+  skillsPersona,
 }: ProfileDraftGuardSnapshotInput): ProfileDraftGuardSnapshot {
   const source =
-    preferredSource ?? (hasLayerChanges ? "layers" : basics?.isDirty ? "basics" : null);
+    preferredSource ??
+    (hasLayerChanges
+      ? "layers"
+      : basics?.isDirty
+        ? "basics"
+        : skillsPersona?.isDirty
+          ? "skills-persona"
+          : null);
   const copy = getDialogCopy(source);
 
   if (source === "layers") {
@@ -126,6 +155,21 @@ export function resolveProfileDraftGuardSnapshot({
     };
   }
 
+  if (source === "skills-persona") {
+    const hasSkillsPersonaChanges = Boolean(skillsPersona?.isDirty);
+    const skillsPersonaCanSave = Boolean(hasSkillsPersonaChanges && skillsPersona?.canSave);
+    return {
+      source,
+      hasChanges: hasSkillsPersonaChanges,
+      canSave: skillsPersonaCanSave,
+      saveDisabledReason:
+        hasSkillsPersonaChanges && !skillsPersonaCanSave
+          ? (skillsPersona?.saveDisabledReason ?? "Skills & Persona cannot be saved yet.")
+          : null,
+      ...copy,
+    };
+  }
+
   return {
     source: null,
     hasChanges: false,
@@ -141,6 +185,12 @@ export function formatProfileDraftGuardError(
 ): string {
   if (source === "basics") {
     return formatProfileBasicsBridgeError(error, BASICS_DIALOG_COPY.saveFailureFallback);
+  }
+  if (source === "skills-persona") {
+    return formatProfileSkillsPersonaBridgeError(
+      error,
+      SKILLS_PERSONA_DIALOG_COPY.saveFailureFallback
+    );
   }
   const message = getErrorMessage(error);
   if (containsUnsafeGuardDiagnosticText(message)) return LAYER_DIALOG_COPY.saveFailureFallback;
@@ -159,6 +209,7 @@ export function useProfileDraftNavigationGuard(options: {
   const { announce } = options;
   const hasUnsavedChanges = useAtomValue(hasUnsavedChangesAtom);
   const basicsGuard = useAtomValue(profileBasicsNavigationGuardAtom);
+  const skillsPersonaGuard = useAtomValue(profileSkillsPersonaNavigationGuardAtom);
   const selectedScope = useAtomValue(selectedScopeAtom);
   const draftDoc = useAtomValue(draftDocAtom);
   const originalDoc = useAtomValue(originalDocAtom);
@@ -195,6 +246,7 @@ export function useProfileDraftNavigationGuard(options: {
     layerCanSave,
     layerSaveDisabledReason,
     basics: basicsGuard,
+    skillsPersona: skillsPersonaGuard,
     preferredSource: open ? activeSource : null,
   });
 
@@ -239,6 +291,7 @@ export function useProfileDraftNavigationGuard(options: {
         layerCanSave,
         layerSaveDisabledReason,
         basics: basicsGuard,
+        skillsPersona: skillsPersonaGuard,
       });
       if (!nextSnapshot.source || !nextSnapshot.hasChanges) {
         continuation();
@@ -252,7 +305,14 @@ export function useProfileDraftNavigationGuard(options: {
       setOpen(true);
       announce("Unsaved profile changes need a decision before leaving.");
     },
-    [announce, basicsGuard, hasUnsavedChanges, layerCanSave, layerSaveDisabledReason]
+    [
+      announce,
+      basicsGuard,
+      hasUnsavedChanges,
+      layerCanSave,
+      layerSaveDisabledReason,
+      skillsPersonaGuard,
+    ]
   );
 
   const cancel = React.useCallback(() => {
@@ -276,9 +336,14 @@ export function useProfileDraftNavigationGuard(options: {
       completeWith(BASICS_DIALOG_COPY.discardAnnouncement);
       return;
     }
+    if (source === "skills-persona") {
+      skillsPersonaGuard?.discardAndClose();
+      completeWith(SKILLS_PERSONA_DIALOG_COPY.discardAnnouncement);
+      return;
+    }
     resetDraftToOriginal();
     completeWith(LAYER_DIALOG_COPY.discardAnnouncement);
-  }, [activeSource, basicsGuard, completeWith, resetDraftToOriginal]);
+  }, [activeSource, basicsGuard, completeWith, resetDraftToOriginal, skillsPersonaGuard]);
 
   const saveLayerAndContinue = React.useCallback(async () => {
     if (!selectedScope || !draftDoc || !layerCanSave) {
@@ -356,18 +421,47 @@ export function useProfileDraftNavigationGuard(options: {
     }
   }, [announce, basicsGuard, completeWith]);
 
+  const saveSkillsPersonaAndContinue = React.useCallback(async () => {
+    if (!skillsPersonaGuard?.canSave) {
+      setErrorMessage(
+        skillsPersonaGuard?.saveDisabledReason ?? "Skills & Persona cannot be saved yet."
+      );
+      return;
+    }
+
+    setBusy(true);
+    setErrorMessage(null);
+    try {
+      await skillsPersonaGuard.saveAndClose();
+      completeWith(SKILLS_PERSONA_DIALOG_COPY.saveAnnouncement);
+    } catch (error) {
+      const message = formatProfileDraftGuardError(error, "skills-persona");
+      setErrorMessage(message);
+      announce(`${SKILLS_PERSONA_DIALOG_COPY.saveFailurePrefix}: ${message}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [announce, completeWith, skillsPersonaGuard]);
+
   const saveAndContinue = React.useCallback(async () => {
     const source = pendingSourceRef.current ?? activeSource;
     if (source === "basics") {
       await saveBasicsAndContinue();
       return;
     }
+    if (source === "skills-persona") {
+      await saveSkillsPersonaAndContinue();
+      return;
+    }
     await saveLayerAndContinue();
-  }, [activeSource, saveBasicsAndContinue, saveLayerAndContinue]);
+  }, [activeSource, saveBasicsAndContinue, saveLayerAndContinue, saveSkillsPersonaAndContinue]);
 
   return {
     open,
-    busy: busy || (snapshot.source === "basics" && Boolean(basicsGuard?.isSaving)),
+    busy:
+      busy ||
+      (snapshot.source === "basics" && Boolean(basicsGuard?.isSaving)) ||
+      (snapshot.source === "skills-persona" && Boolean(skillsPersonaGuard?.isSaving)),
     errorMessage,
     canSave: snapshot.canSave,
     saveDisabledReason: snapshot.saveDisabledReason,
@@ -382,6 +476,7 @@ export function useProfileDraftNavigationGuard(options: {
 
 function getDialogCopy(source: ProfileDraftGuardSource | null): typeof LAYER_DIALOG_COPY {
   if (source === "basics") return BASICS_DIALOG_COPY;
+  if (source === "skills-persona") return SKILLS_PERSONA_DIALOG_COPY;
   if (source === "layers") return LAYER_DIALOG_COPY;
   return DEFAULT_DIALOG_COPY;
 }

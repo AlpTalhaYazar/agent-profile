@@ -58,9 +58,21 @@ export interface ProfileBasicsNavigationGuardController {
   discardAndClose: () => void;
 }
 
+export interface ProfileSkillsPersonaNavigationGuardController {
+  isDirty: boolean;
+  isSaving: boolean;
+  canSave: boolean;
+  saveDisabledReason: string | null;
+  saveAndClose: () => Promise<void>;
+  discardAndClose: () => void;
+}
+
 export const profileBasicsNavigationGuardAtom = atom<ProfileBasicsNavigationGuardController | null>(
   null
 );
+
+export const profileSkillsPersonaNavigationGuardAtom =
+  atom<ProfileSkillsPersonaNavigationGuardController | null>(null);
 
 export const appErrorAtom = atom<string | null>(null);
 export const isBootstrappingAtom = atom(true);

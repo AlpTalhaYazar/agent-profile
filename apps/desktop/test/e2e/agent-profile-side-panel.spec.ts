@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Locator, expect, test } from "@playwright/test";
 import {
@@ -92,7 +93,9 @@ test("profile side panel guided tools editor previews, saves, discards, and stay
     const panel = page.getByTestId("profile-tools-panel");
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("Guided Tools");
-    await expect(panel.getByTestId("profile-tools-empty")).toContainText("No profile-owned MCP tools yet");
+    await expect(panel.getByTestId("profile-tools-empty")).toContainText(
+      "No profile-owned MCP tools yet"
+    );
     await expectRedactedTools(panel);
 
     await panel.getByTestId("profile-tools-add-github").click();
@@ -119,7 +122,9 @@ test("profile side panel guided tools editor previews, saves, discards, and stay
     await panel.getByTestId("profile-tools-save").click();
     await expect(panel).toHaveCount(0, { timeout: 15_000 });
 
-    const savedProfile = await readText(join(fixture.projectDir, ".myclaude", "roles", "backend.yml"));
+    const savedProfile = await readText(
+      join(fixture.projectDir, ".myclaude", "roles", "backend.yml")
+    );
     expect(savedProfile).toContain("github:");
     expect(savedProfile).toContain("github.pat");
     await page.getByTestId("home-view-profile-details").click();
@@ -137,6 +142,140 @@ test("profile side panel guided tools editor previews, saves, discards, and stay
     await page.getByTestId("agent-profile-panel-open-tools-editor").click();
     await expect(panel.getByTestId("profile-tools-server-name")).toHaveValue("github");
     await expectRedactedTools(panel);
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("profile side panel guided skills and persona editor previews, guards dirty drafts, and saves", async () => {
+  const fixture = await createDesktopFixture("agent-profile-side-panel-guided-skills-");
+  await seedProfileFixture(fixture);
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("home-view-profile-details").click();
+    await page.getByTestId("agent-profile-panel-section-skills").click();
+    await page.getByTestId("agent-profile-panel-open-skills-persona").click();
+
+    const panel = page.getByTestId("profile-skills-persona-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Guided Skills & Persona");
+    await expect(panel.getByTestId("profile-skills-persona-empty-skills")).toContainText(
+      "No skills attached yet"
+    );
+    await expect(panel.getByTestId("profile-skills-persona-add-skills")).toBeFocused();
+    await expect(panel.getByTestId("profile-skills-persona-save")).toBeDisabled();
+    await expectRedactedSkillsPersona(panel);
+
+    await panel.getByTestId("profile-skills-persona-add-skills").click();
+    await expect(panel.getByTestId("profile-skills-persona-row")).toHaveCount(1);
+    await panel.getByTestId("profile-skills-persona-ref-input").fill("skills/react/SKILL.md");
+    await expect(panel.getByTestId("profile-skills-persona-save")).toBeDisabled();
+
+    await panel.getByTestId("profile-skills-persona-preview-action").click();
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText(
+      "safe Skills & Persona",
+      { timeout: 15_000 }
+    );
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText("react");
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText(
+      "Source could not be found"
+    );
+    await expect(panel.getByTestId("profile-skills-persona-save")).toBeEnabled();
+    await expectRedactedSkillsPersona(panel.getByTestId("profile-skills-persona-preview"));
+
+    await panel.getByTestId("profile-skills-persona-ref-input").fill("skills/a11y/SKILL.md");
+    await expect(panel.getByTestId("profile-skills-persona-save")).toBeDisabled();
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText(
+      "Preview the current draft before saving"
+    );
+
+    await panel.getByTestId("profile-skills-persona-preview-action").click();
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText("a11y", {
+      timeout: 15_000,
+    });
+    await panel.getByTestId("profile-skills-persona-cancel").click();
+    await expect(page.getByTestId("profile-skills-persona-dirty-dialog")).toBeVisible();
+    await page.getByTestId("profile-skills-persona-dirty-cancel").click();
+    await expect(panel).toBeVisible();
+    await panel.getByTestId("profile-skills-persona-cancel").click();
+    await page.getByTestId("profile-skills-persona-dirty-discard").click();
+    await expect(panel).toHaveCount(0);
+
+    await page.getByTestId("agent-profile-panel-open-skills-persona").click();
+    await panel.getByTestId("profile-skills-persona-add-skills").click();
+    await panel.getByTestId("profile-skills-persona-ref-input").fill("skills/a11y/SKILL.md");
+    await panel.getByTestId("profile-skills-persona-preview-action").click();
+    await expect(panel.getByTestId("profile-skills-persona-preview")).toContainText("a11y", {
+      timeout: 15_000,
+    });
+    await panel.getByTestId("profile-skills-persona-save").click();
+    await expect(panel).toHaveCount(0, { timeout: 15_000 });
+
+    const savedProfile = await readText(
+      join(fixture.projectDir, ".myclaude", "roles", "backend.yml")
+    );
+    expect(savedProfile).toContain("persona:");
+    expect(savedProfile).toContain("skills/a11y/SKILL.md");
+    await expect(page.getByTestId("agent-profile-card")).toContainText("1 skill/persona asset");
+    await page.getByTestId("home-view-profile-details").click();
+    await page.getByTestId("agent-profile-panel-section-skills").click();
+    await expect(page.getByTestId("agent-profile-panel-skills")).toContainText("Skills");
+    await expect(page.getByTestId("agent-profile-panel-skills")).toContainText("1");
+    await expectRedactedSkillsPersona(page.getByTestId("agent-profile-panel-skills"));
+  } finally {
+    await app.close();
+    await fixture.cleanup();
+  }
+});
+
+test("profile skills and persona panel handles invalid rows and unavailable targets calmly", async () => {
+  const fixture = await createDesktopFixture("agent-profile-side-panel-skills-unavailable-");
+  await mkdir(join(fixture.myClaudeHome, "config", "global", "roles"), { recursive: true });
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "authProfiles.yml"),
+    `version: 1
+authProfiles:
+  work:
+    displayName: Work
+    anthropic:
+      mode: apiKey
+      secretRef: keyring://anthropic/work
+    mcpSecretRefs: {}
+`
+  );
+  await writeFile(
+    join(fixture.myClaudeHome, "config", "global", "roles", "backend.yml"),
+    `version: 1
+profile:
+  displayName: Backend API Review
+auth:
+  profileId: work
+persona:
+  skills:
+    - skills/react/SKILL.md
+`
+  );
+
+  const { app, page } = await launchDesktop(fixture);
+
+  try {
+    await expect(page.getByRole("heading", { name: "Agent Profiles" })).toBeVisible();
+    await page.getByTestId("profile-skills-persona-open").click();
+
+    const panel = page.getByTestId("profile-skills-persona-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByTestId("profile-skills-persona-target")).toContainText(
+      "writable project"
+    );
+    await expect(panel.getByTestId("profile-skills-persona-save")).toBeDisabled();
+    await expect(panel.getByTestId("profile-skills-persona-open-advanced")).toBeVisible();
+    await expectRedactedSkillsPersona(panel);
+
+    await panel.getByTestId("profile-skills-persona-open-advanced").click();
+    await expect(page.getByRole("heading", { name: "Profile Workspace" })).toBeVisible();
   } finally {
     await app.close();
     await fixture.cleanup();
@@ -197,9 +336,7 @@ test("profile side panel suppresses motion when reduced motion is requested", as
     const panel = page.getByTestId("agent-profile-side-panel");
     await expect(frame).toHaveAttribute("data-motion", "reduced");
     await expect(frame).toHaveAttribute("data-state", "open");
-    await expect
-      .poll(async () => readMaxTransitionDurationMs(panel))
-      .toBeLessThanOrEqual(0.02);
+    await expect.poll(async () => readMaxTransitionDurationMs(panel)).toBeLessThanOrEqual(0.02);
     await expect
       .poll(async () => panel.evaluate((element) => getComputedStyle(element).transform))
       .toBe("none");
@@ -217,6 +354,18 @@ async function expectRedactedTools(locator: Locator): Promise<void> {
   expect(text).not.toMatch(/Bearer\s+\S+/i);
   expect(text).not.toMatch(/ghp_[A-Za-z0-9_]+/i);
   expect(text).not.toMatch(/github_pat_[A-Za-z0-9_]+/i);
+}
+
+async function expectRedactedSkillsPersona(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  const text = await locator.innerText();
+  expect(text).not.toMatch(/keyring:\/\//i);
+  expect(text).not.toMatch(/\$\{secret:/i);
+  expect(text).not.toMatch(/Bearer\s+\S+/i);
+  expect(text).not.toMatch(/ghp_[A-Za-z0-9_]+/i);
+  expect(text).not.toMatch(/github_pat_[A-Za-z0-9_]+/i);
+  expect(text).not.toMatch(/project-role|global-role/i);
+  expect(text).not.toMatch(/\/Users\//i);
 }
 
 async function readMaxTransitionDurationMs(locator: Locator): Promise<number> {

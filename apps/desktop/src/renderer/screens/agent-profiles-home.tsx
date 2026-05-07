@@ -27,6 +27,7 @@ import { AgentProfileSidePanel } from "../components/agent-profile-side-panel.js
 import { useAnnounce } from "../components/live-announcer.js";
 import { ProfileBasicsPanel } from "../components/profile-basics-panel.js";
 import { ProfileMcpToolsPanel } from "../components/profile-mcp-tools-panel.js";
+import { ProfileSkillsPersonaPanel } from "../components/profile-skills-persona-panel.js";
 import { ProfileUnsavedChangesDialog } from "../components/profile-unsaved-dialog.js";
 import { IconFrame, ScreenHeader, ScreenSurface, StatusChip } from "../components/screen-ui.js";
 import {
@@ -111,6 +112,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [basicsPanelOpen, setBasicsPanelOpen] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
+  const [skillsPersonaPanelOpen, setSkillsPersonaPanelOpen] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [createProfileError, setCreateProfileError] = React.useState<string | null>(null);
   const [librarySwitchError, setLibrarySwitchError] = React.useState<string | null>(null);
@@ -118,6 +120,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
   const createButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const basicsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const toolsButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const skillsPersonaButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const detailsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const isPanelOpenForProfile = selectedPanelProfileId === agentProfile.id;
 
@@ -184,6 +187,13 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     });
   }, []);
 
+  const closeSkillsPersonaPanel = React.useCallback(() => {
+    setSkillsPersonaPanelOpen(false);
+    window.requestAnimationFrame(() => {
+      skillsPersonaButtonRef.current?.focus();
+    });
+  }, []);
+
   const openBasicsPanel = React.useCallback(() => {
     setLaunchError(null);
     setLibrarySwitchError(null);
@@ -196,6 +206,12 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
     setLaunchError(null);
     setLibrarySwitchError(null);
     setToolsPanelOpen(true);
+  }, []);
+
+  const openSkillsPersonaPanel = React.useCallback(() => {
+    setLaunchError(null);
+    setLibrarySwitchError(null);
+    setSkillsPersonaPanelOpen(true);
   }, []);
 
   const openCreateDialog = React.useCallback(() => {
@@ -681,6 +697,17 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
                   </Button>
                   <Button
                     className="min-h-10"
+                    data-testid="profile-skills-persona-open"
+                    onClick={openSkillsPersonaPanel}
+                    ref={skillsPersonaButtonRef}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Customize skills & persona
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    className="min-h-10"
                     data-testid="home-secondary-action"
                     onClick={activeReadinessIssue ? handleFixPath : openProfileWorkspace}
                     type="button"
@@ -742,6 +769,7 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           activeSection={panelSection}
           onClose={closeProfileDetails}
           onOpenClaudeAuth={openClaudeAuth}
+          onOpenProfileSkillsPersona={openSkillsPersonaPanel}
           onOpenProfileTools={openToolsPanel}
           onOpenProfileWorkspace={openProfileWorkspaceTab}
           onRepairToolSecret={requestToolSecretRepair}
@@ -785,6 +813,24 @@ export function AgentProfilesHomeScreen(): React.ReactElement {
           onSaved={handleBasicsSaved}
           onValidationStateChange={setValidationState}
           open={toolsPanelOpen}
+          profile={agentProfile}
+          scopeEntries={scopeEntries}
+          selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
+          selectedRole={agentProfile.details.inspectTarget.role ?? ""}
+        />
+        <ProfileSkillsPersonaPanel
+          cwd={cwd}
+          onOpenAdvanced={() => {
+            goToProfileWorkspaceTab("layers");
+          }}
+          onOpenChange={(open) => {
+            if (!open) closeSkillsPersonaPanel();
+            else setSkillsPersonaPanelOpen(true);
+          }}
+          onPreviewStateChange={setPreviewState}
+          onSaved={handleBasicsSaved}
+          onValidationStateChange={setValidationState}
+          open={skillsPersonaPanelOpen}
           profile={agentProfile}
           scopeEntries={scopeEntries}
           selectedAuthId={agentProfile.details.inspectTarget.authProfileId ?? ""}
